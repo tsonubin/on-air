@@ -1,0 +1,9 @@
+{
+  "name": "@on-air/core",
+  "private": true,
+  "scripts": {
+    "build": "cargo build",
+    "test": "cargo test",
+    "typecheck": "cargo check"
+  }
+}
