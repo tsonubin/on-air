@@ -1,1 +1,11 @@
-.worktrees/
+# Rust
+/target
+**/target
+
+# Node
+node_modules
+dist
+.turbo
+
+# OS
+.DS_Store
