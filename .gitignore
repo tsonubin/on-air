@@ -12,3 +12,9 @@ dist
 
 # Worktrees (SDD task workspaces)
 .worktrees/
+
+# React Native
+apps/mobile/ios/build
+apps/mobile/ios/Pods
+apps/mobile/android/.gradle
+apps/mobile/android/app/build
