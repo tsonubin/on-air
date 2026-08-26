@@ -1,5 +1,7 @@
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
+use std::net::SocketAddr;
+use tokio::net::TcpListener;
 
 pub const DEFAULT_PORT: u16 = 47990;
 
@@ -22,4 +24,13 @@ pub fn build_router() -> Router {
 
 async fn status_handler() -> Json<StatusResponse> {
     Json(status())
+}
+
+pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
+    axum::serve(listener, build_router()).await
+}
+
+pub async fn serve_on(addr: SocketAddr) -> std::io::Result<()> {
+    let listener = TcpListener::bind(addr).await?;
+    serve(listener).await
 }
