@@ -6,7 +6,7 @@ import {
   Button,
   StyleSheet,
 } from "react-native";
-import type { StatusResponse } from "@on-air/api-types";
+import { DEFAULT_PORT, type StatusResponse } from "@on-air/api-types";
 
 function App(): React.JSX.Element {
   const [ip, setIp] = useState("");
@@ -17,7 +17,7 @@ function App(): React.JSX.Element {
     setError(null);
     setStatus(null);
     try {
-      const response = await fetch(`http://${ip}:47990/api/status`);
+      const response = await fetch(`http://${ip}:${DEFAULT_PORT}/api/status`);
       const json: StatusResponse = await response.json();
       setStatus(json);
     } catch (err) {

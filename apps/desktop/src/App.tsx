@@ -4,9 +4,12 @@ import type { StatusResponse } from "@on-air/api-types";
 
 function App() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<StatusResponse>("get_status").then(setStatus);
+    invoke<StatusResponse>("get_status")
+      .then(setStatus)
+      .catch((e) => setError(String(e)));
   }, []);
 
   return (
@@ -17,6 +20,7 @@ function App() {
           ? `core status: ${status.status} (v${status.version})`
           : "loading core status..."}
       </p>
+      {error && <p>Error: {error}</p>}
     </main>
   );
 }

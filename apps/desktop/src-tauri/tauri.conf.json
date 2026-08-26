@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "appsdesktop",
+  "productName": "on-air-desktop",
   "version": "0.1.0",
-  "identifier": "com.shay.appsdesktop",
+  "identifier": "com.shay.on-air",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "appsdesktop",
+        "title": "on-air",
         "width": 800,
         "height": 600
       }

@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
+// Keep in sync with DEFAULT_PORT in packages/api-types/src/index.ts
 pub const DEFAULT_PORT: u16 = 47990;
 
 #[derive(Serialize, PartialEq, Debug)]
