@@ -37,10 +37,11 @@ impl CoreState {
     pub async fn activate_sender(&self, new_sender: Box<dyn AudioSender>) -> Result<(), SenderError> {
         let mut guard = self.active_sender.lock().await;
         if let Some(mut current) = guard.take() {
-            current.stop().await?;
+            let device_name = current.name().to_string();
+            let _ = current.stop().await;
             let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
                 transport: "sonos".to_string(),
-                device_name: current.name().to_string(),
+                device_name,
                 active: false,
             });
         }

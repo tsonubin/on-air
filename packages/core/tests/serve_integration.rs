@@ -15,4 +15,12 @@ async fn serve_responds_to_status_over_http() {
 
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["status"], "ok");
+
+    let outputs: serde_json::Value = reqwest::get(format!("http://{addr}/api/outputs"))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(outputs["outputs"].is_array());
 }

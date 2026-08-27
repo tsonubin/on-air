@@ -1,4 +1,14 @@
 use reqwest::Client;
+use std::time::Duration;
+
+pub const SOAP_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub fn http_client() -> Client {
+    Client::builder()
+        .timeout(SOAP_TIMEOUT)
+        .build()
+        .expect("reqwest SOAP client")
+}
 
 #[derive(Debug)]
 pub struct SoapError {

@@ -4,11 +4,16 @@ use axum::extract::State;
 use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 
 pub async fn stream_audio(State(state): State<CoreState>) -> Response {
     let rx = state.audio_tx.subscribe();
     let sample_rate = *state.target_sample_rate_hz.lock().unwrap();
-    let body = Body::from_stream(BroadcastStream::new(rx));
+    // Lagged items are skipped so a slow Sonos HTTP client does not tear down
+    // the live PCM body (same failure mode previously fixed on /api/ws).
+    let body = Body::from_stream(BroadcastStream::new(rx).filter_map(|item| {
+        item.ok().map(Ok::<bytes::Bytes, std::convert::Infallible>)
+    }));
 
     (
         [

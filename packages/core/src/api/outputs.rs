@@ -63,7 +63,11 @@ pub async fn activate_output(
         crate::DEFAULT_PORT
     );
 
-    let sender = SonosSender::new(device, reqwest::Client::new(), stream_url);
+    let sender = SonosSender::new(
+        device,
+        crate::sender::sonos::soap::http_client(),
+        stream_url,
+    );
     match state.activate_sender(Box::new(sender)).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),

@@ -54,7 +54,9 @@ async fn status_handler() -> Json<StatusResponse> {
 }
 
 pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
-    axum::serve(listener, build_router(CoreState::new())).await
+    let state = CoreState::new();
+    let _discovery = state.spawn_sonos_discovery();
+    axum::serve(listener, build_router(state)).await
 }
 
 pub async fn serve_on(addr: SocketAddr) -> std::io::Result<()> {
