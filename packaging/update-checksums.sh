@@ -44,9 +44,12 @@ try_hash() {
 
 dmg_arm=$(try_hash "on-air-desktop_${VERSION}_aarch64.dmg" || true)
 dmg_intel=$(try_hash "on-air-desktop_${VERSION}_x64.dmg" || true)
-deb=$(try_hash "on-air-desktop_${VERSION}_amd64.deb" || true)
-nsis=$(try_hash "on-air-desktop_${VERSION}_x64-setup.exe" || true)
-msi=$(try_hash "on-air-desktop_${VERSION}_x64_en-US.msi" || true)
+deb_amd64=$(try_hash "on-air-desktop_${VERSION}_amd64.deb" || true)
+deb_arm64=$(try_hash "on-air-desktop_${VERSION}_arm64.deb" || true)
+nsis_x64=$(try_hash "on-air-desktop_${VERSION}_x64-setup.exe" || true)
+msi_x64=$(try_hash "on-air-desktop_${VERSION}_x64_en-US.msi" || true)
+nsis_arm64=$(try_hash "on-air-desktop_${VERSION}_arm64-setup.exe" || true)
+msi_arm64=$(try_hash "on-air-desktop_${VERSION}_arm64_en-US.msi" || true)
 
 if [ -n "${dmg_arm:-}" ] && [ -n "${dmg_intel:-}" ]; then
   python3 - "$root/Casks/on-air.rb" "$dmg_arm" "$dmg_intel" <<'PY'
@@ -69,24 +72,41 @@ else
   echo "skipping Casks/on-air.rb (need both macOS dmgs)" >&2
 fi
 
-if [ -n "${deb:-}" ]; then
-  python3 - "$root/packaging/aur/on-air-bin/PKGBUILD" "$deb" <<'PY'
+if [ -n "${deb_amd64:-}" ] || [ -n "${deb_arm64:-}" ]; then
+  python3 - "$root/packaging/aur/on-air-bin/PKGBUILD" "${deb_amd64:-}" "${deb_arm64:-}" <<'PY'
 import pathlib, re, sys
-path, digest = pathlib.Path(sys.argv[1]), sys.argv[2]
+path = pathlib.Path(sys.argv[1])
+amd64, arm64 = sys.argv[2], sys.argv[3]
 text = path.read_text()
-text = re.sub(r"sha256sums=\('SKIP'\)", f"sha256sums=('{digest}')", text, count=1)
-text = re.sub(r"sha256sums=\('[0-9a-f]+'\)", f"sha256sums=('{digest}')", text, count=1)
+if amd64:
+    text = re.sub(
+        r"sha256sums_x86_64=\('(?:SKIP|[0-9a-f]+)'\)",
+        f"sha256sums_x86_64=('{amd64}')",
+        text,
+        count=1,
+    )
+if arm64:
+    text = re.sub(
+        r"sha256sums_aarch64=\('(?:SKIP|[0-9a-f]+)'\)",
+        f"sha256sums_aarch64=('{arm64}')",
+        text,
+        count=1,
+    )
 path.write_text(text)
 print(f"updated {path}")
 PY
   if command -v makepkg >/dev/null; then
     (cd "$root/packaging/aur/on-air-bin" && makepkg --printsrcinfo > .SRCINFO)
   else
-    python3 - "$root/packaging/aur/on-air-bin/.SRCINFO" "$deb" <<'PY'
+    python3 - "$root/packaging/aur/on-air-bin/.SRCINFO" "${deb_amd64:-}" "${deb_arm64:-}" <<'PY'
 import pathlib, re, sys
-path, digest = pathlib.Path(sys.argv[1]), sys.argv[2]
+path = pathlib.Path(sys.argv[1])
+amd64, arm64 = sys.argv[2], sys.argv[3]
 text = path.read_text()
-text = re.sub(r"sha256sums = \S+", f"sha256sums = {digest}", text, count=1)
+if amd64:
+    text = re.sub(r"sha256sums_x86_64 = \S+", f"sha256sums_x86_64 = {amd64}", text, count=1)
+if arm64:
+    text = re.sub(r"sha256sums_aarch64 = \S+", f"sha256sums_aarch64 = {arm64}", text, count=1)
 path.write_text(text)
 print(f"updated {path}")
 PY
@@ -95,18 +115,13 @@ else
   echo "skipping AUR on-air-bin (need .deb)" >&2
 fi
 
-if [ -n "${nsis:-}" ] || [ -n "${msi:-}" ]; then
-  python3 - "$root/packaging/winget/Tsonubin.OnAir.installer.yaml" "${nsis:-}" "${msi:-}" <<'PY'
+if [ -n "${nsis_x64:-}" ] || [ -n "${msi_x64:-}" ] || [ -n "${nsis_arm64:-}" ] || [ -n "${msi_arm64:-}" ]; then
+  python3 - "$root/packaging/winget/Tsonubin.OnAir.installer.yaml" \
+    "${nsis_x64:-}" "${msi_x64:-}" "${nsis_arm64:-}" "${msi_arm64:-}" <<'PY'
 import pathlib, re, sys
 path = pathlib.Path(sys.argv[1])
-nsis, msi = sys.argv[2], sys.argv[3]
-text = path.read_text()
-hashes = []
-if nsis:
-    hashes.append(nsis.upper())
-if msi:
-    hashes.append(msi.upper())
-it = iter(hashes)
+repl = [h.upper() for h in sys.argv[2:] if h]
+it = iter(repl)
 
 def sub(_match):
     try:
@@ -114,7 +129,7 @@ def sub(_match):
     except StopIteration:
         return _match.group(0)
 
-path.write_text(re.sub(r"InstallerSha256: [0-9A-Fa-f]{64}", sub, text))
+path.write_text(re.sub(r"InstallerSha256: [0-9A-Fa-f]{64}", sub, path.read_text()))
 print(f"updated {path}")
 PY
 else

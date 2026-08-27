@@ -6,7 +6,10 @@ can start on login, and is controllable from a companion mobile app on the
 same LAN. There is no cloud remote: discovery is mDNS (`_on-air._tcp.local.`),
 control is HTTP/WebSocket on port **47990**, and LAN clients pair with a PIN.
 
-Two artifacts ship from a tagged GitHub Release (`v*`):
+A tagged GitHub Release (`v*`) ships **installers** for both **x86_64** and
+**arm64** — `.dmg` on macOS, `.msi` / NSIS `.exe` / portable `.zip` on
+Windows, `.deb` / `.rpm` / `.AppImage` on Linux. GitHub also attaches an
+automatic source zip/tarball; that is not the install path.
 
 | Artifact | What it is |
 | --- | --- |
@@ -63,21 +66,28 @@ After the manifests are accepted into [microsoft/winget-pkgs](https://github.com
 winget install Tsonubin.OnAir
 ```
 
-Manual fallback: download `on-air-desktop_0.1.0_x64-setup.exe` (NSIS) or
-`on-air-desktop_0.1.0_x64_en-US.msi` (WiX) from the release page and run it.
+Manual fallback from the GitHub Release:
+
+- NSIS: `on-air-desktop_0.1.0_x64-setup.exe` or `_arm64-setup.exe`
+- MSI: `on-air-desktop_0.1.0_x64_en-US.msi` or `_arm64_en-US.msi`
+- Portable zip: `on-air-desktop_0.1.0_x64-portable.zip` or `_arm64-portable.zip`
 
 ### Debian / Ubuntu — APT
 
-Install the Tauri `.deb` from the GitHub Release (amd64):
+Install the Tauri `.deb` from the GitHub Release (`amd64` or `arm64`):
 
 ```bash
-# helper (downloads + apt install)
+# helper (downloads + apt install for the host architecture)
 packaging/apt/install.sh
 
-# or by hand
+# or by hand — amd64
 VERSION=0.1.0
 curl -fLO "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop_${VERSION}_amd64.deb"
 sudo apt install "./on-air-desktop_${VERSION}_amd64.deb"
+
+# arm64
+curl -fLO "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop_${VERSION}_arm64.deb"
+sudo apt install "./on-air-desktop_${VERSION}_arm64.deb"
 ```
 
 To build a **headless** `.deb` of `on-air-core` from this tree (needs
@@ -119,9 +129,16 @@ Install the Tauri-produced RPM from the GitHub Release:
 
 ```bash
 VERSION=0.1.0
+# x86_64
 sudo dnf install \
   "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.x86_64.rpm"
+# aarch64
+sudo dnf install \
+  "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.aarch64.rpm"
 ```
+
+Portable (no package manager): `on-air-desktop_${VERSION}_amd64.AppImage` or
+`on-air-desktop_${VERSION}_aarch64.AppImage`, then `chmod +x` and run.
 
 To build **on-air-core** from source with `rpmbuild`:
 
@@ -185,10 +202,9 @@ Nix, APT (`on-air-core` .deb), AUR (`on-air-core`), and RPM
 
 Release binaries (when published) are named:
 
-- `on-air-core-serve-macos-aarch64`
-- `on-air-core-serve-macos-x86_64`
-- `on-air-core-serve-linux-x86_64`
-- `on-air-core-serve-windows-x86_64.exe`
+- `on-air-core-serve-macos-aarch64` / `on-air-core-serve-macos-x86_64`
+- `on-air-core-serve-linux-x86_64` / `on-air-core-serve-linux-aarch64`
+- `on-air-core-serve-windows-x86_64.exe` / `on-air-core-serve-windows-aarch64.exe`
 
 ```bash
 chmod +x on-air-core-serve-linux-x86_64
@@ -199,15 +215,14 @@ chmod +x on-air-core-serve-linux-x86_64
 
 https://github.com/tsonubin/on-air/releases
 
-| Platform | File |
-| --- | --- |
-| macOS Apple silicon | `on-air-desktop_0.1.0_aarch64.dmg` |
-| macOS Intel | `on-air-desktop_0.1.0_x64.dmg` |
-| Linux deb | `on-air-desktop_0.1.0_amd64.deb` |
-| Linux rpm | `on-air-desktop-0.1.0-1.x86_64.rpm` |
-| Linux AppImage | `on-air-desktop_0.1.0_amd64.AppImage` |
-| Windows NSIS | `on-air-desktop_0.1.0_x64-setup.exe` |
-| Windows MSI | `on-air-desktop_0.1.0_x64_en-US.msi` |
+| Platform | Arch | File |
+| --- | --- | --- |
+| macOS | Apple silicon | `on-air-desktop_0.1.0_aarch64.dmg` |
+| macOS | Intel | `on-air-desktop_0.1.0_x64.dmg` |
+| Linux | x86_64 | `on-air-desktop_0.1.0_amd64.deb`, `on-air-desktop-0.1.0-1.x86_64.rpm`, `on-air-desktop_0.1.0_amd64.AppImage` |
+| Linux | arm64 | `on-air-desktop_0.1.0_arm64.deb`, `on-air-desktop-0.1.0-1.aarch64.rpm`, `on-air-desktop_0.1.0_aarch64.AppImage` |
+| Windows | x64 | `on-air-desktop_0.1.0_x64-setup.exe`, `on-air-desktop_0.1.0_x64_en-US.msi`, `on-air-desktop_0.1.0_x64-portable.zip` |
+| Windows | arm64 | `on-air-desktop_0.1.0_arm64-setup.exe`, `on-air-desktop_0.1.0_arm64_en-US.msi`, `on-air-desktop_0.1.0_arm64-portable.zip` |
 
 ## Build from source
 
@@ -283,17 +298,30 @@ CI (`.github/workflows/release.yml`) uploads Tauri bundles plus the core
 `on-air-desktop` version `0.1.0`:
 
 ```
+# macOS
 on-air-desktop_0.1.0_aarch64.dmg
 on-air-desktop_0.1.0_x64.dmg
+# Linux
 on-air-desktop_0.1.0_amd64.deb
+on-air-desktop_0.1.0_arm64.deb
 on-air-desktop-0.1.0-1.x86_64.rpm
+on-air-desktop-0.1.0-1.aarch64.rpm
 on-air-desktop_0.1.0_amd64.AppImage
+on-air-desktop_0.1.0_aarch64.AppImage
+# Windows
 on-air-desktop_0.1.0_x64-setup.exe
+on-air-desktop_0.1.0_arm64-setup.exe
 on-air-desktop_0.1.0_x64_en-US.msi
+on-air-desktop_0.1.0_arm64_en-US.msi
+on-air-desktop_0.1.0_x64-portable.zip
+on-air-desktop_0.1.0_arm64-portable.zip
+# Headless
 on-air-core-serve-macos-aarch64
 on-air-core-serve-macos-x86_64
 on-air-core-serve-linux-x86_64
+on-air-core-serve-linux-aarch64
 on-air-core-serve-windows-x86_64.exe
+on-air-core-serve-windows-aarch64.exe
 SHA256SUMS
 ```
 

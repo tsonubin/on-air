@@ -64,7 +64,15 @@ There is no hosted package archive yet. Users install the GitHub `.deb` /
 
 ## Expected Tauri 2 asset names
 
-`productName` is `on-air-desktop`. See INSTALL.md for the full list. If a
-future Tauri CLI changes the pattern, update INSTALL.md, the cask URL, the
-AUR source, the winget installer URL, and `packaging/update-checksums.sh`
-together.
+`productName` is `on-air-desktop`. CI builds **x86_64 and arm64** for every
+desktop OS:
+
+| OS | Formats |
+| --- | --- |
+| macOS | `.dmg` |
+| Windows | NSIS `.exe`, WiX `.msi`, portable `.zip` |
+| Linux | `.deb`, `.rpm`, `.AppImage` |
+
+See INSTALL.md for the filename list. If a future Tauri CLI changes the
+pattern, update INSTALL.md, the cask URL, the AUR source, the winget
+installer URL, and `packaging/update-checksums.sh` together.

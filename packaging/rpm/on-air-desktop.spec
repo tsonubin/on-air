@@ -1,6 +1,7 @@
 # Binary spec: re-wrap the Tauri-produced GitHub Release RPM so COPR/local
 # rpmbuild can consume a URL. Prefer installing that RPM directly:
 #   sudo dnf install https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop-0.1.0-1.x86_64.rpm
+#   sudo dnf install https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop-0.1.0-1.aarch64.rpm
 
 Name:           on-air-desktop
 Version:        0.1.0
@@ -9,10 +10,13 @@ Summary:        LAN audio streaming to AirPlay, Bluetooth, or Sonos (desktop GUI
 
 License:        Unspecified
 URL:            https://github.com/tsonubin/on-air
+%ifarch aarch64
+Source0:        https://github.com/tsonubin/on-air/releases/download/v%{version}/on-air-desktop-%{version}-1.aarch64.rpm
+%else
 Source0:        https://github.com/tsonubin/on-air/releases/download/v%{version}/on-air-desktop-%{version}-1.x86_64.rpm
+%endif
 
-ExclusiveArch:  x86_64
-BuildArch:      x86_64
+ExclusiveArch:  x86_64 aarch64
 
 # Tauri 2 Linux GUI
 Requires:       webkit2gtk4.1

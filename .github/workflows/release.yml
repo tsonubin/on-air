@@ -11,24 +11,48 @@ permissions:
 
 jobs:
   publish:
-    name: build-${{ matrix.platform }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-latest
-            args: --target aarch64-apple-darwin
-            rust-targets: aarch64-apple-darwin
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
-            rust-targets: x86_64-apple-darwin
-          - platform: ubuntu-22.04
-            args: ""
-            rust-targets: ""
-          - platform: windows-latest
-            args: ""
-            rust-targets: ""
+          - name: macos-aarch64
+            platform: macos-latest
+            rust_target: aarch64-apple-darwin
+            bundles: dmg
+            os_name: macos
+            arch_name: aarch64
+          - name: macos-x86_64
+            platform: macos-latest
+            rust_target: x86_64-apple-darwin
+            bundles: dmg
+            os_name: macos
+            arch_name: x86_64
+          - name: linux-x86_64
+            platform: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+            os_name: linux
+            arch_name: x86_64
+          - name: linux-aarch64
+            platform: ubuntu-22.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+            os_name: linux
+            arch_name: aarch64
+          - name: windows-x86_64
+            platform: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+            os_name: windows
+            arch_name: x86_64
+          - name: windows-aarch64
+            platform: windows-11-arm
+            rust_target: aarch64-pc-windows-msvc
+            bundles: nsis,msi
+            os_name: windows
+            arch_name: aarch64
     steps:
       - uses: actions/checkout@v4
       # version comes from package.json "packageManager"; do not also pin it here
@@ -40,74 +64,126 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust-targets }}
+          targets: ${{ matrix.rust_target }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: |
             .
             apps/desktop/src-tauri
-      - name: Install Linux Tauri deps
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Install Linux bundle deps
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev libssl-dev pkg-config
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libgtk-3-dev libasound2-dev libssl-dev pkg-config \
+            rpm file libfuse2
       - run: pnpm install
       - name: App version
         id: ver
         shell: bash
         run: |
           version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
       - name: Build core example binary
-        run: cargo build -p on-air-core --release --example serve ${{ matrix.args }}
+        run: cargo build -p on-air-core --release --example serve --target ${{ matrix.rust_target }}
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
+          tauriScript: pnpm tauri
           tagName: v__VERSION__
           releaseName: "on-air v__VERSION__"
           releaseBody: |
-            Desktop installers (macOS / Linux / Windows) and the `on-air-core` serve binary.
+            Installer packages (not a source-only release). GitHub also attaches
+            an automatic source zip/tarball; use the files below to install.
+
+            **macOS**
+            - Apple silicon: `on-air-desktop___VERSION___aarch64.dmg`
+            - Intel: `on-air-desktop___VERSION___x64.dmg`
+
+            **Windows**
+            - x64: `on-air-desktop___VERSION___x64-setup.exe`, `on-air-desktop___VERSION___x64_en-US.msi`, `on-air-desktop___VERSION___x64-portable.zip`
+            - arm64: `on-air-desktop___VERSION___arm64-setup.exe`, `on-air-desktop___VERSION___arm64_en-US.msi`, `on-air-desktop___VERSION___arm64-portable.zip`
+
+            **Linux**
+            - x86_64: `on-air-desktop___VERSION___amd64.deb`, `on-air-desktop-__VERSION__-1.x86_64.rpm`, `on-air-desktop___VERSION___amd64.AppImage`
+            - arm64: `on-air-desktop___VERSION___arm64.deb`, `on-air-desktop-__VERSION__-1.aarch64.rpm`, `on-air-desktop___VERSION___aarch64.AppImage`
+
+            Headless core binaries are `on-air-core-serve-<os>-<arch>`. See INSTALL.md.
 
             Built from `${{ github.sha }}`.
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
-      - name: Stage core serve binary
+          includeUpdaterJson: false
+          args: --target ${{ matrix.rust_target }} --bundles ${{ matrix.bundles }}
+      - name: Verify installer bundles
         shell: bash
         run: |
-          mkdir -p dist-core
-          os="${{ runner.os }}"
-          arch="${{ runner.arch }}"
-          case "$os" in
-            macOS) os_name=macos ;;
-            Linux) os_name=linux ;;
-            Windows) os_name=windows ;;
-            *) os_name=$(echo "$os" | tr '[:upper:]' '[:lower:]') ;;
+          set -euo pipefail
+          find target -type f -path '*/release/bundle/*' | tee /tmp/bundles.txt
+          case "${{ matrix.os_name }}" in
+            macos)
+              grep -E '\.dmg$' /tmp/bundles.txt
+              ;;
+            linux)
+              grep -E '\.deb$' /tmp/bundles.txt
+              grep -E '\.rpm$' /tmp/bundles.txt
+              grep -E '\.AppImage$' /tmp/bundles.txt
+              ;;
+            windows)
+              grep -E 'setup\.exe$' /tmp/bundles.txt
+              grep -E '\.msi$' /tmp/bundles.txt
+              ;;
           esac
-          case "$arch" in
-            X64) arch_name=x86_64 ;;
-            ARM64) arch_name=aarch64 ;;
-            *) arch_name=$(echo "$arch" | tr '[:upper:]' '[:lower:]') ;;
-          esac
-          if [ "$os" = Windows ]; then
-            dest="dist-core/on-air-core-serve-${os_name}-${arch_name}.exe"
+      - name: Stage extra artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-extra
+          version="${{ steps.ver.outputs.version }}"
+          rust_target="${{ matrix.rust_target }}"
+          os_name="${{ matrix.os_name }}"
+          arch_name="${{ matrix.arch_name }}"
+
+          if [ "$os_name" = windows ]; then
+            core_src="target/${rust_target}/release/examples/serve.exe"
+            core_dest="dist-extra/on-air-core-serve-${os_name}-${arch_name}.exe"
+            winarch=x64
+            [ "$arch_name" = aarch64 ] && winarch=arm64
+            exe="target/${rust_target}/release/on-air-desktop.exe"
+            if [ ! -f "$exe" ]; then
+              exe=$(find target -name on-air-desktop.exe -path '*/release/*' ! -path '*/deps/*' | head -1)
+            fi
+            if [ -z "$exe" ] || [ ! -f "$exe" ]; then
+              echo "on-air-desktop.exe not found" >&2
+              exit 1
+            fi
+            py=python3
+            command -v python3 >/dev/null 2>&1 || py=python
+            "$py" -c 'import sys, zipfile, pathlib; src, dest = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]); zf = zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED); zf.write(src, "on-air-desktop.exe"); zf.close(); print("wrote", dest, "from", src)' \
+              "$exe" "dist-extra/on-air-desktop_${version}_${winarch}-portable.zip"
           else
-            dest="dist-core/on-air-core-serve-${os_name}-${arch_name}"
+            core_src="target/${rust_target}/release/examples/serve"
+            core_dest="dist-extra/on-air-core-serve-${os_name}-${arch_name}"
           fi
-          found=$(find target -type f \( -name serve -o -name serve.exe \) -path '*/release/examples/*' | head -1)
-          if [ -z "$found" ]; then
+
+          if [ ! -f "$core_src" ]; then
+            core_src=$(find target -type f \( -name serve -o -name serve.exe \) -path '*/release/examples/*' | head -1)
+          fi
+          if [ -z "$core_src" ] || [ ! -f "$core_src" ]; then
             echo "on-air-core serve binary not found under target/" >&2
             find target -name 'serve*' || true
             exit 1
           fi
-          cp "$found" "$dest"
-          ls -la dist-core
+          cp "$core_src" "$core_dest"
+          ls -la dist-extra
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
-          files: dist-core/*
+          files: dist-extra/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -121,6 +197,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
           mkdir -p /tmp/rel
           gh release download "v${version}" --dir /tmp/rel --pattern '*'
