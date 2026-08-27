@@ -4,6 +4,10 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
 pub mod dsp;
+pub mod sender;
+pub mod state;
+
+use state::CoreState;
 
 // Keep in sync with DEFAULT_PORT in packages/api-types/src/index.ts
 pub const DEFAULT_PORT: u16 = 47990;
@@ -21,8 +25,10 @@ pub fn status() -> StatusResponse {
     }
 }
 
-pub fn build_router() -> Router {
-    Router::new().route("/api/status", get(status_handler))
+pub fn build_router(state: CoreState) -> Router {
+    Router::new()
+        .route("/api/status", get(status_handler))
+        .with_state(state)
 }
 
 async fn status_handler() -> Json<StatusResponse> {
@@ -30,7 +36,7 @@ async fn status_handler() -> Json<StatusResponse> {
 }
 
 pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
-    axum::serve(listener, build_router()).await
+    axum::serve(listener, build_router(CoreState::new())).await
 }
 
 pub async fn serve_on(addr: SocketAddr) -> std::io::Result<()> {

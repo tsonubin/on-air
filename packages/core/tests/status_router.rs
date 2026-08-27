@@ -1,10 +1,11 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use on_air_core::state::CoreState;
 use tower::ServiceExt;
 
 #[tokio::test]
 async fn status_route_returns_ok_json() {
-    let app = on_air_core::build_router();
+    let app = on_air_core::build_router(CoreState::new());
 
     let response = app
         .oneshot(
