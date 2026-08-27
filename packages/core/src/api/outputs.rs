@@ -81,11 +81,14 @@ pub async fn activate_output(
             if state.mock {
                 Box::new(NullSender::new(name, state.mock_log.clone()))
             } else {
-                let lan_ip = match local_lan_ip() {
+                let lan_ip = match crate::sender::sonos::net::local_lan_ip_toward(device.ip) {
                     Ok(ip) => ip,
-                    Err(e) => {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
-                    }
+                    Err(_) => match local_lan_ip() {
+                        Ok(ip) => ip,
+                        Err(e) => {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
+                        }
+                    },
                 };
                 let stream_url = format!("http://{lan_ip}:{}/stream/audio.wav", crate::DEFAULT_PORT);
                 Box::new(SonosSender::new(

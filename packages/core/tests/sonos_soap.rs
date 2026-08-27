@@ -51,6 +51,8 @@ async fn set_av_transport_uri_sends_expected_action_and_body() {
     assert_eq!(calls.len(), 1);
     assert!(calls[0].0.contains("SetAVTransportURI"));
     assert!(calls[0].1.contains("<CurrentURI>http://192.168.1.10:47990/stream/audio.wav</CurrentURI>"));
+    assert!(calls[0].1.contains("CurrentURIMetaData"));
+    assert!(calls[0].1.contains("audio/wav"));
 }
 
 #[tokio::test]

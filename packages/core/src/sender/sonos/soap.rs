@@ -38,14 +38,18 @@ impl SonosControlClient {
         control_url: &str,
         stream_uri: &str,
     ) -> Result<(), SoapError> {
+        let escaped = xml_escape(stream_uri);
+        let didl = xml_escape(&format!(
+            r#"<DIDL-Lite xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/"><item id="-1" parentID="-1" restricted="true"><res protocolInfo="http-get:*:audio/wav:*">{stream_uri}</res><dc:title>on-air</dc:title><upnp:class>object.item.audioItem.audioBroadcast</upnp:class></item></DIDL-Lite>"#
+        ));
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
     <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
       <InstanceID>0</InstanceID>
-      <CurrentURI>{stream_uri}</CurrentURI>
-      <CurrentURIMetaData></CurrentURIMetaData>
+      <CurrentURI>{escaped}</CurrentURI>
+      <CurrentURIMetaData>{didl}</CurrentURIMetaData>
     </u:SetAVTransportURI>
   </s:Body>
 </s:Envelope>"#
@@ -152,4 +156,12 @@ impl SonosControlClient {
             })
         }
     }
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }

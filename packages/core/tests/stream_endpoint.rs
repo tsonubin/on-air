@@ -33,7 +33,7 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
         .unwrap();
     assert_eq!(
         response.headers().get("content-type").unwrap(),
-        "audio/L16;rate=44100;channels=1"
+        "audio/wav"
     );
 
     let mut stream = response.bytes_stream();
@@ -42,6 +42,12 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
         .expect("received a chunk before timing out")
         .expect("stream not closed")
         .expect("chunk read ok");
+    assert!(first_chunk.starts_with(b"RIFF"), "wav header first: {first_chunk:?}");
 
-    assert_eq!(first_chunk, known_chunk);
+    let pcm_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
+        .await
+        .expect("received pcm before timing out")
+        .expect("stream not closed")
+        .expect("chunk read ok");
+    assert_eq!(pcm_chunk, known_chunk);
 }
