@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 
+pub mod api;
 pub mod dsp;
 pub mod pipeline;
 pub mod sender;
@@ -29,6 +30,7 @@ pub fn status() -> StatusResponse {
 pub fn build_router(state: CoreState) -> Router {
     Router::new()
         .route("/api/status", get(status_handler))
+        .route("/stream/audio.wav", get(api::stream::stream_audio))
         .with_state(state)
 }
 
