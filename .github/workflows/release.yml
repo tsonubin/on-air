@@ -1,0 +1,95 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: build-${{ matrix.platform }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust-targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust-targets: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+      - name: Install Linux Tauri deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev pkg-config
+      - run: pnpm install
+      - name: App version
+        id: ver
+        shell: bash
+        run: |
+          version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+      - name: Build core example binary
+        run: cargo build -p on-air-core --release --example serve ${{ matrix.args }}
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop
+          tagName: v__VERSION__
+          releaseName: "on-air v__VERSION__"
+          releaseBody: |
+            Desktop installers (macOS / Linux / Windows) and the `on-air-core` serve binary.
+
+            Built from `${{ github.sha }}`.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+      - name: Stage core serve binary
+        shell: bash
+        run: |
+          mkdir -p dist-core
+          os="${{ runner.os }}"
+          if [ -f target/release/examples/serve.exe ]; then
+            cp target/release/examples/serve.exe "dist-core/on-air-core-serve-${os}.exe"
+          elif [ -f target/release/examples/serve ]; then
+            cp target/release/examples/serve "dist-core/on-air-core-serve-${os}"
+          else
+            find target -type f \( -name serve -o -name serve.exe \) -path '*/release/examples/*' -exec cp {} dist-core/ \;
+          fi
+          ls -la dist-core
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: dist-core/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
