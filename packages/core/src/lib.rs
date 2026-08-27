@@ -1,3 +1,4 @@
+use axum::routing::post;
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -31,6 +32,8 @@ pub fn build_router(state: CoreState) -> Router {
     Router::new()
         .route("/api/status", get(status_handler))
         .route("/stream/audio.wav", get(api::stream::stream_audio))
+        .route("/api/inputs", get(api::inputs::list_inputs))
+        .route("/api/inputs/active", post(api::inputs::activate_input))
         .with_state(state)
 }
 

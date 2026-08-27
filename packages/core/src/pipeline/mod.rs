@@ -78,3 +78,20 @@ pub fn spawn_processing_task(
         join_handle: Some(join_handle),
     }
 }
+
+pub mod capture;
+
+pub struct CaptureHandle {
+    pub stream: cpal::Stream,
+    pub processing: ProcessingTaskHandle,
+    pub device_name: String,
+}
+
+impl CaptureHandle {
+    /// Blocking: stops the capture stream and joins the processing thread.
+    /// From async code, call this inside `tokio::task::spawn_blocking`.
+    pub fn stop(self) {
+        drop(self.stream);
+        self.processing.stop();
+    }
+}

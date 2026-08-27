@@ -9,6 +9,7 @@ pub struct CoreState {
     pub eq_gains_db: Arc<StdMutex<[f32; 5]>>,
     pub target_sample_rate_hz: Arc<StdMutex<u32>>,
     pub audio_tx: broadcast::Sender<Bytes>,
+    pub capture: Arc<Mutex<Option<crate::pipeline::CaptureHandle>>>,
 }
 
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
@@ -21,6 +22,7 @@ impl CoreState {
             eq_gains_db: Arc::new(StdMutex::new([0.0; 5])),
             target_sample_rate_hz: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE_DEFAULT_HZ)),
             audio_tx,
+            capture: Arc::new(Mutex::new(None)),
         }
     }
 
