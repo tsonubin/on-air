@@ -4,7 +4,7 @@ use axum::routing::put;
 use axum::Router;
 use on_air_core::sender::airplay::AirPlaySender;
 use on_air_core::sender::bluetooth::{
-    BluetoothAdapter, BluetoothDevice, BluetoothSender, MockBluetoothAdapter,
+    BluetoothAdapter, BluetoothDevice, BluetoothSender, MockBluetoothAdapter, RecordingPcmSink,
 };
 use on_air_core::sender::sonos::discovery::SonosDevice;
 use on_air_core::sender::sonos::SonosSender;
@@ -82,11 +82,14 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
         )))
         .await
         .unwrap();
+    let sink = std::sync::Arc::new(RecordingPcmSink::default());
     state
         .activate_sender(Box::new(BluetoothSender::new(
             "bt-1",
             "BT",
             adapter.clone(),
+            state.audio_tx.clone(),
+            sink,
         )))
         .await
         .unwrap();

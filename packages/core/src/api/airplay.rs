@@ -1,3 +1,4 @@
+use crate::auth::Paired;
 use crate::sender::airplay;
 use crate::state::CoreState;
 use axum::extract::State;
@@ -24,6 +25,7 @@ pub struct AirPlayPairRequest {
 
 /// OwnTone/AirPlay2 PIN handshake. Mock mode accepts any PIN for a known device.
 pub async fn pair(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<AirPlayPairRequest>,
 ) -> StatusCode {

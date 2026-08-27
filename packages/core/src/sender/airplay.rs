@@ -75,3 +75,41 @@ pub fn platform_mode() -> &'static str {
         "owntone"
     }
 }
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct OwnToneOutputs {
+    #[serde(default)]
+    outputs: Vec<OwnToneOutput>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct OwnToneOutput {
+    #[serde(default)]
+    id: serde_json::Value,
+    #[serde(default)]
+    name: String,
+}
+
+pub async fn fetch_owntone_outputs(base: &str) -> Result<Vec<crate::state::CatalogDevice>, SenderError> {
+    let url = format!("{}/api/outputs", base.trim_end_matches('/'));
+    let body: OwnToneOutputs = crate::sender::sonos::soap::http_client()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| SenderError(e.to_string()))?
+        .json()
+        .await
+        .map_err(|e| SenderError(e.to_string()))?;
+    Ok(body
+        .outputs
+        .into_iter()
+        .map(|o| crate::state::CatalogDevice {
+            id: match o.id {
+                serde_json::Value::String(s) => s,
+                other => other.to_string(),
+            },
+            name: o.name,
+        })
+        .filter(|d| !d.name.is_empty())
+        .collect())
+}

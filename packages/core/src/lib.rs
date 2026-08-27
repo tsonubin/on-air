@@ -1,11 +1,12 @@
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use tower_http::cors::CorsLayer;
 use serde::Serialize;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 
 pub mod api;
+pub mod auth;
 pub mod dsp;
 pub mod mdns;
 pub mod pairing;
@@ -76,7 +77,8 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
     };
     let _mdns = crate::mdns::spawn_advertisement(DEFAULT_PORT, env!("CARGO_PKG_VERSION"));
     if !state.mock {
-        let _discovery = state.spawn_sonos_discovery();
+        let _sonos = state.spawn_sonos_discovery();
+        let _airplay = state.spawn_airplay_discovery();
     }
     axum::serve(listener, build_router(state)).await
 }

@@ -8,6 +8,18 @@ pub struct InputDeviceInfo {
 }
 
 /// Loopback-oriented capture backend for the current OS (M5).
+pub fn is_loopback_device_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    n.contains("monitor")
+        || n.contains("loopback")
+        || n.contains("blackhole")
+        || n.contains("soundflower")
+        || n.contains("stereo mix")
+        || n.contains("what u hear")
+        || n.contains("screencapture")
+        || n.contains("wasapi")
+}
+
 pub fn loopback_backend() -> &'static str {
     if cfg!(target_os = "linux") {
         "pipewire-monitor"
@@ -22,11 +34,18 @@ pub fn loopback_backend() -> &'static str {
 
 pub fn list_input_devices(host: &Host) -> Result<Vec<InputDeviceInfo>, cpal::Error> {
     let devices = host.input_devices()?;
-    Ok(devices
+    let mut listed: Vec<InputDeviceInfo> = devices
         .map(|d| InputDeviceInfo {
             name: d.to_string(),
         })
-        .collect())
+        .collect();
+    listed.sort_by_key(|d| !is_loopback_device_name(&d.name));
+    Ok(listed)
+}
+
+pub fn find_preferred_loopback(host: &Host) -> Result<Option<Device>, cpal::Error> {
+    let devices = host.input_devices()?;
+    Ok(devices.into_iter().find(|d| is_loopback_device_name(&d.to_string())))
 }
 
 pub fn find_input_device(host: &Host, name: &str) -> Result<Option<Device>, cpal::Error> {

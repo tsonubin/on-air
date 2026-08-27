@@ -1,3 +1,4 @@
+use crate::auth::Paired;
 use crate::sender::bluetooth::BluetoothAdapter;
 use crate::state::CoreState;
 use axum::extract::State;
@@ -18,10 +19,11 @@ pub struct BluetoothListResponse {
     pub devices: Vec<BluetoothDeviceInfo>,
 }
 
-pub async fn list_devices(State(state): State<CoreState>) -> Json<BluetoothListResponse> {
+pub async fn list_devices(Paired: Paired, State(state): State<CoreState>) -> Json<BluetoothListResponse> {
     Json(BluetoothListResponse {
         devices: state
             .bluetooth
+            .as_ref()
             .list()
             .into_iter()
             .map(|d| BluetoothDeviceInfo {
@@ -40,6 +42,7 @@ pub struct BluetoothIdRequest {
 }
 
 pub async fn pair_device(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<BluetoothIdRequest>,
 ) -> Result<StatusCode, StatusCode> {
@@ -51,6 +54,7 @@ pub async fn pair_device(
 }
 
 pub async fn connect_device(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<BluetoothIdRequest>,
 ) -> Result<StatusCode, StatusCode> {

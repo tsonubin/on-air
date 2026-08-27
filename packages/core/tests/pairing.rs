@@ -1,8 +1,24 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use on_air_core::pairing::MOCK_PIN;
+use on_air_core::auth::authorize;
+use on_air_core::pairing::{PairingState, MOCK_PIN};
 use on_air_core::state::CoreState;
 use tower::ServiceExt;
+
+#[test]
+fn issued_token_is_required_for_control_paths() {
+    let mut pairing = PairingState::mock();
+    assert!(!authorize("/api/outputs", None, false, &pairing, true));
+    let token = pairing.verify(MOCK_PIN).unwrap();
+    assert!(authorize(
+        "/api/outputs",
+        Some(&format!("Bearer {token}")),
+        false,
+        &pairing,
+        true
+    ));
+    assert!(authorize("/api/status", None, false, &pairing, true));
+}
 
 #[tokio::test]
 async fn pin_verify_issues_a_token_and_rejects_bad_pin() {
@@ -56,4 +72,53 @@ async fn pin_verify_issues_a_token_and_rejects_bad_pin() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["token"].as_str().unwrap().starts_with("onair-"));
+}
+
+#[tokio::test]
+async fn control_routes_require_token_when_require_auth_is_set() {
+    let mut state = CoreState::new_mock().await;
+    state.require_auth = true;
+    let app = on_air_core::build_router(state);
+
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/outputs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let verify = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/pairing/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(r#"{{"pin":"{MOCK_PIN}"}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(verify.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let token = json["token"].as_str().unwrap();
+
+    let allowed = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/outputs")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), StatusCode::OK);
 }

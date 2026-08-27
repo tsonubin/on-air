@@ -1,3 +1,4 @@
+use crate::auth::Paired;
 use crate::pipeline::{self, capture};
 use crate::state::CoreState;
 use axum::extract::State;
@@ -14,7 +15,7 @@ pub struct InputsResponse {
     pub inputs: Vec<String>,
 }
 
-pub async fn list_inputs(State(state): State<CoreState>) -> Result<Json<InputsResponse>, StatusCode> {
+pub async fn list_inputs(Paired: Paired, State(state): State<CoreState>) -> Result<Json<InputsResponse>, StatusCode> {
     if state.mock {
         return Ok(Json(InputsResponse {
             inputs: state.mock_inputs.lock().unwrap().clone(),
@@ -34,7 +35,7 @@ pub struct ActiveInputResponse {
     pub backend: &'static str,
 }
 
-pub async fn get_active_input(State(state): State<CoreState>) -> Json<ActiveInputResponse> {
+pub async fn get_active_input(Paired: Paired, State(state): State<CoreState>) -> Json<ActiveInputResponse> {
     Json(ActiveInputResponse {
         name: state.active_input.lock().unwrap().clone(),
         backend: capture::loopback_backend(),
@@ -47,6 +48,7 @@ pub struct ActivateInputRequest {
 }
 
 pub async fn activate_input(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<ActivateInputRequest>,
 ) -> Response {
@@ -60,10 +62,18 @@ pub async fn activate_input(
     }
 
     let host = cpal::default_host();
-    let device = match capture::find_input_device(&host, &req.name) {
-        Ok(Some(d)) => d,
-        Ok(None) => return (StatusCode::NOT_FOUND, "input device not found").into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    let device = if req.name == "__loopback__" {
+        match capture::find_preferred_loopback(&host) {
+            Ok(Some(d)) => d,
+            Ok(None) => return (StatusCode::NOT_FOUND, "no loopback capture device").into_response(),
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
+    } else {
+        match capture::find_input_device(&host, &req.name) {
+            Ok(Some(d)) => d,
+            Ok(None) => return (StatusCode::NOT_FOUND, "input device not found").into_response(),
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        }
     };
 
     let target_rate = *state.target_sample_rate_hz.lock().unwrap();

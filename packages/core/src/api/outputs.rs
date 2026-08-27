@@ -1,7 +1,8 @@
 use crate::sender::airplay::AirPlaySender;
-use crate::sender::bluetooth::{BluetoothAdapter, BluetoothSender};
+use crate::sender::bluetooth::{BluetoothSender, CpalPcmSink, PcmSink};
 use crate::sender::sonos::{net::local_lan_ip, SonosSender};
 use crate::sender::{AudioSender, NullSender};
+use crate::auth::Paired;
 use crate::state::{ActiveOutput, CoreState};
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -21,7 +22,7 @@ pub struct OutputsResponse {
     pub outputs: Vec<OutputInfo>,
 }
 
-pub async fn list_outputs(State(state): State<CoreState>) -> Json<OutputsResponse> {
+pub async fn list_outputs(Paired: Paired, State(state): State<CoreState>) -> Json<OutputsResponse> {
     let mut outputs = Vec::new();
     for d in state.outputs.lock().await.list() {
         outputs.push(OutputInfo {
@@ -47,7 +48,7 @@ pub async fn list_outputs(State(state): State<CoreState>) -> Json<OutputsRespons
     Json(OutputsResponse { outputs })
 }
 
-pub async fn get_active_output(State(state): State<CoreState>) -> Json<Option<ActiveOutput>> {
+pub async fn get_active_output(Paired: Paired, State(state): State<CoreState>) -> Json<Option<ActiveOutput>> {
     Json(state.active_output.lock().unwrap().clone())
 }
 
@@ -58,6 +59,7 @@ pub struct ActivateOutputRequest {
 }
 
 pub async fn activate_output(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<ActivateOutputRequest>,
 ) -> Response {
@@ -137,15 +139,18 @@ pub async fn activate_output(
                 device_id: device.id.clone(),
                 device_name: device.name.clone(),
             });
-            if state.mock {
-                Box::new(NullSender::new(device.name, state.mock_log.clone()))
+            let sink: std::sync::Arc<dyn PcmSink> = if state.mock {
+                state.pcm_sink.clone()
             } else {
-                Box::new(BluetoothSender::new(
-                    device.id,
-                    device.name,
-                    state.bluetooth.clone() as std::sync::Arc<dyn crate::sender::bluetooth::BluetoothAdapter>,
-                ))
-            }
+                std::sync::Arc::new(CpalPcmSink::for_output_named(&device.name))
+            };
+            Box::new(BluetoothSender::new(
+                device.id,
+                device.name,
+                state.bluetooth.clone(),
+                state.audio_tx.clone(),
+                sink,
+            ))
         }
         _ => {
             return (StatusCode::BAD_REQUEST, "unknown transport").into_response();
@@ -164,6 +169,7 @@ pub struct SetVolumeRequest {
 }
 
 pub async fn set_output_volume(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<SetVolumeRequest>,
 ) -> Response {

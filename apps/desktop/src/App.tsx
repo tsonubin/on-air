@@ -32,6 +32,7 @@ function App() {
   const [sampleRate, setSampleRate] = useState(44100);
   const [pin, setPin] = useState("");
   const [airplayMode, setAirplayMode] = useState("");
+  const [autostart, setAutostart] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -58,6 +59,12 @@ function App() {
       setSampleRate(sr.sample_rate_hz);
       setPin(pairing.pin);
       setAirplayMode(ap.mode);
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        setAutostart(await invoke<boolean>("autostart_enabled"));
+      } catch {
+        setAutostart(null);
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -114,7 +121,21 @@ function App() {
         </p>
         <p data-testid="pairing-pin">Mobile PIN: {pin || "…"}</p>
         <p data-testid="airplay-mode">AirPlay mode: {airplayMode}</p>
-        <p data-testid="autostart-hint">Autostart: login item (plugin)</p>
+        <p data-testid="autostart-hint">
+          Autostart: {autostart == null ? "unknown" : autostart ? "enabled" : "disabled"}
+        </p>
+        {airplayMode === "avroute-picker" && (
+          <button
+            data-testid="airplay-picker"
+            onClick={() => {
+              void import("@tauri-apps/api/core").then(({ invoke }) =>
+                invoke("open_airplay_picker"),
+              );
+            }}
+          >
+            Open AirPlay route picker
+          </button>
+        )}
       </header>
       {error && <p className="error">Error: {error}</p>}
 

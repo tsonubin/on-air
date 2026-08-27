@@ -1,3 +1,4 @@
+use crate::auth::Paired;
 use crate::state::CoreState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -27,7 +28,7 @@ pub enum WsEvent {
     },
 }
 
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<CoreState>) -> Response {
+pub async fn ws_handler(Paired: Paired, ws: WebSocketUpgrade, State(state): State<CoreState>) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 

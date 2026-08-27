@@ -1,6 +1,8 @@
 use crate::api::ws::WsEvent;
 use crate::pairing::PairingState;
-use crate::sender::bluetooth::{BluetoothDevice, MockBluetoothAdapter};
+use crate::sender::bluetooth::{
+    BluetoothAdapter, BluetoothDevice, MockBluetoothAdapter, RecordingPcmSink, SystemBluetoothAdapter,
+};
 use crate::sender::sonos::discovery::{DeviceRegistry, SonosDevice};
 use crate::sender::{AudioSender, SenderError};
 use bytes::Bytes;
@@ -35,7 +37,9 @@ pub struct CoreState {
     pub mock_inputs: Arc<StdMutex<Vec<String>>>,
     pub active_input: Arc<StdMutex<Option<String>>>,
     pub airplay_outputs: Arc<StdMutex<Vec<CatalogDevice>>>,
-    pub bluetooth: Arc<MockBluetoothAdapter>,
+    pub bluetooth: Arc<dyn BluetoothAdapter>,
+    pub pcm_sink: Arc<RecordingPcmSink>,
+    pub require_auth: bool,
     pub pairing: Arc<StdMutex<PairingState>>,
     pub active_output: Arc<StdMutex<Option<ActiveOutput>>>,
     pub mock_log: Arc<tokio::sync::Mutex<Vec<String>>>,
@@ -60,7 +64,9 @@ impl CoreState {
             mock_inputs: Arc::new(StdMutex::new(Vec::new())),
             active_input: Arc::new(StdMutex::new(None)),
             airplay_outputs: Arc::new(StdMutex::new(Vec::new())),
-            bluetooth: Arc::new(MockBluetoothAdapter::default()),
+            bluetooth: Arc::new(SystemBluetoothAdapter::from_host()),
+            pcm_sink: Arc::new(RecordingPcmSink::default()),
+            require_auth: false,
             pairing: Arc::new(StdMutex::new(PairingState::new())),
             active_output: Arc::new(StdMutex::new(None)),
             mock_log: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -92,6 +98,22 @@ impl CoreState {
         };
         state.outputs.lock().await.upsert(sonos, Instant::now());
         state
+    }
+
+    pub fn spawn_airplay_discovery(&self) -> tokio::task::JoinHandle<()> {
+        let outputs = self.airplay_outputs.clone();
+        let base = self.owntone_base.clone();
+        tokio::spawn(async move {
+            loop {
+                let url = base.lock().unwrap().clone();
+                if let Ok(found) = crate::sender::airplay::fetch_owntone_outputs(&url).await {
+                    if !found.is_empty() {
+                        *outputs.lock().unwrap() = found;
+                    }
+                }
+                tokio::time::sleep(Duration::from_secs(30)).await;
+            }
+        })
     }
 
     pub async fn activate_sender(&self, new_sender: Box<dyn AudioSender>) -> Result<(), SenderError> {

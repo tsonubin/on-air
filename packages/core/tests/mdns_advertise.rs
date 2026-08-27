@@ -19,3 +19,12 @@ fn loopback_backend_is_named_for_this_os() {
             || backend == "cpal-default"
     );
 }
+
+#[test]
+fn loopback_names_match_os_capture_devices() {
+    use on_air_core::pipeline::capture::is_loopback_device_name;
+    assert!(is_loopback_device_name("alsa_output.pci.monitor"));
+    assert!(is_loopback_device_name("BlackHole 2ch"));
+    assert!(is_loopback_device_name("Stereo Mix"));
+    assert!(!is_loopback_device_name("MacBook Pro Microphone"));
+}

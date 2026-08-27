@@ -1,3 +1,4 @@
+use crate::auth::Paired;
 use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -9,7 +10,7 @@ pub struct SampleRateResponse {
     pub sample_rate_hz: u32,
 }
 
-pub async fn get_sample_rate(State(state): State<CoreState>) -> Json<SampleRateResponse> {
+pub async fn get_sample_rate(Paired: Paired, State(state): State<CoreState>) -> Json<SampleRateResponse> {
     Json(SampleRateResponse {
         sample_rate_hz: *state.target_sample_rate_hz.lock().unwrap(),
     })
@@ -21,6 +22,7 @@ pub struct SetSampleRateRequest {
 }
 
 pub async fn set_sample_rate(
+    Paired: Paired,
     State(state): State<CoreState>,
     Json(req): Json<SetSampleRateRequest>,
 ) -> StatusCode {

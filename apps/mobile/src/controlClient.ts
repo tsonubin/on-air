@@ -21,10 +21,31 @@ export async function verifyPin(base: string, pin: string): Promise<string> {
   return body.token;
 }
 
-export async function listOutputs(base: string, token?: string): Promise<OutputInfo[]> {
+function authHeaders(token?: string, json = false): Record<string, string> {
   const headers: Record<string, string> = {};
+  if (json) headers["content-type"] = "application/json";
   if (token) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(`${base}/api/outputs`, { headers });
+  return headers;
+}
+
+export async function listInputs(base: string, token?: string): Promise<string[]> {
+  const response = await fetch(`${base}/api/inputs`, { headers: authHeaders(token) });
+  if (!response.ok) throw new Error(`inputs ${response.status}`);
+  const body = (await response.json()) as { inputs: string[] };
+  return body.inputs;
+}
+
+export async function activateInput(base: string, name: string, token?: string): Promise<void> {
+  const response = await fetch(`${base}/api/inputs/active`, {
+    method: "POST",
+    headers: authHeaders(token, true),
+    body: JSON.stringify({ name }),
+  });
+  if (!response.ok) throw new Error(`activate input ${response.status}`);
+}
+
+export async function listOutputs(base: string, token?: string): Promise<OutputInfo[]> {
+  const response = await fetch(`${base}/api/outputs`, { headers: authHeaders(token) });
   if (!response.ok) throw new Error(`outputs ${response.status}`);
   const body = (await response.json()) as { outputs: OutputInfo[] };
   return body.outputs;
@@ -34,19 +55,20 @@ export async function activateOutput(
   base: string,
   transport: string,
   deviceId: string,
+  token?: string,
 ): Promise<void> {
   const response = await fetch(`${base}/api/outputs/active`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders(token, true),
     body: JSON.stringify({ transport, device_id: deviceId }),
   });
   if (!response.ok) throw new Error(`activate ${response.status}`);
 }
 
-export async function setVolume(base: string, volume: number): Promise<void> {
+export async function setVolume(base: string, volume: number, token?: string): Promise<void> {
   const response = await fetch(`${base}/api/outputs/active/volume`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders(token, true),
     body: JSON.stringify({ volume }),
   });
   if (!response.ok) throw new Error(`volume ${response.status}`);
@@ -55,10 +77,11 @@ export async function setVolume(base: string, volume: number): Promise<void> {
 export async function setEq(
   base: string,
   gains: [number, number, number, number, number],
+  token?: string,
 ): Promise<void> {
   const response = await fetch(`${base}/api/eq`, {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders(token, true),
     body: JSON.stringify({ gains_db: gains }),
   });
   if (!response.ok) throw new Error(`eq ${response.status}`);
@@ -66,13 +89,15 @@ export async function setEq(
 
 export async function goldenPathSonos(base: string, pin: string): Promise<void> {
   await fetchStatus(base);
-  await verifyPin(base, pin);
-  const outputs = await listOutputs(base);
+  const token = await verifyPin(base, pin);
+  const inputs = await listInputs(base, token);
+  if (inputs[0]) await activateInput(base, inputs[0], token);
+  const outputs = await listOutputs(base, token);
   const sonos = outputs.find((o) => o.transport === "sonos");
   if (!sonos) throw new Error("no sonos output");
-  await activateOutput(base, "sonos", sonos.id);
-  await setVolume(base, 20);
-  await setEq(base, [3, 0, 0, 0, -3]);
+  await activateOutput(base, "sonos", sonos.id, token);
+  await setVolume(base, 20, token);
+  await setEq(base, [3, 0, 0, 0, -3], token);
 }
 
 export async function switchTransports(base: string): Promise<string[]> {

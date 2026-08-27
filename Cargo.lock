@@ -2911,6 +2911,7 @@ dependencies = [
 name = "on-air-desktop"
 version = "0.1.0"
 dependencies = [
+ "objc2",
  "on-air-core",
  "serde",
  "serde_json",
