@@ -5,7 +5,7 @@ class OnAirCore < Formula
       tag:      "v0.1.0",
       revision: "5e372829c846cdadacac1ebe8f4c1f5a4acec0b7"
   license :cannot_represent
-  head "https://github.com/tsonubin/on-air.git", branch: "master"
+  head "https://github.com/tsonubin/on-air.git", branch: "main"
 
   depends_on "pkg-config" => :build
   depends_on "rust" => :build
