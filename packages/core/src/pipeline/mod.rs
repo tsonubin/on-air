@@ -1,3 +1,4 @@
+use crate::api::ws::WsEvent;
 use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::MonoResampler;
 use bytes::Bytes;
@@ -43,6 +44,7 @@ pub fn spawn_processing_task(
     output_rate_hz: u32,
     eq_gains_db: Arc<Mutex<[f32; 5]>>,
     audio_tx: broadcast::Sender<Bytes>,
+    ws_tx: broadcast::Sender<WsEvent>,
 ) -> ProcessingTaskHandle {
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_flag_thread = stop_flag.clone();
@@ -67,6 +69,11 @@ pub fn spawn_processing_task(
 
             eq.set_gains_db(*eq_gains_db.lock().unwrap());
             eq.process(&mut chunk);
+
+            let peak = chunk.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+            let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
+            let _ = ws_tx.send(WsEvent::LevelMeter { rms, peak });
+
             let resampled = resampler.process(&chunk);
             let pcm_bytes = f32_to_le_i16_bytes(&resampled);
             let _ = audio_tx.send(pcm_bytes); // no subscribers is fine

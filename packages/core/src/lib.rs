@@ -45,6 +45,7 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/sample-rate",
             get(api::sample_rate::get_sample_rate).put(api::sample_rate::set_sample_rate),
         )
+        .route("/api/ws", get(api::ws::ws_handler))
         .with_state(state)
 }
 

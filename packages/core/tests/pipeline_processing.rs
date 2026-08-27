@@ -9,9 +9,10 @@ use tokio::sync::broadcast;
 async fn processes_synthetic_frames_into_broadcast_pcm() {
     let (mut producer, consumer) = new_ring_buffer(1024 * 8);
     let (audio_tx, mut audio_rx) = broadcast::channel(8);
+    let (ws_tx, _) = broadcast::channel::<on_air_core::api::ws::WsEvent>(8);
     let eq_gains_db = Arc::new(Mutex::new([0.0; 5]));
 
-    let handle = spawn_processing_task(consumer, 44100, 44100, eq_gains_db, audio_tx);
+    let handle = spawn_processing_task(consumer, 44100, 44100, eq_gains_db, audio_tx, ws_tx);
 
     // push more than one resampler chunk's worth of a known sine wave
     let samples: Vec<f32> = (0..1024 * 2)

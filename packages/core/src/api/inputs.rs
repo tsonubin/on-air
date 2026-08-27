@@ -59,6 +59,7 @@ pub async fn activate_input(
         target_rate,
         state.eq_gains_db.clone(),
         state.audio_tx.clone(),
+        state.ws_tx.clone(),
     );
 
     let new_handle = pipeline::CaptureHandle {
