@@ -19,8 +19,8 @@ pkgbase = on-air-bin
 	options = !strip
 	options = !debug
 	source_x86_64 = on-air-desktop_0.1.0_amd64.deb::https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop_0.1.0_amd64.deb
-	sha256sums_x86_64 = SKIP
+	sha256sums_x86_64 = fc3564fbd8b0a6ab8943a94047e93a039c0185893762a0a4f95fbcca9936e846
 	source_aarch64 = on-air-desktop_0.1.0_arm64.deb::https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop_0.1.0_arm64.deb
-	sha256sums_aarch64 = SKIP
+	sha256sums_aarch64 = 439494b6fae83ef20379498518bc09e072543d68b42abf131534db6ce1f1ca47
 
 pkgname = on-air-bin

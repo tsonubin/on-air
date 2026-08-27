@@ -13,8 +13,8 @@ conflicts=('on-air')
 options=('!strip' '!debug')
 source_x86_64=("on-air-desktop_${pkgver}_amd64.deb::https://github.com/tsonubin/on-air/releases/download/v${pkgver}/on-air-desktop_${pkgver}_amd64.deb")
 source_aarch64=("on-air-desktop_${pkgver}_arm64.deb::https://github.com/tsonubin/on-air/releases/download/v${pkgver}/on-air-desktop_${pkgver}_arm64.deb")
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
+sha256sums_x86_64=('fc3564fbd8b0a6ab8943a94047e93a039c0185893762a0a4f95fbcca9936e846')
+sha256sums_aarch64=('439494b6fae83ef20379498518bc09e072543d68b42abf131534db6ce1f1ca47')
 
 package() {
   local deb

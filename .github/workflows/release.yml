@@ -180,12 +180,13 @@ jobs:
           fi
           cp "$core_src" "$core_dest"
           ls -la dist-extra
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.tag }}
-          files: dist-extra/*
+      # Upload extras without PATCHing release metadata (softprops "update a
+      # release" fails for GITHUB_TOKEN on workflow_dispatch).
+      - name: Upload extra artifacts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ steps.ver.outputs.tag }}" dist-extra/* --clobber
 
   checksums:
     name: publish SHA256SUMS
