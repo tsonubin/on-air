@@ -80,7 +80,11 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
         let _sonos = state.spawn_sonos_discovery();
         let _airplay = state.spawn_airplay_discovery();
     }
-    axum::serve(listener, build_router(state)).await
+    axum::serve(
+        listener,
+        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 pub async fn serve_on(addr: SocketAddr) -> std::io::Result<()> {

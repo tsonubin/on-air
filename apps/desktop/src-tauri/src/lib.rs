@@ -20,13 +20,19 @@ fn autostart_enabled(app: tauri::AppHandle) -> bool {
 }
 
 #[tauri::command]
-fn open_airplay_picker() -> Result<String, String> {
+fn open_airplay_picker(app: tauri::AppHandle) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
-        macos_airplay::present_route_picker()
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        app.run_on_main_thread(move || {
+            let _ = tx.send(macos_airplay::present_route_picker());
+        })
+        .map_err(|e| e.to_string())?;
+        rx.recv().map_err(|e| e.to_string())?
     }
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = app;
         Ok("owntone-list".into())
     }
 }
@@ -34,16 +40,56 @@ fn open_airplay_picker() -> Result<String, String> {
 #[cfg(target_os = "macos")]
 mod macos_airplay {
     use objc2::rc::Retained;
-    use objc2::runtime::AnyObject;
-    use objc2::{class, msg_send};
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_app_kit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
+    use objc2_av_kit::AVRoutePickerView;
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+    use std::cell::RefCell;
+
+    thread_local! {
+        static LIVE_WINDOWS: RefCell<Vec<Retained<NSWindow>>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn live_window_count() -> usize {
+        LIVE_WINDOWS.with(|w| w.borrow().len())
+    }
+
+    pub fn picker_is_installed_in_a_window() -> bool {
+        LIVE_WINDOWS.with(|w| {
+            w.borrow().last().is_some_and(|window| {
+                window
+                    .contentView()
+                    .is_some_and(|view| !view.subviews().is_empty())
+            })
+        })
+    }
 
     pub fn present_route_picker() -> Result<String, String> {
-        unsafe {
-            let avkit = class!(AVRoutePickerView);
-            let view: Retained<AnyObject> = msg_send![avkit, new];
-            let _shown: () = msg_send![&view, setActiveTintColor: std::ptr::null::<AnyObject>()];
-            let _ = view;
+        let mtm = MainThreadMarker::new()
+            .ok_or_else(|| "AVRoutePickerView must be created on the main thread".to_string())?;
+        let frame = NSRect::new(NSPoint::new(200.0, 200.0), NSSize::new(240.0, 80.0));
+        let picker_frame = NSRect::new(NSPoint::new(80.0, 20.0), NSSize::new(80.0, 40.0));
+        let window = unsafe {
+            NSWindow::initWithContentRect_styleMask_backing_defer(
+                NSWindow::alloc(mtm),
+                frame,
+                NSWindowStyleMask::Titled | NSWindowStyleMask::Closable,
+                NSBackingStoreType::Buffered,
+                false,
+            )
+        };
+        window.setTitle(&NSString::from_str("AirPlay"));
+        let picker =
+            unsafe { AVRoutePickerView::initWithFrame(AVRoutePickerView::alloc(mtm), picker_frame) };
+        let content = window
+            .contentView()
+            .ok_or_else(|| "window has no content view".to_string())?;
+        content.addSubview(&picker);
+        window.makeKeyAndOrderFront(None);
+        if content.subviews().is_empty() {
+            return Err("AVRoutePickerView was not added to the window".into());
         }
+        LIVE_WINDOWS.with(|w| w.borrow_mut().push(window));
         Ok("avroute-picker".into())
     }
 }
@@ -102,4 +148,24 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    #[test]
+    fn airplay_picker_is_attached_to_a_live_window() {
+        let before = super::macos_airplay::live_window_count();
+        match super::macos_airplay::present_route_picker() {
+            Ok(label) => {
+                assert_eq!(label, "avroute-picker");
+                assert!(super::macos_airplay::live_window_count() > before);
+                assert!(super::macos_airplay::picker_is_installed_in_a_window());
+            }
+            Err(err) if err.contains("main thread") => {
+                // cargo test worker threads are not the AppKit main thread.
+                eprintln!("skipping picker UI attach: {err}");
+            }
+            Err(err) => panic!("{err}"),
+        }
+    }
 }

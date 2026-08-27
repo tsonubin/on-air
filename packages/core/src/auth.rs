@@ -51,14 +51,18 @@ impl FromRequestParts<CoreState> for Paired {
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok());
+        let connect_loopback = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip().is_loopback())
+            .unwrap_or(true);
+        let peer_is_loopback = if state.require_auth {
+            false
+        } else {
+            connect_loopback
+        };
         let pairing = state.pairing.lock().unwrap();
-        if authorize(
-            path,
-            authorization,
-            !state.require_auth,
-            &pairing,
-            state.require_auth,
-        ) {
+        if authorize(path, authorization, peer_is_loopback, &pairing, false) {
             Ok(Paired)
         } else {
             Err(StatusCode::UNAUTHORIZED)

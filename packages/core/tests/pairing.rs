@@ -20,6 +20,19 @@ fn issued_token_is_required_for_control_paths() {
     assert!(authorize("/api/status", None, false, &pairing, true));
 }
 
+#[test]
+fn production_remote_clients_need_a_token_loopback_does_not() {
+    let pairing = PairingState::mock();
+    assert!(
+        authorize("/api/outputs", None, true, &pairing, false),
+        "loopback desktop UI must work without pairing"
+    );
+    assert!(
+        !authorize("/api/outputs", None, false, &pairing, false),
+        "remote clients must pair before control routes"
+    );
+}
+
 #[tokio::test]
 async fn pin_verify_issues_a_token_and_rejects_bad_pin() {
     let app = on_air_core::build_router(CoreState::new_mock().await);
