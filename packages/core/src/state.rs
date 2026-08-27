@@ -56,18 +56,29 @@ impl CoreState {
 
         let outputs = self.outputs.clone();
         tokio::spawn(async move {
-            let http = reqwest::Client::new();
+            let http = reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .expect("reqwest client");
             loop {
                 if let Ok(found) = search_once(Duration::from_secs(2)).await {
-                    let now = Instant::now();
-                    let mut registry = outputs.lock().await;
+                    let mut named = Vec::new();
+                    let mut seen = std::collections::HashSet::new();
                     for mut device in found {
+                        if !seen.insert(device.usn.clone()) {
+                            continue;
+                        }
                         if let Some(name) =
                             crate::sender::sonos::discovery::fetch_friendly_name(&http, &device.location)
                                 .await
                         {
                             device.friendly_name = name;
                         }
+                        named.push(device);
+                    }
+                    let now = Instant::now();
+                    let mut registry = outputs.lock().await;
+                    for device in named {
                         registry.upsert(device, now);
                     }
                     registry.expire_stale(now, DEVICE_TTL);
