@@ -1,0 +1,21 @@
+# Maintainer: Shay <tsonubin@users.noreply.github.com>
+pkgname=on-air-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="LAN audio streaming to AirPlay, Bluetooth, or Sonos (desktop GUI)"
+arch=('x86_64')
+url="https://github.com/tsonubin/on-air"
+license=('custom:unknown')
+depends=('gtk3' 'webkit2gtk-4.1' 'libayatana-appindicator' 'librsvg' 'alsa-lib' 'openssl' 'hicolor-icon-theme')
+makedepends=('binutils')
+provides=('on-air')
+conflicts=('on-air')
+options=('!strip' '!debug')
+source=("on-air-desktop_${pkgver}_amd64.deb::https://github.com/tsonubin/on-air/releases/download/v${pkgver}/on-air-desktop_${pkgver}_amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir"
+  ar x "on-air-desktop_${pkgver}_amd64.deb"
+  tar -xf data.tar.* -C "$pkgdir"
+}

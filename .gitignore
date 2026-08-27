@@ -15,6 +15,10 @@ e2e/**/playwright-report
 # Worktrees (SDD task workspaces)
 .worktrees/
 
+# Nix
+/result
+/result-*
+
 # React Native
 apps/mobile/ios/build
 apps/mobile/ios/Pods

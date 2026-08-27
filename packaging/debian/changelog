@@ -1,0 +1,5 @@
+on-air-core (0.1.0) UNRELEASED; urgency=medium
+
+  * Initial Debian package for the on-air-core serve example.
+
+ -- Shay <tsonubin@users.noreply.github.com>  Thu, 27 Aug 2026 12:00:00 +0000

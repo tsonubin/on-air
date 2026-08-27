@@ -1,0 +1,22 @@
+#!/usr/bin/make -f
+export DH_VERBOSE = 1
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	mkdir -p "$(CARGO_HOME)"
+
+override_dh_auto_build:
+	cargo build --release --locked --package on-air-core --example serve
+
+override_dh_auto_test:
+	cargo test --release --locked --package on-air-core
+
+override_dh_auto_install:
+	install -Dm755 target/release/examples/serve debian/on-air-core/usr/bin/on-air-core
+
+override_dh_auto_clean:
+	rm -rf "$(CARGO_HOME)"
+	dh_auto_clean

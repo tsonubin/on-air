@@ -1,0 +1,17 @@
+pkgbase = on-air-core
+	pkgdesc = LAN audio streaming core (HTTP/WS + AirPlay/Bluetooth/Sonos senders)
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/tsonubin/on-air
+	arch = x86_64
+	arch = aarch64
+	license = custom:unknown
+	makedepends = cargo
+	makedepends = pkgconf
+	makedepends = git
+	depends = alsa-lib
+	depends = openssl
+	source = on-air-core-0.1.0::git+https://github.com/tsonubin/on-air.git#tag=v0.1.0
+	sha256sums = SKIP
+
+pkgname = on-air-core

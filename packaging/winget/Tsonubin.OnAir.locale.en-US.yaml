@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
+PackageIdentifier: Tsonubin.OnAir
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: Tsonubin
+PublisherUrl: https://github.com/tsonubin
+PublisherSupportUrl: https://github.com/tsonubin/on-air/issues
+Author: Shay
+PackageName: on-air
+PackageUrl: https://github.com/tsonubin/on-air
+License: Unknown
+LicenseUrl: https://github.com/tsonubin/on-air
+Copyright: Copyright (c) 2026
+ShortDescription: LAN audio streaming to AirPlay, Bluetooth, or Sonos
+Description: >
+  on-air captures audio on your computer and sends it to one wireless output
+  at a time — AirPlay, Bluetooth, or Sonos. Control it from the desktop tray
+  app or a companion mobile remote on the same LAN. Discovery is mDNS; there
+  is no cloud remote.
+Moniker: on-air
+Tags:
+  - airplay
+  - audio
+  - bluetooth
+  - sonos
+  - streaming
+ReleaseNotesUrl: https://github.com/tsonubin/on-air/releases/tag/v0.1.0
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

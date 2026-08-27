@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
+PackageIdentifier: Tsonubin.OnAir
+PackageVersion: 0.1.0
+UpgradeBehavior: install
+ReleaseDate: 2026-08-27
+Installers:
+  - Architecture: x64
+    InstallerType: nullsoft
+    Scope: user
+    InstallerUrl: https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop_0.1.0_x64-setup.exe
+    # Filled by packaging/update-checksums.sh after a GitHub Release.
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallModes:
+      - silent
+      - silentWithProgress
+  - Architecture: x64
+    InstallerType: wix
+    Scope: machine
+    InstallerUrl: https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop_0.1.0_x64_en-US.msi
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    InstallModes:
+      - silent
+      - silentWithProgress
+ManifestType: installer
+ManifestVersion: 1.6.0

@@ -1,0 +1,34 @@
+# Maintainer: Shay <tsonubin@users.noreply.github.com>
+pkgname=on-air-core
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="LAN audio streaming core (HTTP/WS + AirPlay/Bluetooth/Sonos senders)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/tsonubin/on-air"
+license=('custom:unknown')
+depends=('alsa-lib' 'openssl')
+makedepends=('cargo' 'pkgconf' 'git')
+source=("${pkgname}-${pkgver}::git+https://github.com/tsonubin/on-air.git#tag=v${pkgver}")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --frozen --release --package on-air-core --example serve
+}
+
+check() {
+  cd "${pkgname}-${pkgver}"
+  cargo test --frozen --package on-air-core
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  install -Dm755 target/release/examples/serve "$pkgdir/usr/bin/on-air-core"
+}

@@ -1,0 +1,23 @@
+Source: on-air-core
+Section: sound
+Priority: optional
+Maintainer: Shay <tsonubin@users.noreply.github.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc,
+ pkg-config,
+ libasound2-dev,
+ libssl-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/tsonubin/on-air
+Rules-Requires-Root: no
+
+Package: on-air-core
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: LAN audio streaming core (AirPlay, Bluetooth, Sonos)
+ Headless on-air control plane: HTTP/WebSocket on port 47990, mDNS
+ advertisement, PIN pairing, and exclusive senders for AirPlay, Bluetooth,
+ and Sonos. Pair with the desktop GUI package (on-air-desktop .deb from
+ GitHub Releases) when you want a tray app.

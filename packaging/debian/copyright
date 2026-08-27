@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: on-air
+Upstream-Contact: https://github.com/tsonubin/on-air
+Source: https://github.com/tsonubin/on-air
+
+Files: *
+Copyright: 2026 Shay / tsonubin
+License: unspecified
+ Upstream has not published a LICENSE file. Do not upload this package to
+ Debian/Ubuntu archives until a license is declared.
