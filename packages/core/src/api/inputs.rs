@@ -46,8 +46,11 @@ pub async fn activate_input(
         .unwrap_or(target_rate);
 
     let (producer, consumer) = pipeline::new_ring_buffer(RING_BUFFER_CAPACITY_FRAMES);
-    let stream = match capture::start_capture(&device, producer) {
-        Ok(s) => s,
+    let started = tokio::task::spawn_blocking(move || capture::start_capture(&device, producer))
+        .await;
+    let stream = match started {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
     let processing = pipeline::spawn_processing_task(
