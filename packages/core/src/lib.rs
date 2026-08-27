@@ -34,6 +34,7 @@ pub fn build_router(state: CoreState) -> Router {
         .route("/stream/audio.wav", get(api::stream::stream_audio))
         .route("/api/inputs", get(api::inputs::list_inputs))
         .route("/api/inputs/active", post(api::inputs::activate_input))
+        .route("/api/outputs", get(api::outputs::list_outputs))
         .with_state(state)
 }
 

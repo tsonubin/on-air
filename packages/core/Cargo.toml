@@ -15,8 +15,8 @@ bytes = "1"
 ringbuf = "0.5.1"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 cpal = "0.18.2"
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
-reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"

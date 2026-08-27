@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub mod sonos;
+
 #[derive(Debug)]
 pub struct SenderError(pub String);
 
