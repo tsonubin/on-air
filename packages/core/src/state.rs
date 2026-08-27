@@ -1,10 +1,26 @@
 use crate::api::ws::WsEvent;
-use crate::sender::sonos::discovery::DeviceRegistry;
+use crate::pairing::PairingState;
+use crate::sender::bluetooth::{BluetoothDevice, MockBluetoothAdapter};
+use crate::sender::sonos::discovery::{DeviceRegistry, SonosDevice};
 use crate::sender::{AudioSender, SenderError};
 use bytes::Bytes;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogDevice {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ActiveOutput {
+    pub transport: String,
+    pub device_id: String,
+    pub device_name: String,
+}
 
 #[derive(Clone)]
 pub struct CoreState {
@@ -15,6 +31,15 @@ pub struct CoreState {
     pub capture: Arc<Mutex<Option<crate::pipeline::CaptureHandle>>>,
     pub outputs: Arc<Mutex<DeviceRegistry>>,
     pub ws_tx: broadcast::Sender<WsEvent>,
+    pub mock: bool,
+    pub mock_inputs: Arc<StdMutex<Vec<String>>>,
+    pub active_input: Arc<StdMutex<Option<String>>>,
+    pub airplay_outputs: Arc<StdMutex<Vec<CatalogDevice>>>,
+    pub bluetooth: Arc<MockBluetoothAdapter>,
+    pub pairing: Arc<StdMutex<PairingState>>,
+    pub active_output: Arc<StdMutex<Option<ActiveOutput>>>,
+    pub mock_log: Arc<tokio::sync::Mutex<Vec<String>>>,
+    pub owntone_base: Arc<StdMutex<String>>,
 }
 
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
@@ -31,7 +56,42 @@ impl CoreState {
             capture: Arc::new(Mutex::new(None)),
             outputs: Arc::new(Mutex::new(DeviceRegistry::new())),
             ws_tx,
+            mock: false,
+            mock_inputs: Arc::new(StdMutex::new(Vec::new())),
+            active_input: Arc::new(StdMutex::new(None)),
+            airplay_outputs: Arc::new(StdMutex::new(Vec::new())),
+            bluetooth: Arc::new(MockBluetoothAdapter::default()),
+            pairing: Arc::new(StdMutex::new(PairingState::new())),
+            active_output: Arc::new(StdMutex::new(None)),
+            mock_log: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            owntone_base: Arc::new(StdMutex::new("http://127.0.0.1:3689".into())),
         }
+    }
+
+    /// E2E / CI: fake inputs and transports, fixed pairing PIN, no hardware.
+    pub async fn new_mock() -> Self {
+        let mut state = Self::new();
+        state.mock = true;
+        state.pairing = Arc::new(StdMutex::new(PairingState::mock()));
+        *state.mock_inputs.lock().unwrap() = vec!["Mock Monitor".into()];
+        *state.airplay_outputs.lock().unwrap() = vec![CatalogDevice {
+            id: "ap-living".into(),
+            name: "Living Room AirPlay".into(),
+        }];
+        state.bluetooth = Arc::new(MockBluetoothAdapter::with_devices(vec![BluetoothDevice {
+            id: "bt-speaker".into(),
+            name: "Mock Bluetooth Speaker".into(),
+            paired: true,
+            connected: false,
+        }]));
+        let sonos = SonosDevice {
+            usn: "uuid:mock-sonos".into(),
+            location: "http://127.0.0.1:1400/xml/device_description.xml".into(),
+            ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            friendly_name: "Mock Sonos".into(),
+        };
+        state.outputs.lock().await.upsert(sonos, Instant::now());
+        state
     }
 
     pub async fn activate_sender(&self, new_sender: Box<dyn AudioSender>) -> Result<(), SenderError> {

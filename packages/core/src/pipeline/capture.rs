@@ -7,6 +7,19 @@ pub struct InputDeviceInfo {
     pub name: String,
 }
 
+/// Loopback-oriented capture backend for the current OS (M5).
+pub fn loopback_backend() -> &'static str {
+    if cfg!(target_os = "linux") {
+        "pipewire-monitor"
+    } else if cfg!(target_os = "macos") {
+        "coreaudio-screencapturekit"
+    } else if cfg!(target_os = "windows") {
+        "wasapi-loopback"
+    } else {
+        "cpal-default"
+    }
+}
+
 pub fn list_input_devices(host: &Host) -> Result<Vec<InputDeviceInfo>, cpal::Error> {
     let devices = host.input_devices()?;
     Ok(devices

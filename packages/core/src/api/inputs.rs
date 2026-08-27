@@ -14,13 +14,31 @@ pub struct InputsResponse {
     pub inputs: Vec<String>,
 }
 
-pub async fn list_inputs() -> Result<Json<InputsResponse>, StatusCode> {
+pub async fn list_inputs(State(state): State<CoreState>) -> Result<Json<InputsResponse>, StatusCode> {
+    if state.mock {
+        return Ok(Json(InputsResponse {
+            inputs: state.mock_inputs.lock().unwrap().clone(),
+        }));
+    }
     let host = cpal::default_host();
     let devices =
         capture::list_input_devices(&host).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(InputsResponse {
         inputs: devices.into_iter().map(|d| d.name).collect(),
     }))
+}
+
+#[derive(Serialize)]
+pub struct ActiveInputResponse {
+    pub name: Option<String>,
+    pub backend: &'static str,
+}
+
+pub async fn get_active_input(State(state): State<CoreState>) -> Json<ActiveInputResponse> {
+    Json(ActiveInputResponse {
+        name: state.active_input.lock().unwrap().clone(),
+        backend: capture::loopback_backend(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -32,6 +50,15 @@ pub async fn activate_input(
     State(state): State<CoreState>,
     Json(req): Json<ActivateInputRequest>,
 ) -> Response {
+    if state.mock {
+        let known = state.mock_inputs.lock().unwrap().iter().any(|n| n == &req.name);
+        if !known {
+            return (StatusCode::NOT_FOUND, "input device not found").into_response();
+        }
+        *state.active_input.lock().unwrap() = Some(req.name);
+        return StatusCode::NO_CONTENT.into_response();
+    }
+
     let host = cpal::default_host();
     let device = match capture::find_input_device(&host, &req.name) {
         Ok(Some(d)) => d,
@@ -73,6 +100,7 @@ pub async fn activate_input(
         let _ = tokio::task::spawn_blocking(move || old.stop()).await;
     }
     *guard = Some(new_handle);
+    *state.active_input.lock().unwrap() = Some(req.name);
 
     StatusCode::NO_CONTENT.into_response()
 }

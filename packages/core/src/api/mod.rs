@@ -1,6 +1,9 @@
+pub mod airplay;
+pub mod bluetooth;
 pub mod eq;
 pub mod inputs;
 pub mod outputs;
+pub mod pairing;
 pub mod sample_rate;
 pub mod stream;
 pub mod ws;

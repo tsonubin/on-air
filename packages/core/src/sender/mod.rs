@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+pub mod airplay;
+pub mod bluetooth;
 pub mod sonos;
 
 #[derive(Debug)]

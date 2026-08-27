@@ -16,6 +16,8 @@ ringbuf = "0.5.1"
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 cpal = "0.18.2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
+mdns-sd = "0.13"
+tower-http = { version = "0.6", features = ["cors"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
