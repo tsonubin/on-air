@@ -35,6 +35,11 @@ pub fn build_router(state: CoreState) -> Router {
         .route("/api/inputs", get(api::inputs::list_inputs))
         .route("/api/inputs/active", post(api::inputs::activate_input))
         .route("/api/outputs", get(api::outputs::list_outputs))
+        .route("/api/outputs/active", post(api::outputs::activate_output))
+        .route(
+            "/api/outputs/active/volume",
+            post(api::outputs::set_output_volume),
+        )
         .with_state(state)
 }
 
