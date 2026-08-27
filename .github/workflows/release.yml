@@ -54,11 +54,11 @@ jobs:
             os_name: windows
             arch_name: aarch64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # version comes from package.json "packageManager"; do not also pin it here
       # (pnpm/action-setup errors with "Multiple versions of pnpm specified").
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -180,21 +180,44 @@ jobs:
           fi
           cp "$core_src" "$core_dest"
           ls -la dist-extra
-      # Upload extras without PATCHing release metadata (softprops "update a
-      # release" fails for GITHUB_TOKEN on workflow_dispatch).
-      - name: Upload extra artifacts
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: gh release upload "${{ steps.ver.outputs.tag }}" dist-extra/* --clobber
+      # Don't PATCH the GitHub Release from matrix jobs (GITHUB_TOKEN cannot
+      # update-a-release on workflow_dispatch). Stage extras as build artifacts
+      # and upload them in a single follow-up job.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extra-${{ matrix.name }}
+          path: dist-extra/*
+          if-no-files-found: error
+          retention-days: 3
 
-  checksums:
-    name: publish SHA256SUMS
+  extras:
+    name: upload extras
     needs: publish
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: extra-*
+          merge-multiple: true
+          path: dist-extra
+      - name: Upload extras to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ls -la dist-extra
+          version=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          gh release upload "v${version}" dist-extra/* --clobber
+
+  checksums:
+    name: publish SHA256SUMS
+    needs: [publish, extras]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
       - name: Hash release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
