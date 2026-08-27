@@ -1,5 +1,5 @@
-use axum::routing::post;
-use axum::{routing::get, Json, Router};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::Serialize;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -39,6 +39,11 @@ pub fn build_router(state: CoreState) -> Router {
         .route(
             "/api/outputs/active/volume",
             post(api::outputs::set_output_volume),
+        )
+        .route("/api/eq", get(api::eq::get_eq).put(api::eq::set_eq))
+        .route(
+            "/api/sample-rate",
+            get(api::sample_rate::get_sample_rate).put(api::sample_rate::set_sample_rate),
         )
         .with_state(state)
 }
