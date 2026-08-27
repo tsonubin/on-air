@@ -21,7 +21,17 @@ async fn ws_forwards_published_events_as_json() {
     let (mut ws_stream, _) = connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
 
     let event = WsEvent::LevelMeter { rms: 0.5, peak: 0.9 };
-    let _ = ws_tx.send(event.clone());
+    // keep publishing until a subscriber (the websocket handler) exists
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if ws_tx.send(event.clone()).is_ok() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("subscriber appeared before timeout");
 
     let msg = tokio::time::timeout(std::time::Duration::from_secs(2), ws_stream.next())
         .await

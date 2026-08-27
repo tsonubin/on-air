@@ -33,12 +33,26 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<CoreState>) ->
 
 async fn handle_socket(mut socket: WebSocket, state: CoreState) {
     let mut rx = state.ws_tx.subscribe();
-    while let Ok(event) = rx.recv().await {
-        let Ok(text) = serde_json::to_string(&event) else {
-            continue;
-        };
-        if socket.send(Message::Text(text)).await.is_err() {
-            break;
+    loop {
+        tokio::select! {
+            event = rx.recv() => {
+                let event = match event {
+                    Ok(event) => event,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                let Ok(text) = serde_json::to_string(&event) else { continue };
+                if socket.send(Message::Text(text)).await.is_err() {
+                    break;
+                }
+            }
+            msg = socket.recv() => {
+                match msg {
+                    None | Some(Err(_)) => break,
+                    Some(Ok(Message::Close(_))) => break,
+                    Some(Ok(_)) => {}
+                }
+            }
         }
     }
 }
