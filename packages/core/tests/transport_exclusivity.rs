@@ -59,12 +59,12 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
     }]));
 
     let state = CoreState::new();
-    let sonos = SonosDevice {
-        usn: "uuid:s".into(),
-        location: format!("http://{soap_addr}/xml/device_description.xml"),
-        ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-        friendly_name: "Sonos".into(),
-    };
+    let sonos = SonosDevice::discovered(
+        "uuid:s",
+        format!("http://{soap_addr}/xml/device_description.xml"),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        "Sonos",
+    );
 
     state
         .activate_sender(Box::new(SonosSender::new(

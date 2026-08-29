@@ -5,7 +5,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use cpal::traits::DeviceTrait;
 use serde::{Deserialize, Serialize};
 
 const RING_BUFFER_CAPACITY_FRAMES: usize = 1024 * 8;
@@ -61,48 +60,25 @@ pub async fn activate_input(
         return StatusCode::NO_CONTENT.into_response();
     }
 
-    let host = cpal::default_host();
-    let device = if req.name == "__loopback__" {
+    let source_name = if req.name == "__loopback__" {
+        let host = cpal::default_host();
         match capture::find_preferred_loopback(&host) {
-            Ok(Some(d)) => d,
-            Ok(None) => return (StatusCode::NOT_FOUND, "no loopback capture device").into_response(),
+            Ok(Some(d)) => d.to_string(),
+            Ok(None) => match capture::preferred_pulse_monitor() {
+                Some(name) => name,
+                None => {
+                    return (StatusCode::NOT_FOUND, "no loopback capture device").into_response()
+                }
+            },
             Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         }
     } else {
-        match capture::find_input_device(&host, &req.name) {
-            Ok(Some(d)) => d,
-            Ok(None) => return (StatusCode::NOT_FOUND, "input device not found").into_response(),
-            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-        }
+        req.name.clone()
     };
 
-    let target_rate = *state.target_sample_rate_hz.lock().unwrap();
-    let input_rate = device
-        .default_input_config()
-        .map(|c| c.sample_rate())
-        .unwrap_or(target_rate);
-
-    let (producer, consumer) = pipeline::new_ring_buffer(RING_BUFFER_CAPACITY_FRAMES);
-    let started = tokio::task::spawn_blocking(move || capture::start_capture(&device, producer))
-        .await;
-    let stream = match started {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
-    let processing = pipeline::spawn_processing_task(
-        consumer,
-        input_rate,
-        target_rate,
-        state.eq_gains_db.clone(),
-        state.audio_tx.clone(),
-        state.ws_tx.clone(),
-    );
-
-    let new_handle = pipeline::CaptureHandle {
-        stream,
-        processing,
-        device_name: req.name.clone(),
+    let new_handle = match start_named_capture(&state, source_name.clone()).await {
+        Ok(handle) => handle,
+        Err((status, msg)) => return (status, msg).into_response(),
     };
 
     let mut guard = state.capture.lock().await;
@@ -110,7 +86,47 @@ pub async fn activate_input(
         let _ = tokio::task::spawn_blocking(move || old.stop()).await;
     }
     *guard = Some(new_handle);
-    *state.active_input.lock().unwrap() = Some(req.name);
+    *state.active_input.lock().unwrap() = Some(source_name);
 
     StatusCode::NO_CONTENT.into_response()
+}
+
+async fn start_named_capture(
+    state: &CoreState,
+    name: String,
+) -> Result<pipeline::CaptureHandle, (StatusCode, String)> {
+    let target_rate = *state.target_sample_rate_hz.lock().unwrap();
+    let (producer, consumer) = pipeline::new_ring_buffer(RING_BUFFER_CAPACITY_FRAMES);
+    let eq = state.eq_gains_db.clone();
+    let audio_tx = state.audio_tx.clone();
+    let ws_tx = state.ws_tx.clone();
+    let label = name.clone();
+
+    if capture::is_pulse_monitor_name(&name) {
+        let src = name.clone();
+        let started = tokio::task::spawn_blocking(move || {
+            capture::start_pulse_monitor(&src, producer, Some(target_rate))
+        })
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let (pulse, input_rate) = started.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let processing =
+            pipeline::spawn_processing_task(consumer, input_rate, target_rate, eq, audio_tx, ws_tx);
+        return Ok(pipeline::CaptureHandle::pulse(pulse, processing, label));
+    }
+
+    let host = cpal::default_host();
+    let device = capture::find_input_device(&host, &name)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "input device not found".into()))?;
+    let started = tokio::task::spawn_blocking(move || {
+        capture::start_capture_at(&device, producer, Some(target_rate))
+    })
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let (stream, input_rate) =
+        started.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let processing =
+        pipeline::spawn_processing_task(consumer, input_rate, target_rate, eq, audio_tx, ws_tx);
+    Ok(pipeline::CaptureHandle::cpal(stream, processing, label))
 }

@@ -41,5 +41,34 @@ pub async fn pair(
     if req.pin.is_empty() {
         return StatusCode::BAD_REQUEST;
     }
-    StatusCode::NO_CONTENT
+    if state.mock {
+        if let Some(device) = state
+            .airplay_outputs
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|d| d.id == req.device_id)
+        {
+            device.paired = true;
+            device.needs_pair = false;
+        }
+        return StatusCode::NO_CONTENT;
+    }
+    let base = state.owntone_base.lock().unwrap().clone();
+    match airplay::pair_owntone(&base, &req.device_id, &req.pin).await {
+        Ok(()) => {
+            if let Some(device) = state
+                .airplay_outputs
+                .lock()
+                .unwrap()
+                .iter_mut()
+                .find(|d| d.id == req.device_id)
+            {
+                device.paired = true;
+                device.needs_pair = false;
+            }
+            StatusCode::NO_CONTENT
+        }
+        Err(_) => StatusCode::BAD_GATEWAY,
+    }
 }

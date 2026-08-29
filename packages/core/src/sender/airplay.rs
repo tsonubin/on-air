@@ -66,6 +66,10 @@ impl AudioSender for AirPlaySender {
     fn name(&self) -> &str {
         &self.name
     }
+
+    fn transport(&self) -> &'static str {
+        "airplay"
+    }
 }
 
 pub fn platform_mode() -> &'static str {
@@ -88,6 +92,12 @@ struct OwnToneOutput {
     id: serde_json::Value,
     #[serde(default)]
     name: String,
+    #[serde(default)]
+    needs_auth: bool,
+    #[serde(default)]
+    has_password: bool,
+    #[serde(default)]
+    r#type: String,
 }
 
 pub async fn fetch_owntone_outputs(base: &str) -> Result<Vec<crate::state::CatalogDevice>, SenderError> {
@@ -109,7 +119,43 @@ pub async fn fetch_owntone_outputs(base: &str) -> Result<Vec<crate::state::Catal
                 other => other.to_string(),
             },
             name: o.name,
+            needs_pair: o.needs_auth || o.has_password,
+            paired: !(o.needs_auth || o.has_password),
+            kind: "solo",
+            member_count: 1,
         })
         .filter(|d| !d.name.is_empty())
         .collect())
+}
+
+pub async fn pair_owntone(base: &str, device_id: &str, pin: &str) -> Result<(), SenderError> {
+    let http = crate::sender::sonos::soap::http_client();
+    let base = base.trim_end_matches('/');
+    let pin_body = serde_json::json!({ "pin": pin, "pairing_code": pin });
+    for path in ["/api/pairing", "/api/pair"] {
+        let response = http
+            .post(format!("{base}{path}"))
+            .json(&pin_body)
+            .send()
+            .await;
+        if let Ok(r) = response {
+            if r.status().is_success() {
+                return Ok(());
+            }
+        }
+    }
+    let selected = http
+        .put(format!("{base}/api/outputs/{device_id}"))
+        .json(&serde_json::json!({ "selected": true, "pin": pin }))
+        .send()
+        .await
+        .map_err(|e| SenderError(e.to_string()))?;
+    if selected.status().is_success() {
+        Ok(())
+    } else {
+        Err(SenderError(format!(
+            "AirPlay pair failed: {}",
+            selected.status()
+        )))
+    }
 }

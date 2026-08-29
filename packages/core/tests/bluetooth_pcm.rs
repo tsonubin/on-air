@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use on_air_core::sender::bluetooth::{
-    BluetoothAdapter, BluetoothDevice, BluetoothSender, MockBluetoothAdapter, RecordingPcmSink,
+    looks_like_a2dp_sink, parse_pactl_list_sinks, BluetoothAdapter, BluetoothDevice,
+    BluetoothSender, MockBluetoothAdapter, RecordingPcmSink,
 };
 use on_air_core::sender::AudioSender;
 use std::sync::Arc;
@@ -30,4 +31,22 @@ async fn bluetooth_sender_pumps_pipeline_pcm_into_the_sink() {
         sink.byte_count()
     );
     sender.stop().await.unwrap();
+}
+
+#[test]
+fn pactl_listing_keeps_only_bluez_sinks() {
+    let text = "\
+Sink #56
+\tName: alsa_output.pci-0000_00_1b.0.analog-stereo
+\tDescription: Built-in Audio Analog Stereo
+Sink #706
+\tName: bluez_output.58_EA_1F_87_56_45.1
+\tDescription: Xiaomi Speaker Mini-8230
+";
+    let devices = parse_pactl_list_sinks(text);
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].id, "bluez_output.58_EA_1F_87_56_45.1");
+    assert_eq!(devices[0].name, "Xiaomi Speaker Mini-8230");
+    assert!(!looks_like_a2dp_sink("HDA Intel HDMI, HDMI 0"));
+    assert!(looks_like_a2dp_sink("bluez_output.aa.1"));
 }

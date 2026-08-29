@@ -39,12 +39,12 @@ async fn start_fake_sonos() -> (std::net::SocketAddr, Captured) {
 #[tokio::test]
 async fn start_calls_set_uri_then_play_stop_calls_stop_set_volume_calls_set_volume() {
     let (addr, captured) = start_fake_sonos().await;
-    let device = SonosDevice {
-        usn: "uuid:fake".into(),
-        location: format!("http://{addr}/xml/device_description.xml"),
-        ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
-        friendly_name: "Fake Speaker".into(),
-    };
+    let device = SonosDevice::discovered(
+        "uuid:fake",
+        format!("http://{addr}/xml/device_description.xml"),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        "Fake Speaker",
+    );
 
     let mut sender = SonosSender::new(
         device,

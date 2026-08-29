@@ -16,6 +16,10 @@ export interface OutputInfo {
   id: string;
   name: string;
   transport: "sonos" | "airplay" | "bluetooth" | string;
+  kind?: "solo" | "pair" | "group" | string;
+  member_count?: number;
+  needs_pair?: boolean;
+  paired?: boolean;
 }
 
 export interface OutputsResponse {
@@ -32,8 +36,16 @@ export interface EqResponse {
   gains_db: [number, number, number, number, number];
 }
 
+export interface SampleRateSide {
+  sample_rate_hz: number;
+  supported_hz: number[];
+  transport?: string;
+}
+
 export interface SampleRateResponse {
   sample_rate_hz: number;
+  input: SampleRateSide;
+  output: SampleRateSide;
 }
 
 export interface PinResponse {

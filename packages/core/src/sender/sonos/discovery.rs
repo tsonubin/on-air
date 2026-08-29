@@ -15,6 +15,31 @@ pub struct SonosDevice {
     pub location: String,
     pub ip: IpAddr,
     pub friendly_name: String,
+    /// False for bonded satellites (Invisible=1) that must not be activated alone.
+    pub playable: bool,
+    /// Speakers in this ZonePlayer group (2 = stereo pair).
+    pub member_count: u8,
+}
+
+impl SonosDevice {
+    pub fn discovered(
+        usn: impl Into<String>,
+        location: impl Into<String>,
+        ip: IpAddr,
+        friendly_name: impl Into<String>,
+    ) -> Self {
+        let usn = canonical_usn(&usn.into());
+        let location = location.into();
+        let ip = ip_from_http_location(&location).unwrap_or(ip);
+        SonosDevice {
+            usn,
+            location,
+            ip,
+            friendly_name: friendly_name.into(),
+            playable: true,
+            member_count: 1,
+        }
+    }
 }
 
 impl SonosDevice {
@@ -56,7 +81,180 @@ impl DeviceRegistry {
     }
 
     pub fn list(&self) -> Vec<SonosDevice> {
-        self.devices.values().map(|(d, _)| d.clone()).collect()
+        self.devices
+            .values()
+            .filter(|(d, _)| d.playable)
+            .map(|(d, _)| d.clone())
+            .collect()
+    }
+
+    pub fn apply_zone_groups(&mut self, groups: &[ZoneGroup]) {
+        if groups.is_empty() {
+            return;
+        }
+        for (device, _) in self.devices.values_mut() {
+            let key = rincon_key(&device.usn);
+            let mut matched = false;
+            for group in groups {
+                if rincon_key(&group.coordinator) == key {
+                    device.playable = true;
+                    device.member_count = group.members.len().max(1) as u8;
+                    if let Some(name) = group
+                        .members
+                        .iter()
+                        .find(|m| rincon_key(&m.uuid) == key)
+                        .map(|m| m.name.clone())
+                    {
+                        if !name.is_empty() {
+                            device.friendly_name = name;
+                        }
+                    }
+                    matched = true;
+                    break;
+                }
+                if group.members.iter().any(|m| rincon_key(&m.uuid) == key) {
+                    device.playable = false;
+                    device.member_count = 1;
+                    matched = true;
+                    break;
+                }
+            }
+            if !matched {
+                device.playable = true;
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoneGroup {
+    pub coordinator: String,
+    pub members: Vec<ZoneMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ZoneMember {
+    pub uuid: String,
+    pub name: String,
+    pub invisible: bool,
+}
+
+/// Stable ZonePlayer id: `RINCON_<12-hex MAC>`, ignoring USN URN suffixes
+/// and the trailing instance digits (`01400`) that topology XML includes
+/// but some catalogs omit.
+pub fn rincon_key(usn: &str) -> String {
+    let raw = usn
+        .trim_start_matches("uuid:")
+        .split("::")
+        .next()
+        .unwrap_or(usn);
+    let raw = raw.split(':').next().unwrap_or(raw);
+    let upper = raw.to_ascii_uppercase();
+    if let Some(rest) = upper.strip_prefix("RINCON_") {
+        let mac: String = rest.chars().filter(|c| c.is_ascii_hexdigit()).take(12).collect();
+        if mac.len() == 12 {
+            return format!("RINCON_{mac}");
+        }
+    }
+    raw.to_string()
+}
+
+/// One registry key per speaker so SSDP (`uuid:RINCON_…::urn:…`) and mDNS
+/// (`uuid:RINCON_…01400`) collapse.
+pub fn canonical_usn(usn: &str) -> String {
+    let key = rincon_key(usn);
+    if key.starts_with("RINCON_") {
+        format!("uuid:{key}")
+    } else {
+        usn.split("::").next().unwrap_or(usn).to_string()
+    }
+}
+
+pub fn ip_from_http_location(location: &str) -> Option<IpAddr> {
+    let rest = location.strip_prefix("http://")?;
+    let host = rest.split(['/', ':']).next()?;
+    host.parse().ok()
+}
+
+/// SOAP always goes to the IPv4 in `location`; mDNS may list IPv6 first.
+pub fn soap_ip(device: &SonosDevice) -> IpAddr {
+    ip_from_http_location(&device.location).unwrap_or(device.ip)
+}
+
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    let needle = format!("{name}=\"");
+    let start = tag.find(&needle)? + needle.len();
+    let end = tag[start..].find('"')? + start;
+    Some(&tag[start..end])
+}
+
+/// Parse GetZoneGroupState XML (optionally SOAP-escaped).
+pub fn parse_zone_groups(xml: &str) -> Vec<ZoneGroup> {
+    let xml = xml
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&");
+    let mut groups = Vec::new();
+    let mut rest = xml.as_str();
+    while let Some(start) = rest.find("<ZoneGroup ") {
+        let after = &rest[start..];
+        let Some(end) = after.find("</ZoneGroup>") else {
+            break;
+        };
+        let block = &after[..end];
+        let coordinator = attr(block, "Coordinator").unwrap_or("").to_string();
+        let mut members = Vec::new();
+        let mut cursor = block;
+        while let Some(mstart) = cursor.find("<ZoneGroupMember ") {
+            let tag_end = cursor[mstart..].find('>').map(|i| mstart + i);
+            let Some(tag_end) = tag_end else { break };
+            let tag = &cursor[mstart..tag_end];
+            members.push(ZoneMember {
+                uuid: attr(tag, "UUID").unwrap_or("").to_string(),
+                name: attr(tag, "ZoneName").unwrap_or("").to_string(),
+                invisible: attr(tag, "Invisible") == Some("1"),
+            });
+            cursor = &cursor[tag_end..];
+        }
+        if !coordinator.is_empty() && !members.is_empty() {
+            groups.push(ZoneGroup {
+                coordinator,
+                members,
+            });
+        }
+        rest = &after[end + 12..];
+    }
+    groups
+}
+
+pub async fn fetch_zone_groups(client: &reqwest::Client, ip: IpAddr) -> Option<Vec<ZoneGroup>> {
+    let url = format!("http://{ip}:1400/ZoneGroupTopology/Control");
+    let body = r#"<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:GetZoneGroupState xmlns:u="urn:schemas-upnp-org:service:ZoneGroupTopology:1"></u:GetZoneGroupState>
+  </s:Body>
+</s:Envelope>"#;
+    let text = client
+        .post(&url)
+        .header("Content-Type", r#"text/xml; charset="utf-8""#)
+        .header(
+            "SOAPACTION",
+            r#""urn:schemas-upnp-org:service:ZoneGroupTopology:1#GetZoneGroupState""#,
+        )
+        .body(body)
+        .send()
+        .await
+        .ok()?
+        .text()
+        .await
+        .ok()?;
+    let groups = parse_zone_groups(&text);
+    if groups.is_empty() {
+        None
+    } else {
+        Some(groups)
     }
 }
 
@@ -85,12 +283,12 @@ fn parse_ssdp_response(data: &[u8], source_ip: IpAddr) -> Option<SonosDevice> {
             _ => {}
         }
     }
-    Some(SonosDevice {
-        usn: usn?,
-        location: location.clone()?,
-        ip: source_ip,
-        friendly_name: source_ip.to_string(),
-    })
+    Some(SonosDevice::discovered(
+        usn?,
+        location.clone()?,
+        source_ip,
+        source_ip.to_string(),
+    ))
 }
 
 async fn search_to(target: SocketAddr, duration: Duration) -> std::io::Result<Vec<SonosDevice>> {
@@ -122,6 +320,65 @@ async fn search_to(target: SocketAddr, duration: Duration) -> std::io::Result<Ve
 pub async fn search_once(duration: Duration) -> std::io::Result<Vec<SonosDevice>> {
     let target: SocketAddr = SSDP_MULTICAST_ADDR.parse().expect("valid multicast addr");
     search_to(target, duration).await
+}
+
+pub const SONOS_MDNS_TYPE: &str = "_sonos._tcp.local.";
+
+/// Build a registry entry from mDNS TXT (`uuid`, `location`) plus an address.
+pub fn device_from_mdns_fields(uuid: &str, location: &str, ip: IpAddr) -> SonosDevice {
+    let usn = if uuid.is_empty() {
+        location.to_string()
+    } else if uuid.starts_with("uuid:") {
+        uuid.to_string()
+    } else {
+        format!("uuid:{uuid}")
+    };
+    SonosDevice::discovered(usn, location, ip, ip.to_string())
+}
+
+fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<SonosDevice> {
+    let location = info.get_property_val_str("location")?.to_string();
+    let uuid = info.get_property_val_str("uuid").unwrap_or("");
+    let ip = info
+        .get_addresses()
+        .iter()
+        .copied()
+        .find(|ip| ip.is_ipv4())
+        .or_else(|| ip_from_http_location(&location))
+        .or_else(|| info.get_addresses().iter().copied().next())?;
+    Some(device_from_mdns_fields(uuid, &location, ip))
+}
+
+fn search_mdns_blocking(duration: Duration) -> Vec<SonosDevice> {
+    let Ok(mdns) = mdns_sd::ServiceDaemon::new() else {
+        return Vec::new();
+    };
+    let Ok(rx) = mdns.browse(SONOS_MDNS_TYPE) else {
+        return Vec::new();
+    };
+    let deadline = Instant::now() + duration;
+    let mut found = Vec::new();
+    while Instant::now() < deadline {
+        let wait = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(wait) {
+            Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
+                if let Some(device) = device_from_mdns_info(&info) {
+                    found.push(device);
+                }
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = mdns.shutdown();
+    found
+}
+
+/// Browse `_sonos._tcp` — works on LANs where SSDP multicast is filtered.
+pub async fn search_mdns(duration: Duration) -> Vec<SonosDevice> {
+    tokio::task::spawn_blocking(move || search_mdns_blocking(duration))
+        .await
+        .unwrap_or_default()
 }
 
 /// Test seam: same protocol, but unicast to an arbitrary address instead of

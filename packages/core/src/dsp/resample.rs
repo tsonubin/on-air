@@ -49,3 +49,53 @@ impl MonoResampler {
         output_data.remove(0).into_iter().take(frames_written).collect()
     }
 }
+
+/// Buffers arbitrary-sized mono chunks into `MonoResampler`'s fixed input size.
+/// Same-rate I/O is a lossless passthrough (no rubato delay).
+pub struct StreamingMonoResampler {
+    input_rate_hz: u32,
+    output_rate_hz: u32,
+    inner: Option<MonoResampler>,
+    pending: Vec<f32>,
+}
+
+impl StreamingMonoResampler {
+    pub fn new(input_rate_hz: u32, output_rate_hz: u32) -> Self {
+        let inner = if input_rate_hz == output_rate_hz {
+            None
+        } else {
+            Some(MonoResampler::new(input_rate_hz, output_rate_hz))
+        };
+        StreamingMonoResampler {
+            input_rate_hz,
+            output_rate_hz,
+            inner,
+            pending: Vec::new(),
+        }
+    }
+
+    pub fn input_rate_hz(&self) -> u32 {
+        self.input_rate_hz
+    }
+
+    pub fn output_rate_hz(&self) -> u32 {
+        self.output_rate_hz
+    }
+
+    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
+        let Some(resampler) = self.inner.as_mut() else {
+            return input.to_vec();
+        };
+        self.pending.extend_from_slice(input);
+        let mut output = Vec::new();
+        loop {
+            let need = resampler.input_frames_next();
+            if self.pending.len() < need {
+                break;
+            }
+            let chunk: Vec<f32> = self.pending.drain(..need).collect();
+            output.extend(resampler.process(&chunk));
+        }
+        output
+    }
+}

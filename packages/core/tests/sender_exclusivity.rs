@@ -1,3 +1,4 @@
+use on_air_core::api::ws::WsEvent;
 use on_air_core::sender::{AudioSender, NullSender, SenderError};
 use on_air_core::state::CoreState;
 use std::sync::Arc;
@@ -27,6 +28,10 @@ impl AudioSender for FailingStopSender {
     fn name(&self) -> &str {
         &self.name
     }
+
+    fn transport(&self) -> &'static str {
+        "null"
+    }
 }
 
 #[tokio::test]
@@ -45,6 +50,26 @@ async fn activating_new_sender_stops_previous_first() {
 
     let entries = log.lock().await.clone();
     assert_eq!(entries, vec!["A:start", "A:stop", "B:start"]);
+}
+
+#[tokio::test]
+async fn activate_ws_event_uses_the_sender_transport() {
+    let state = CoreState::new();
+    let mut rx = state.ws_tx.subscribe();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    state
+        .activate_sender(Box::new(NullSender::new("BT", log)))
+        .await
+        .unwrap();
+    match rx.try_recv() {
+        Ok(WsEvent::OutputStateChanged {
+            transport, active, ..
+        }) => {
+            assert_eq!(transport, "null");
+            assert!(active);
+        }
+        other => panic!("expected output_state_changed, got {other:?}"),
+    }
 }
 
 #[tokio::test]

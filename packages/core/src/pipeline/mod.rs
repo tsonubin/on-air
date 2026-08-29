@@ -29,13 +29,7 @@ impl ProcessingTaskHandle {
 }
 
 fn f32_to_le_i16_bytes(samples: &[f32]) -> Bytes {
-    let mut buf = Vec::with_capacity(samples.len() * 2);
-    for &s in samples {
-        let clamped = s.clamp(-1.0, 1.0);
-        let sample_i16 = (clamped * i16::MAX as f32) as i16;
-        buf.extend_from_slice(&sample_i16.to_le_bytes());
-    }
-    Bytes::from(buf)
+    Bytes::from(crate::dsp::bridge::f32_to_l16_le(samples))
 }
 
 pub fn spawn_processing_task(
@@ -87,18 +81,45 @@ pub fn spawn_processing_task(
 }
 
 pub mod capture;
+pub mod local_sink;
 
 pub struct CaptureHandle {
-    pub stream: cpal::Stream,
-    pub processing: ProcessingTaskHandle,
+    _stream: Option<cpal::Stream>,
+    pulse: Option<capture::PulseMonitorCapture>,
+    processing: ProcessingTaskHandle,
     pub device_name: String,
 }
 
 impl CaptureHandle {
+    pub fn cpal(stream: cpal::Stream, processing: ProcessingTaskHandle, device_name: String) -> Self {
+        CaptureHandle {
+            _stream: Some(stream),
+            pulse: None,
+            processing,
+            device_name,
+        }
+    }
+
+    pub fn pulse(
+        pulse: capture::PulseMonitorCapture,
+        processing: ProcessingTaskHandle,
+        device_name: String,
+    ) -> Self {
+        CaptureHandle {
+            _stream: None,
+            pulse: Some(pulse),
+            processing,
+            device_name,
+        }
+    }
+
     /// Blocking: stops the capture stream and joins the processing thread.
     /// From async code, call this inside `tokio::task::spawn_blocking`.
     pub fn stop(self) {
-        drop(self.stream);
+        drop(self._stream);
+        if let Some(pulse) = self.pulse {
+            pulse.stop();
+        }
         self.processing.stop();
     }
 }

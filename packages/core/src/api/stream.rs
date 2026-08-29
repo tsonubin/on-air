@@ -1,7 +1,9 @@
+use crate::dsp::bridge::RateBridge;
 use crate::state::CoreState;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::header;
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use tokio_stream::wrappers::BroadcastStream;
@@ -32,14 +34,38 @@ fn wav_header(sample_rate: u32) -> Bytes {
     Bytes::from(h)
 }
 
+pub fn sonos_radio_is_live(state: &CoreState) -> bool {
+    state
+        .active_output
+        .lock()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|o| o.transport == "sonos")
+}
+
 pub async fn stream_audio(State(state): State<CoreState>) -> Response {
+    if !sonos_radio_is_live(&state) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let rx = state.audio_tx.subscribe();
-    let sample_rate = *state.target_sample_rate_hz.lock().unwrap();
-    let header = wav_header(sample_rate);
-    // Lagged items are skipped so a slow Sonos HTTP client does not tear down
-    // the live PCM body (same failure mode previously fixed on /api/ws).
-    let pcm = BroadcastStream::new(rx).filter_map(|item| {
-        item.ok().map(Ok::<bytes::Bytes, std::convert::Infallible>)
+    let pipeline_hz = *state.target_sample_rate_hz.lock().unwrap();
+    let output_hz = *state.output_sample_rate_hz.lock().unwrap();
+    let header = wav_header(output_hz);
+    let pcm = BroadcastStream::new(rx).filter_map({
+        let mut bridge = RateBridge::new(pipeline_hz, output_hz, 1);
+        move |item| {
+            let Ok(chunk) = item else {
+                return None;
+            };
+            if pipeline_hz == output_hz {
+                return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
+            }
+            let resampled = bridge.process_l16_mono_to_l16(&chunk);
+            if resampled.is_empty() {
+                return None;
+            }
+            Some(Ok(Bytes::from(resampled)))
+        }
     });
     let body = Body::from_stream(tokio_stream::once(Ok(header)).chain(pcm));
 

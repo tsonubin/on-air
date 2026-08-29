@@ -12,6 +12,7 @@ pub mod mdns;
 pub mod pairing;
 pub mod pipeline;
 pub mod sender;
+pub mod session;
 pub mod state;
 
 use state::CoreState;

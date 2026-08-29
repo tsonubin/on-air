@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub mod airplay;
+pub mod airplay_mdns;
 pub mod bluetooth;
 pub mod sonos;
 
@@ -22,6 +23,7 @@ pub trait AudioSender: Send + Sync {
     async fn stop(&mut self) -> Result<(), SenderError>;
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError>;
     fn name(&self) -> &str;
+    fn transport(&self) -> &'static str;
 }
 
 /// Test/CI fake — logs every call instead of touching real hardware or network.
@@ -61,5 +63,9 @@ impl AudioSender for NullSender {
 
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn transport(&self) -> &'static str {
+        "null"
     }
 }

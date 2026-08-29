@@ -29,6 +29,10 @@ impl AudioSender for SonosSender {
             .set_av_transport_uri(&self.device.av_transport_control_url(), &self.stream_url)
             .await
             .map_err(|e| SenderError(e.to_string()))?;
+        // Sonos closes the HTTP connection after each SOAP action
+        // (`Connection: close`). A tiny pause also lets SetAVTransportURI
+        // settle before Play, which otherwise races on S2.
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         self.client
             .play(&self.device.av_transport_control_url())
             .await
@@ -51,5 +55,9 @@ impl AudioSender for SonosSender {
 
     fn name(&self) -> &str {
         &self.device.friendly_name
+    }
+
+    fn transport(&self) -> &'static str {
+        "sonos"
     }
 }
