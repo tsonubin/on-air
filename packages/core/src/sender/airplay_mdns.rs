@@ -16,6 +16,7 @@ pub struct AirPlayDevice {
     pub gid: String,
     pub is_leader: bool,
     pub in_group: bool,
+    pub password: bool,
     pub ip: IpAddr,
 }
 
@@ -31,9 +32,8 @@ pub fn skip_airplay_model(model: &str, manufacturer: &str) -> bool {
         || model.starts_with("mac")
 }
 
-pub fn needs_homekit_pair(model: &str) -> bool {
-    let m = model.to_ascii_lowercase();
-    m.starts_with("audioaccessory") || m.contains("homepod")
+pub fn airplay_password_required(pw: &str) -> bool {
+    matches!(pw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")
 }
 
 /// Collapse a HomePod stereo pair to the group leader; hide the satellite.
@@ -67,8 +67,8 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
             out.push(CatalogDevice {
                 id: leader.id,
                 name,
-                needs_pair: needs_homekit_pair(&leader.model),
-                paired: !needs_homekit_pair(&leader.model),
+                needs_pair: leader.password,
+                paired: !leader.password,
                 kind: "pair",
                 member_count: members.len().min(255) as u8,
             });
@@ -84,12 +84,11 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
 }
 
 fn to_catalog(device: AirPlayDevice, member_count: u8, kind: &'static str) -> CatalogDevice {
-    let needs_pair = needs_homekit_pair(&device.model);
     CatalogDevice {
         id: device.id,
         name: device.name,
-        needs_pair,
-        paired: !needs_pair,
+        needs_pair: device.password,
+        paired: !device.password,
         kind,
         member_count,
     }
@@ -117,6 +116,7 @@ pub fn device_from_txt(
     igl: &str,
     gcgl: &str,
     gpn: &str,
+    pw: &str,
     ip: IpAddr,
 ) -> Option<AirPlayDevice> {
     if skip_airplay_model(model, manufacturer) {
@@ -147,6 +147,7 @@ pub fn device_from_txt(
         gid: gid.to_string(),
         is_leader: igl == "1",
         in_group,
+        password: airplay_password_required(pw),
         ip,
     })
 }
@@ -195,6 +196,7 @@ fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<AirPlayDevice> {
         txt(info, "igl"),
         txt(info, "gcgl"),
         txt(info, "gpn"),
+        txt(info, "pw"),
         ip,
     )
 }

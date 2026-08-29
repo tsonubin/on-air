@@ -217,42 +217,67 @@ function App() {
   };
 
   const live = Boolean(activeOutput);
+  const lampMode = live ? "live" : error || !status ? "warn" : "ok";
+  const lampLabel = live ? "on air" : error || !status ? "problem" : "ok";
+
+  const wordmarkTone =
+    lampMode === "live"
+      ? "wordmark-live"
+      : lampMode === "warn"
+        ? "wordmark-warn"
+        : "wordmark-ok";
+  const wordmarkFace =
+    lampMode === "live"
+      ? "wordmark-live-face"
+      : lampMode === "warn"
+        ? "wordmark-warn-face"
+        : "wordmark-ok-face";
 
   return (
-    <main className="app">
-      <div className="chassis">
-        <header className="mast">
-          <div className="brand">
-            <h1 className="wordmark" aria-label="on-air">
-              <span className="wordmark-ghost" aria-hidden="true">
-                ~~~~~~
-              </span>
-              <span className="wordmark-face">on-air</span>
-            </h1>
-            <div
-              className={`lamp ${live ? "live" : ""}`}
-              title={live ? "on air" : "standby"}
-              aria-label={live ? "on air" : "standby"}
-            >
-              <span className="lens" />
-            </div>
-          </div>
-          <div className="meta">
-            <span
-              className={`meta-ok ${status ? "ok" : ""}`}
+    <main className="flex h-full min-h-full flex-col gap-2.5 overflow-auto p-[clamp(10px,2vw,18px)]">
+      <div className="chassis flex min-h-0 flex-1 flex-col rounded-[10px] border border-[#3a342a]">
+        <header className="flex flex-wrap items-center justify-between gap-2.5 gap-x-[18px] border-b border-[#2e2a24] px-4 py-3 max-[720px]:p-3">
+          <div className="flex items-center gap-3.5">
+            <h1
+              className={`wordmark relative m-0 inline-flex items-center rounded-sm px-3 py-1.5 text-[18px] font-normal [@media(max-height:560px)]:px-2.5 [@media(max-height:560px)]:py-1 [@media(max-height:560px)]:text-base ${wordmarkTone}`}
+              aria-label={lampLabel}
+              title={lampLabel}
               data-testid="core-status"
             >
-              {status ? "ok" : "wait"}
-            </span>
-            <span className="meta-pin">
-              pin{" "}
-              <span className="pin" data-testid="pairing-pin">
-                {pin || "····"}
+              <span
+                className={`wordmark-gel pointer-events-none absolute inset-[3px] z-1 rounded-sm opacity-55 ${lampMode === "live" ? "opacity-70" : ""}`}
+                aria-hidden="true"
+              />
+              <span className={`relative z-2 ${wordmarkFace}`}>ONAIR</span>
+              <span className="sr-only">{status ? "ok" : "wait"}</span>
+            </h1>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded border border-[#3a342a] bg-linear-to-b from-[#2c281f] via-face to-[#12100c] px-2 py-1 shadow-[inset_0_1px_0_#4a4338,0_1px_2px_#000]">
+              <span className="font-mono text-[8px] tracking-[0.18em] text-steel-dim uppercase">
+                pin
               </span>
-            </span>
-            <details className="fold">
-              <summary aria-label="more status">▾</summary>
-              <div className="fold-body">
+              <span className="relative inline-grid rounded-sm bg-[#070605] px-1.5 py-0.5 font-led text-[13px] leading-none tracking-[0.1em] shadow-[inset_0_1px_3px_#000]">
+                <span
+                  className="col-start-1 row-start-1 text-[#1c1812] select-none"
+                  aria-hidden="true"
+                >
+                  888888
+                </span>
+                <span
+                  className="col-start-1 row-start-1 text-amber [text-shadow:0_0_4px_rgba(224,162,75,0.8),0_0_10px_rgba(224,162,75,0.35)]"
+                  data-testid="pairing-pin"
+                >
+                  {pin || "····"}
+                </span>
+              </span>
+            </div>
+            <details className="relative">
+              <summary
+                aria-label="more status"
+                className="hatch-knob size-[18px] cursor-pointer rounded-full border border-[#1a1814] hover:brightness-110"
+              />
+              <div className="absolute top-[calc(100%+8px)] right-0 z-30 flex min-w-[7.5rem] flex-col gap-1.5 rounded-b bg-linear-to-b from-[#2a261f] to-[#16140f] px-2.5 py-2 font-mono text-[11px] text-ink shadow-[inset_0_1px_0_#4a4338,0_10px_22px_rgba(0,0,0,0.5)] border border-[#3a342a]">
                 <span>v{status?.version ?? "—"}</span>
                 <span>:{DEFAULT_PORT}</span>
                 <span data-testid="airplay-mode">{airplayMode || "—"}</span>
@@ -263,7 +288,7 @@ function App() {
                 )}
                 {airplayMode === "avroute-picker" && (
                   <button
-                    className="ghost"
+                    className="cursor-pointer rounded-sm border border-[#3a342a] bg-[#141210] px-2 py-0.5 hover:border-amber hover:text-amber"
                     data-testid="airplay-picker"
                     onClick={() => {
                       void import("@tauri-apps/api/core").then(({ invoke }) =>
@@ -278,39 +303,61 @@ function App() {
             </details>
           </div>
         </header>
-        {error && <p className="error">{error}</p>}
+        {error && (
+          <p className="mx-3 my-0 rounded bg-[#3a1410] px-2.5 py-2 text-xs text-[#f0b4ac]">
+            {error}
+          </p>
+        )}
 
-        <div className="deck">
-          <section className="col">
-            <h2 className="kicker">Source</h2>
-            <ul className="list" data-testid="input-list">
-              {uniqueInputs.length === 0 && <li className="empty">No capture devices</li>}
+        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden min-[721px]:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] min-[721px]:grid-rows-[minmax(0,1fr)]">
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3">
+            <h2 className="mb-2 shrink-0 font-mono text-[10px] tracking-[0.22em] text-steel-dim uppercase">
+              Source
+            </h2>
+            <ul
+              className="flex min-h-0 flex-1 list-none flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain p-0 pr-0.5 m-0"
+              data-testid="input-list"
+            >
+              {uniqueInputs.length === 0 && (
+                <li className="px-1 py-2.5 text-xs text-steel-dim">No capture devices</li>
+              )}
               {uniqueInputs.map((name) => (
                 <li key={name}>
                   <button
-                    className={`row ${activeInput === name ? "on" : ""}`}
+                    className={`device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-[#322e26] px-2.5 py-2 text-left hover:border-[#4a4336] ${activeInput === name ? "device-row-on" : ""}`}
                     data-testid={`input-${name}`}
                     onClick={() => void pickInput(name)}
                   >
-                    <span className="mark" />
-                    <span className="name">{prettyInput(name)}</span>
-                    <span className="tag">{activeInput === name ? "in" : ""}</span>
+                    <span
+                      className={`size-[9px] rounded-full border border-steel-dim ${activeInput === name ? "border-live bg-live" : ""}`}
+                    />
+                    <span className="truncate whitespace-nowrap">{prettyInput(name)}</span>
+                    <span className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.14em] text-steel-dim uppercase">
+                      {activeInput === name ? "in" : ""}
+                    </span>
                   </button>
                 </li>
               ))}
             </ul>
           </section>
 
-          <section className="col">
-            <h2 className="kicker">Destination</h2>
+          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-[#2e2a24] p-3 min-[721px]:border-t-0 min-[721px]:border-l">
+            <h2 className="mb-2 shrink-0 font-mono text-[10px] tracking-[0.22em] text-steel-dim uppercase">
+              Destination
+            </h2>
             <p data-testid="active-output" hidden>
               {activeOutput
                 ? `${activeOutput.transport}: ${activeOutput.device_name}`
                 : "none"}
             </p>
-            <ul className="list" data-testid="output-list">
+            <ul
+              className="flex min-h-0 flex-1 list-none flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain p-0 pr-0.5 m-0"
+              data-testid="output-list"
+            >
               {outputs.length === 0 && (
-                <li className="empty">Waiting for a speaker on the LAN</li>
+                <li className="px-1 py-2.5 text-xs text-steel-dim">
+                  Waiting for a speaker on the LAN
+                </li>
               )}
               {outputs.map((output) => {
                 const on =
@@ -320,17 +367,19 @@ function App() {
                 return (
                   <li key={`${output.transport}-${output.id}`}>
                     <button
-                      className={`row ${on ? "on" : ""}`}
+                      className={`device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-[#322e26] px-2.5 py-2 text-left hover:border-[#4a4336] ${on ? "device-row-on" : ""}`}
                       data-testid={`output-${output.transport}-${output.id}`}
                       onClick={() => void chooseOutput(output)}
                     >
-                      <span className="mark" />
-                      <span className="name">{output.name}</span>
-                      <span className="tag">
+                      <span
+                        className={`size-[9px] rounded-full border border-steel-dim ${on ? "border-live bg-live" : ""}`}
+                      />
+                      <span className="truncate whitespace-nowrap">{output.name}</span>
+                      <span className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.14em] text-steel-dim uppercase">
                         {pair && (
-                          <span className="pair-glyph" title="stereo pair">
-                            <i />
-                            <i />
+                          <span className="inline-flex gap-0.5" title="stereo pair">
+                            <i className="block h-2.5 w-1.5 rounded-[1px_3px_3px_1px] border border-amber" />
+                            <i className="block h-2.5 w-1.5 rounded-[1px_3px_3px_1px] border border-amber" />
                           </span>
                         )}
                         {output.needs_pair && !output.paired ? "pin" : output.transport}
@@ -343,7 +392,7 @@ function App() {
           </section>
         </div>
 
-        <footer className="mix">
+        <footer className="grid shrink-0 grid-cols-1 items-end justify-items-center gap-4 border-t border-[#2e2a24] bg-[#151310] px-4 py-3 min-[561px]:grid-cols-[auto_minmax(0,1fr)_minmax(9.5rem,11rem)] min-[561px]:justify-items-stretch [@media(max-height:560px)]:gap-2.5 [@media(max-height:560px)]:px-3 [@media(max-height:560px)]:py-2">
           <Fader
             label="level"
             value={volume}
@@ -353,7 +402,7 @@ function App() {
             onChange={(v) => void applyVolume(v)}
           />
 
-          <div className="eq-bank">
+          <div className="flex min-w-0 items-end justify-center gap-3">
             {gains.map((gain, i) => (
               <Fader
                 key={i}
@@ -372,7 +421,7 @@ function App() {
             ))}
           </div>
 
-          <div className="rates">
+          <div className="flex w-full min-w-[11rem] flex-col justify-end gap-2">
             <RateSelect
               label="In"
               value={sampleRate}
@@ -406,12 +455,15 @@ function App() {
       </div>
 
       {pairTarget && (
-        <div className="sheet" role="dialog">
-          <div className="sheet-card">
-            <h3>Pair {pairTarget.name}</h3>
-            <p>
+        <div
+          className="fixed inset-0 z-20 flex items-end justify-center bg-[rgba(8,7,6,0.72)] p-4"
+          role="dialog"
+        >
+          <div className="w-full max-w-[420px] rounded-t-[10px] rounded-b bg-face-2 border border-[#3a342a] p-4 shadow-[0_-12px_40px_rgba(0,0,0,0.5)]">
+            <h3 className="mt-0 mb-1.5 font-sign text-xl">Pair {pairTarget.name}</h3>
+            <p className="mt-0 mb-3 text-xs text-steel-dim">
               {pairTarget.transport === "airplay"
-                ? "Enter the HomePod / AirPlay PIN shown on the speaker."
+                ? "Only if this speaker shows a code (Home app or Apple TV). HomePod mini has no screen and usually has no PIN."
                 : "Confirm pairing on the Bluetooth device, then continue."}
             </p>
             {pairTarget.transport === "airplay" && (
@@ -422,13 +474,22 @@ function App() {
                 placeholder="••••"
                 value={pairPin}
                 onChange={(e) => setPairPin(e.target.value)}
+                className="h-auto w-full rounded border border-[#3a342a] bg-well p-2.5 font-mono text-lg tracking-[0.28em]"
               />
             )}
-            <div className="sheet-actions">
-              <button type="button" onClick={() => setPairTarget(null)}>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="flex-1 cursor-pointer rounded border border-[#3a342a] bg-[#141210] py-2.5"
+                onClick={() => setPairTarget(null)}
+              >
                 Cancel
               </button>
-              <button className="go" type="button" onClick={() => void submitPair()}>
+              <button
+                className="flex-1 cursor-pointer rounded border border-[#6a2a22] bg-[#3a1814] py-2.5 text-[#ffd4cc]"
+                type="button"
+                onClick={() => void submitPair()}
+              >
                 Pair &amp; go live
               </button>
             </div>

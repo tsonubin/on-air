@@ -20,6 +20,7 @@ fn stereo_homepods_collapse_to_the_group_leader() {
         "1",
         "1",
         "卧室",
+        "",
         IpAddr::V4(Ipv4Addr::new(192, 168, 5, 14)),
     )
     .unwrap();
@@ -32,6 +33,7 @@ fn stereo_homepods_collapse_to_the_group_leader() {
         "0",
         "1",
         "卧室",
+        "",
         IpAddr::V4(Ipv4Addr::new(192, 168, 5, 26)),
     )
     .unwrap();
@@ -41,7 +43,7 @@ fn stereo_homepods_collapse_to_the_group_leader() {
     assert_eq!(listed[0].name, "卧室");
     assert_eq!(listed[0].kind, "pair");
     assert_eq!(listed[0].member_count, 2);
-    assert!(listed[0].needs_pair);
+    assert!(!listed[0].needs_pair);
 }
 
 #[test]
@@ -54,6 +56,7 @@ fn apple_tv_stays_a_solo_destination() {
         "195CF346-EFDB-4E1F-B69C-B2CED0F5E36C",
         "1",
         "1",
+        "",
         "",
         IpAddr::V4(Ipv4Addr::new(192, 168, 5, 11)),
     )
