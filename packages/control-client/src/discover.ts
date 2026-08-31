@@ -6,11 +6,20 @@ export type { DiscoveredHost };
 const SCAN_TIMEOUT_MS = 350;
 const SCAN_CONCURRENCY = 32;
 
+/** True for a private LAN unicast IPv4 we can expand into a /24 probe list. */
+export function isLanUnicast(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return false;
+  const [a, b] = parts;
+  if (a === 10) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  return false;
+}
+
 export function subnetHosts(localIp: string): string[] {
+  if (!isLanUnicast(localIp)) return [];
   const parts = localIp.split(".");
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(Number(p)))) {
-    return [];
-  }
   const prefix = `${parts[0]}.${parts[1]}.${parts[2]}`;
   const hosts: string[] = [];
   for (let i = 1; i <= 254; i += 1) {

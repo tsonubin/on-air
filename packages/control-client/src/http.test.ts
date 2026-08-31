@@ -1,6 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { activateOutput, apiBase, prettyInput, verifyPin, wsUrl } from "./http.ts";
+import {
+  activateOutput,
+  apiBase,
+  goldenPathSonos,
+  pairAirplay,
+  pairBluetooth,
+  prettyInput,
+  setEq,
+  setSampleRate,
+  setVolume,
+  switchTransports,
+  verifyPin,
+  wsUrl,
+} from "./http.ts";
 
 test("apiBase strips scheme and trailing slash", () => {
   assert.equal(apiBase("192.168.5.14"), "http://192.168.5.14:47990");
@@ -36,4 +49,146 @@ test("activateOutput posts transport and device_id with bearer token", async () 
     return new Response(null, { status: 204 });
   };
   await activateOutput("http://10.0.0.2:47990", "sonos", "uuid:x", "tok", fetchImpl);
+});
+
+function recordFetch(expected: { url: string; method?: string; body?: string; auth?: string }) {
+  const fetchImpl: typeof fetch = async (input, init) => {
+    assert.equal(String(input), expected.url);
+    if (expected.method) assert.equal(init?.method, expected.method);
+    if (expected.body) assert.equal(init?.body, expected.body);
+    if (expected.auth) {
+      const headers = init?.headers as Record<string, string> | undefined;
+      assert.equal(headers?.authorization, expected.auth);
+    }
+    return new Response(null, { status: 204 });
+  };
+  return fetchImpl;
+}
+
+test("setVolume posts the fader value with the pairing token", async () => {
+  await setVolume(
+    "http://10.0.0.2:47990",
+    20,
+    "tok",
+    recordFetch({
+      url: "http://10.0.0.2:47990/api/outputs/active/volume",
+      method: "POST",
+      body: JSON.stringify({ volume: 20 }),
+      auth: "Bearer tok",
+    }),
+  );
+});
+
+test("setEq puts five-band gains", async () => {
+  await setEq(
+    "http://10.0.0.2:47990",
+    [3, 0, 0, 0, -3],
+    "tok",
+    recordFetch({
+      url: "http://10.0.0.2:47990/api/eq",
+      method: "PUT",
+      body: JSON.stringify({ gains_db: [3, 0, 0, 0, -3] }),
+    }),
+  );
+});
+
+test("setSampleRate can set input and output independently", async () => {
+  await setSampleRate(
+    "http://10.0.0.2:47990",
+    { input_hz: 48000, output_hz: 44100 },
+    "tok",
+    recordFetch({
+      url: "http://10.0.0.2:47990/api/sample-rate",
+      method: "PUT",
+      body: JSON.stringify({ input_hz: 48000, output_hz: 44100 }),
+    }),
+  );
+});
+
+test("pairAirplay and pairBluetooth post the device handshake", async () => {
+  await pairAirplay(
+    "http://10.0.0.2:47990",
+    "ap-living",
+    "1111",
+    "tok",
+    recordFetch({
+      url: "http://10.0.0.2:47990/api/airplay/pair",
+      method: "POST",
+      body: JSON.stringify({ device_id: "ap-living", pin: "1111" }),
+    }),
+  );
+  await pairBluetooth(
+    "http://10.0.0.2:47990",
+    "bt-speaker",
+    "tok",
+    recordFetch({
+      url: "http://10.0.0.2:47990/api/bluetooth/pair",
+      method: "POST",
+      body: JSON.stringify({ id: "bt-speaker" }),
+    }),
+  );
+});
+
+test("goldenPathSonos pairs, picks an input, goes live on Sonos, sets volume and EQ", async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    calls.push(`${init?.method ?? "GET"} ${url}`);
+    if (url.endsWith("/api/status")) {
+      return new Response(JSON.stringify({ status: "ok", version: "0.1.0" }), { status: 200 });
+    }
+    if (url.endsWith("/api/pairing/verify")) {
+      return new Response(JSON.stringify({ token: "onair-test" }), { status: 200 });
+    }
+    if (url.endsWith("/api/inputs")) {
+      return new Response(JSON.stringify({ inputs: ["Mock Monitor"] }), { status: 200 });
+    }
+    if (url.endsWith("/api/outputs")) {
+      return new Response(
+        JSON.stringify({
+          outputs: [{ id: "uuid:mock-sonos", name: "Mock Sonos", transport: "sonos" }],
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response(null, { status: 204 });
+  };
+  await goldenPathSonos("http://127.0.0.1:47990", "123456", fetchImpl);
+  assert.deepEqual(calls, [
+    "GET http://127.0.0.1:47990/api/status",
+    "POST http://127.0.0.1:47990/api/pairing/verify",
+    "GET http://127.0.0.1:47990/api/inputs",
+    "POST http://127.0.0.1:47990/api/inputs/active",
+    "GET http://127.0.0.1:47990/api/outputs",
+    "POST http://127.0.0.1:47990/api/outputs/active",
+    "POST http://127.0.0.1:47990/api/outputs/active/volume",
+    "PUT http://127.0.0.1:47990/api/eq",
+  ]);
+});
+
+test("switchTransports activates Sonos then AirPlay then Bluetooth", async () => {
+  const activated: string[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/api/outputs") && !init?.method) {
+      return new Response(
+        JSON.stringify({
+          outputs: [
+            { id: "s", name: "S", transport: "sonos" },
+            { id: "a", name: "A", transport: "airplay" },
+            { id: "b", name: "B", transport: "bluetooth" },
+          ],
+        }),
+        { status: 200 },
+      );
+    }
+    if (url.endsWith("/api/outputs/active")) {
+      activated.push(JSON.parse(String(init?.body)).transport);
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  const order = await switchTransports("http://10.0.0.2:47990", "tok", fetchImpl);
+  assert.deepEqual(order, ["sonos", "airplay", "bluetooth"]);
+  assert.deepEqual(activated, ["sonos", "airplay", "bluetooth"]);
 });

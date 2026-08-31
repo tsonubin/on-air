@@ -26,6 +26,6 @@ Then open Expo Go on a phone on the same Wi-Fi, or press `i` / `a` for
 simulators. Enter the PIN from the desktop ONAIR chrome.
 
 ```bash
-pnpm --filter mobile test
-pnpm --filter @on-air/control-client test
+pnpm test:mobile          # control-client + Expo UI unit tests
+pnpm test:mobile:e2e      # discover → pair → full mixer against mock core
 ```

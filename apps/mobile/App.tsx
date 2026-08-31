@@ -73,13 +73,21 @@ function Fader(props: {
   return (
     <View style={styles.fader} testID={props.testId}>
       <Text style={styles.faderValue}>{props.value}</Text>
-      <Pressable onPress={() => props.onChange(clamp(props.value + step))} style={styles.faderBtn}>
+      <Pressable
+        onPress={() => props.onChange(clamp(props.value + step))}
+        style={styles.faderBtn}
+        testID={`${props.testId}-up`}
+      >
         <Text style={styles.faderBtnText}>+</Text>
       </Pressable>
       <View style={styles.faderTrack}>
         <View style={[styles.faderFill, { height: (fill / 100) * 80 }]} />
       </View>
-      <Pressable onPress={() => props.onChange(clamp(props.value - step))} style={styles.faderBtn}>
+      <Pressable
+        onPress={() => props.onChange(clamp(props.value - step))}
+        style={styles.faderBtn}
+        testID={`${props.testId}-down`}
+      >
         <Text style={styles.faderBtnText}>−</Text>
       </Pressable>
       <Text style={styles.faderLabel}>{props.label}</Text>
@@ -477,6 +485,7 @@ export default function App(): React.JSX.Element {
           {pairTarget.transport === "airplay" && (
             <TextInput
               style={styles.input}
+              testID="device-pin-input"
               placeholder="PIN"
               placeholderTextColor={colors.steelDim}
               value={pairPin}
@@ -485,10 +494,18 @@ export default function App(): React.JSX.Element {
             />
           )}
           <View style={styles.sheetActions}>
-            <Pressable style={styles.button} onPress={() => setPairTarget(null)}>
+            <Pressable
+              style={styles.button}
+              testID="device-pair-cancel"
+              onPress={() => setPairTarget(null)}
+            >
               <Text style={styles.buttonText}>Cancel</Text>
             </Pressable>
-            <Pressable style={styles.buttonLive} onPress={() => void submitPair()}>
+            <Pressable
+              style={styles.buttonLive}
+              testID="device-pair-submit"
+              onPress={() => void submitPair()}
+            >
               <Text style={styles.buttonLiveText}>Pair & go live</Text>
             </Pressable>
           </View>

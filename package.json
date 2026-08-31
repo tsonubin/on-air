@@ -7,6 +7,8 @@
     "dev:mobile": "pnpm --filter mobile start",
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:mobile": "pnpm --filter @on-air/control-client test && pnpm --filter mobile test",
+    "test:mobile:e2e": "node --experimental-strip-types --test e2e/mobile/companion.e2e.ts",
     "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
