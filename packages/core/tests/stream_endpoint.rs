@@ -59,6 +59,47 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
 }
 
 #[tokio::test]
+async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let state = CoreState::new();
+    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:test".into(),
+        device_name: "Test".into(),
+    });
+    let audio_tx = state.audio_tx.clone();
+    let response = on_air_core::build_router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/stream/audio.wav")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+
+    // Sonos radio clients read in bursts while their playback buffer drains.
+    // Queue roughly 2.3 seconds of 1024-frame chunks before polling the body.
+    for sequence in 0u16..100 {
+        audio_tx
+            .send(bytes::Bytes::copy_from_slice(&sequence.to_le_bytes()))
+            .unwrap();
+    }
+
+    let header = stream.next().await.unwrap().unwrap();
+    assert!(header.starts_with(b"RIFF"));
+    let first_pcm = stream.next().await.unwrap().unwrap();
+    assert_eq!(
+        first_pcm,
+        bytes::Bytes::copy_from_slice(&0u16.to_le_bytes())
+    );
+}
+
+#[tokio::test]
 async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
     let state = CoreState::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

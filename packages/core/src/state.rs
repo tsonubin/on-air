@@ -66,6 +66,10 @@ pub struct CoreState {
 }
 
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
+// Network speakers buffer and read live radio streams in bursts. At 1024 mono
+// frames per chunk this retains roughly 12 seconds / 1 MiB at 44.1 kHz, enough
+// to absorb Sonos read pauses without making the audio path unbounded.
+const AUDIO_BROADCAST_CAPACITY: usize = 512;
 const AIRPLAY_EMPTY_SCANS_BEFORE_EVICTION: u8 = 3;
 const SONOS_NAME_LOOKUP_CONCURRENCY: usize = 4;
 const MAX_SONOS_NAME_LOOKUPS_PER_SCAN: usize = 64;
@@ -106,7 +110,7 @@ fn spawn_sonos_name_lookup(
 
 impl CoreState {
     pub fn new() -> Self {
-        let (audio_tx, _) = broadcast::channel(64);
+        let (audio_tx, _) = broadcast::channel(AUDIO_BROADCAST_CAPACITY);
         let (ws_tx, _) = broadcast::channel(64);
         CoreState {
             config_lock: Arc::new(Mutex::new(())),

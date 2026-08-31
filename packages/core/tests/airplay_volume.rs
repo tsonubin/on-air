@@ -38,9 +38,7 @@ fn pyatv_helper_applies_volume_changes_while_streaming() {
 
     let initial_deadline = std::time::Instant::now() + Duration::from_secs(2);
     let mut initial = None;
-    while let Some(remaining) =
-        initial_deadline.checked_duration_since(std::time::Instant::now())
-    {
+    while let Some(remaining) = initial_deadline.checked_duration_since(std::time::Instant::now()) {
         match lines_rx.recv_timeout(remaining) {
             Ok(line) if line == "volume:22" => {
                 initial = Some(line);
