@@ -4,6 +4,7 @@ import {
   activateOutput,
   apiBase,
   fetchStatus,
+  getVolume,
   goldenPathSonos,
   pairAirplay,
   pairBluetooth,
@@ -95,6 +96,16 @@ test("setVolume posts the fader value with the pairing token", async () => {
       auth: "Bearer tok",
     }),
   );
+});
+
+test("getVolume reads the service-owned volume setting", async () => {
+  const fetchImpl: typeof fetch = async (input, init) => {
+    assert.equal(String(input), "http://10.0.0.2:47990/api/outputs/active/volume");
+    const headers = init?.headers as Record<string, string> | undefined;
+    assert.equal(headers?.authorization, "Bearer tok");
+    return new Response(JSON.stringify({ volume: 37 }), { status: 200 });
+  };
+  assert.equal(await getVolume("http://10.0.0.2:47990", "tok", fetchImpl), 37);
 });
 
 test("setEq puts five-band gains", async () => {

@@ -15,6 +15,7 @@ pub mod pairing;
 pub mod pipeline;
 pub mod sender;
 pub mod session;
+pub mod settings;
 pub mod state;
 
 use state::CoreState;
@@ -64,7 +65,7 @@ pub fn build_router(state: CoreState) -> Router {
         )
         .route(
             "/api/outputs/active/volume",
-            post(api::outputs::set_output_volume),
+            post(api::outputs::set_output_volume).get(api::outputs::get_output_volume),
         )
         .route("/api/eq", get(api::eq::get_eq).put(api::eq::set_eq))
         .route(
@@ -118,6 +119,7 @@ pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::i
         let _sonos = state.spawn_sonos_discovery();
         let _airplay = state.spawn_airplay_discovery();
     }
+    state.spawn_saved_session_restore();
     axum::serve(
         listener,
         build_router(state).into_make_service_with_connect_info::<SocketAddr>(),

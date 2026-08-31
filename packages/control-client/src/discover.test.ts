@@ -31,6 +31,26 @@ test("probeOnAir returns a host when /api/status is ok", async () => {
   assert.deepEqual(hit, { host: "192.168.5.14", port: 47990, version: "0.1.0", name: "on-air" });
 });
 
+test("probeOnAir tolerates Expo Go development overhead on a reachable LAN service", async () => {
+  const fetchImpl: typeof fetch = async (_input, init) =>
+    await new Promise<Response>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        resolve(new Response(JSON.stringify({ status: "ok", version: "0.1.0" }), { status: 200 }));
+      }, 500);
+      init?.signal?.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(timer);
+          reject(new DOMException("The operation was aborted", "AbortError"));
+        },
+        { once: true },
+      );
+    });
+
+  const hit = await probeOnAir("192.168.5.14", 47990, undefined, fetchImpl);
+  assert.equal(hit?.host, "192.168.5.14");
+});
+
 test("discoverOnAir dedupes extraHosts and ignores failed probes", async () => {
   const fetchImpl: typeof fetch = async (input) => {
     const url = String(input);
@@ -56,4 +76,21 @@ test("discoverOnAir does not expand a loopback address into a /24 scan", async (
   };
   await discoverOnAir({ localIp: "127.0.0.1", fetchImpl });
   assert.deepEqual(probed, ["http://127.0.0.1:47990/api/status"]);
+});
+
+test("LAN discovery stops probing after the first responsive batch", async () => {
+  const probed: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    probed.push(url);
+    if (url.includes("192.168.5.100")) {
+      return new Response(JSON.stringify({ status: "ok", version: "0.1.0" }), { status: 200 });
+    }
+    return new Response("nope", { status: 500 });
+  };
+
+  const found = await discoverOnAir({ localIp: "192.168.5.101", fetchImpl });
+
+  assert.ok(found.some((host) => host.host === "192.168.5.100"));
+  assert.ok(probed.length < 64, `expected a bounded quick scan, got ${probed.length} probes`);
 });

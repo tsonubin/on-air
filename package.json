@@ -13,7 +13,7 @@
     "lint": "biome lint .",
     "test": "turbo run test",
     "test:mobile": "pnpm --filter @on-air/control-client test && pnpm --filter mobile test",
-    "test:mobile:e2e": "node --experimental-strip-types --test e2e/mobile/companion.e2e.ts",
+    "test:mobile:e2e": "node --experimental-strip-types --test --test-concurrency=1 e2e/mobile/companion.e2e.ts e2e/mobile/expo-go-pairing.e2e.ts",
     "typecheck": "turbo run typecheck",
     "typecheck:web": "pnpm --filter @on-air/api-types typecheck && pnpm --filter @on-air/control-client typecheck && pnpm --filter desktop typecheck && pnpm --filter mobile typecheck"
   },

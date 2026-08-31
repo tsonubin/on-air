@@ -9,6 +9,7 @@ import {
   type OutputInfo,
   type SampleRateResponse,
   type StatusResponse,
+  type VolumeResponse,
 } from "@on-air/api-types";
 
 export { apiBase, DEFAULT_PORT };
@@ -190,6 +191,20 @@ export async function setVolume(
     },
     fetchImpl,
   );
+}
+
+export async function getVolume(
+  base: string,
+  token?: string,
+  fetchImpl?: FetchLike,
+): Promise<number> {
+  const body = await request<VolumeResponse>(
+    base,
+    "/api/outputs/active/volume",
+    { headers: authHeaders(token) },
+    fetchImpl,
+  );
+  return body.volume;
 }
 
 export async function getEq(

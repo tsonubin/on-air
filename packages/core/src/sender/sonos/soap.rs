@@ -33,6 +33,7 @@ impl std::fmt::Display for SoapError {
 
 impl std::error::Error for SoapError {}
 
+#[derive(Clone)]
 pub struct SonosControlClient {
     http: Client,
 }

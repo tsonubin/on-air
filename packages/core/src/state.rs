@@ -6,9 +6,11 @@ use crate::sender::bluetooth::{
 };
 use crate::sender::sonos::discovery::{DeviceRegistry, SonosDevice};
 use crate::sender::{AudioSender, SenderError};
+use crate::settings::{SavedSettings, SettingsPersistence};
 use bytes::Bytes;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
@@ -26,7 +28,7 @@ pub struct CatalogDevice {
     pub address: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ActiveOutput {
     pub transport: String,
     pub device_id: String,
@@ -56,13 +58,22 @@ pub struct CoreState {
     pub require_auth: bool,
     pub pairing: Arc<StdMutex<PairingState>>,
     pub active_output: Arc<StdMutex<Option<ActiveOutput>>>,
+    pub output_volume: Arc<AtomicU8>,
     /// Controls whether remote clients may start or configure audio work. The
     /// lightweight HTTP and discovery services remain online while disabled.
     pub service_enabled: Arc<AtomicBool>,
     pub stream_generation: Arc<AtomicU64>,
     pub stream_clients: Arc<AtomicUsize>,
+    /// Monotonic heartbeat advanced only when a live stream body is polled.
+    /// Sonos recovery uses it to distinguish a connected reader from one that
+    /// has stopped draining audio.
+    pub stream_progress: Arc<AtomicU64>,
     pub mock_log: Arc<tokio::sync::Mutex<Vec<String>>>,
     pub owntone_base: Arc<StdMutex<String>>,
+    saved_settings: Arc<StdMutex<SavedSettings>>,
+    settings_persistence: Option<SettingsPersistence>,
+    settings_revision: Arc<AtomicU64>,
+    restoring_settings: Arc<AtomicBool>,
 }
 
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
@@ -110,15 +121,35 @@ fn spawn_sonos_name_lookup(
 
 impl CoreState {
     pub fn new() -> Self {
+        Self::from_saved_settings(SavedSettings::default(), None)
+    }
+
+    pub fn new_persistent(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let saved = match crate::settings::load_file(&path) {
+            Ok(saved) => saved,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => SavedSettings::default(),
+            Err(error) => {
+                eprintln!("could not load on-air settings; using safe defaults: {error}");
+                SavedSettings::default()
+            }
+        };
+        Self::from_saved_settings(saved, Some(SettingsPersistence::new(path)))
+    }
+
+    fn from_saved_settings(
+        saved_settings: SavedSettings,
+        settings_persistence: Option<SettingsPersistence>,
+    ) -> Self {
         let (audio_tx, _) = broadcast::channel(AUDIO_BROADCAST_CAPACITY);
         let (ws_tx, _) = broadcast::channel(64);
         CoreState {
             config_lock: Arc::new(Mutex::new(())),
             active_sender: Arc::new(Mutex::new(None)),
-            eq_gains_db: Arc::new(StdMutex::new([0.0; 5])),
-            target_sample_rate_hz: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE_DEFAULT_HZ)),
+            eq_gains_db: Arc::new(StdMutex::new(saved_settings.eq_gains_db)),
+            target_sample_rate_hz: Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz)),
             input_supported_hz: Arc::new(StdMutex::new(crate::dsp::rates::INPUT_RATES_HZ.to_vec())),
-            output_sample_rate_hz: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE_DEFAULT_HZ)),
+            output_sample_rate_hz: Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz)),
             audio_tx,
             capture: Arc::new(Mutex::new(None)),
             outputs: Arc::new(Mutex::new(DeviceRegistry::new())),
@@ -133,11 +164,161 @@ impl CoreState {
             require_auth: false,
             pairing: Arc::new(StdMutex::new(PairingState::new())),
             active_output: Arc::new(StdMutex::new(None)),
-            service_enabled: Arc::new(AtomicBool::new(true)),
+            output_volume: Arc::new(AtomicU8::new(saved_settings.volume)),
+            service_enabled: Arc::new(AtomicBool::new(saved_settings.service_enabled)),
             stream_generation: Arc::new(AtomicU64::new(0)),
             stream_clients: Arc::new(AtomicUsize::new(0)),
+            stream_progress: Arc::new(AtomicU64::new(0)),
             mock_log: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             owntone_base: Arc::new(StdMutex::new("http://127.0.0.1:3689".into())),
+            saved_settings: Arc::new(StdMutex::new(saved_settings)),
+            settings_persistence,
+            settings_revision: Arc::new(AtomicU64::new(0)),
+            restoring_settings: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    fn update_saved_settings(&self, update: impl FnOnce(&mut SavedSettings)) {
+        let mut saved = self.saved_settings.lock().unwrap();
+        let previous = saved.clone();
+        update(&mut saved);
+        if *saved == previous {
+            return;
+        }
+        self.settings_revision.fetch_add(1, Ordering::AcqRel);
+        if let Some(persistence) = self.settings_persistence.as_ref() {
+            persistence.queue(saved.clone());
+        }
+    }
+
+    pub(crate) fn remember_input(&self, name: String) {
+        self.update_saved_settings(|saved| saved.active_input = Some(name));
+    }
+
+    pub(crate) fn remember_output(&self, output: ActiveOutput) {
+        self.update_saved_settings(|saved| saved.active_output = Some(output));
+    }
+
+    pub(crate) fn remember_volume(&self, volume: u8) {
+        self.output_volume.store(volume, Ordering::Release);
+        self.update_saved_settings(|saved| saved.volume = volume);
+    }
+
+    pub(crate) fn remember_eq(&self, gains: [f32; 5]) {
+        self.update_saved_settings(|saved| saved.eq_gains_db = gains);
+    }
+
+    pub(crate) fn remember_sample_rates(&self) {
+        let input = *self.target_sample_rate_hz.lock().unwrap();
+        let output = *self.output_sample_rate_hz.lock().unwrap();
+        self.update_saved_settings(|saved| {
+            saved.input_sample_rate_hz = input;
+            saved.output_sample_rate_hz = output;
+        });
+    }
+
+    pub fn set_service_enabled(&self, enabled: bool) {
+        self.service_enabled.store(enabled, Ordering::Release);
+        self.update_saved_settings(|saved| saved.service_enabled = enabled);
+    }
+
+    fn persist_settings_now(&self) {
+        let Some(persistence) = self.settings_persistence.as_ref() else {
+            return;
+        };
+        let saved = self.saved_settings.lock().unwrap();
+        if let Err(error) = persistence.save_now(&saved) {
+            eprintln!("could not flush on-air settings: {error}");
+        }
+    }
+
+    pub fn spawn_saved_session_restore(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let saved = self.saved_settings.lock().unwrap().clone();
+        if self.settings_persistence.is_none()
+            || !self.service_enabled.load(Ordering::Acquire)
+            || (saved.active_input.is_none() && saved.active_output.is_none())
+            || self
+                .restoring_settings
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+        {
+            return None;
+        }
+        let state = self.clone();
+        let revision = self.settings_revision.load(Ordering::Acquire);
+        Some(tokio::spawn(async move {
+            state.restore_saved_session(saved, revision).await;
+            state.restoring_settings.store(false, Ordering::Release);
+        }))
+    }
+
+    async fn restore_saved_session(&self, saved: SavedSettings, revision: u64) {
+        let initial_delay = if cfg!(test) {
+            Duration::from_millis(1)
+        } else {
+            Duration::from_millis(500)
+        };
+        tokio::time::sleep(initial_delay).await;
+
+        let still_current = || {
+            self.service_enabled.load(Ordering::Acquire)
+                && self.settings_revision.load(Ordering::Acquire) == revision
+        };
+
+        if let Some(input) = saved.active_input.as_deref() {
+            let mut last_error = None;
+            for _ in 0..10 {
+                if !still_current() {
+                    return;
+                }
+                let result = {
+                    let _configuration = self.config_lock.lock().await;
+                    crate::api::inputs::activate_input_named(self, input).await
+                };
+                match result {
+                    Ok(()) => {
+                        last_error = None;
+                        break;
+                    }
+                    Err(error) => last_error = Some(error),
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            if let Some((_, error)) = last_error {
+                eprintln!("could not restore saved input {input:?}: {error}");
+            }
+        }
+
+        let Some(output) = saved.active_output else {
+            return;
+        };
+        let mut last_error = None;
+        for _ in 0..20 {
+            if !still_current() {
+                return;
+            }
+            let result = {
+                let _configuration = self.config_lock.lock().await;
+                crate::session::activate(self, &output.transport, &output.device_id).await
+            };
+            match result {
+                Ok(()) => return,
+                Err(crate::session::ActivateError::BadRequest(error)) => {
+                    eprintln!(
+                        "could not restore saved {} output {:?}: {error}",
+                        output.transport, output.device_name
+                    );
+                    return;
+                }
+                Err(error) => last_error = Some(error),
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+        if let Some(error) = last_error {
+            eprintln!(
+                "could not restore saved {} output {:?}: {error:?}",
+                output.transport, output.device_name
+            );
         }
     }
 
@@ -364,8 +545,15 @@ impl CoreState {
 
     /// Stop all live audio resources before the host process exits.
     pub async fn shutdown(&self) {
+        self.persist_settings_now();
         let _configuration = self.config_lock.lock().await;
-        let _ = self.deactivate_sender().await;
+        if let Err(error) = self.deactivate_sender().await {
+            eprintln!("could not stop active output cleanly; forcing local shutdown: {error}");
+            let abandoned = self.active_sender.lock().await.take();
+            drop(abandoned);
+            self.active_output.lock().unwrap().take();
+            self.invalidate_radio_streams();
+        }
         if let Some(capture) = self.capture.lock().await.take() {
             let _ = tokio::task::spawn_blocking(move || capture.stop()).await;
         }
@@ -472,6 +660,8 @@ impl Default for CoreState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn receiver(id: &str) -> CatalogDevice {
         CatalogDevice {
@@ -483,6 +673,17 @@ mod tests {
             member_count: 1,
             address: "192.168.1.2".into(),
         }
+    }
+
+    fn settings_test_path(name: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "on-air-state-{name}-{}-{nonce}.json",
+            std::process::id()
+        ))
     }
 
     #[test]
@@ -502,5 +703,71 @@ mod tests {
             apply_airplay_scan(&mut current, Vec::new(), &mut misses);
         }
         assert!(current.is_empty());
+    }
+
+    #[tokio::test]
+    async fn persistent_state_restores_the_last_complete_mixer_session() {
+        let path = settings_test_path("restore");
+        let initial = CoreState::new_persistent(path.clone());
+        initial.remember_input("Mock Monitor".into());
+        initial.remember_output(ActiveOutput {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            device_name: "Mock Sonos".into(),
+        });
+        initial.remember_volume(37);
+        *initial.eq_gains_db.lock().unwrap() = [1.0, 2.0, 3.0, 4.0, 5.0];
+        initial.remember_eq([1.0, 2.0, 3.0, 4.0, 5.0]);
+        *initial.target_sample_rate_hz.lock().unwrap() = 48_000;
+        *initial.output_sample_rate_hz.lock().unwrap() = 44_100;
+        initial.remember_sample_rates();
+        initial.persist_settings_now();
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        drop(initial);
+
+        let mut restored = CoreState::new_persistent(path.clone());
+        restored.mock = true;
+        *restored.mock_inputs.lock().unwrap() = vec!["Mock Monitor".into()];
+        let sonos = SonosDevice::discovered(
+            "uuid:mock-sonos",
+            "http://127.0.0.1:1400/xml/device_description.xml",
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            "Mock Sonos",
+        );
+        restored.outputs.lock().await.upsert(sonos, Instant::now());
+
+        let restore = restored.spawn_saved_session_restore().unwrap();
+        tokio::time::timeout(Duration::from_secs(1), restore)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            restored.active_input.lock().unwrap().as_deref(),
+            Some("Mock Monitor")
+        );
+        assert_eq!(
+            restored.active_output.lock().unwrap().as_ref(),
+            Some(&ActiveOutput {
+                transport: "sonos".into(),
+                device_id: "uuid:mock-sonos".into(),
+                device_name: "Mock Sonos".into(),
+            })
+        );
+        assert_eq!(restored.output_volume.load(Ordering::Acquire), 37);
+        assert_eq!(
+            *restored.eq_gains_db.lock().unwrap(),
+            [1.0, 2.0, 3.0, 4.0, 5.0]
+        );
+        assert_eq!(*restored.target_sample_rate_hz.lock().unwrap(), 48_000);
+        assert_eq!(
+            restored.mock_log.lock().await.as_slice(),
+            ["Mock Sonos:start", "Mock Sonos:volume:37"]
+        );
+
+        restored.shutdown().await;
+        drop(restored);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let _ = std::fs::remove_file(path);
     }
 }

@@ -10,7 +10,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
-    "test:e2e": "node --experimental-strip-types --test ../../e2e/mobile/companion.e2e.ts",
+    "test:e2e": "node --experimental-strip-types --test --test-concurrency=1 ../../e2e/mobile/companion.e2e.ts ../../e2e/mobile/expo-go-pairing.e2e.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,6 +19,7 @@
     "@on-air/control-client": "workspace:*",
     "expo": "~57.0.18",
     "expo-network": "~57.0.1",
+    "expo-secure-store": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.3",

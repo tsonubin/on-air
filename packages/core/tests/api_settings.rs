@@ -208,7 +208,13 @@ async fn changing_a_live_rate_restarts_the_active_sender() {
     assert_eq!(changed.status(), StatusCode::NO_CONTENT);
     assert_eq!(
         state.mock_log.lock().await.as_slice(),
-        ["Mock Sonos:start", "Mock Sonos:stop", "Mock Sonos:start"]
+        [
+            "Mock Sonos:start",
+            "Mock Sonos:volume:50",
+            "Mock Sonos:stop",
+            "Mock Sonos:start",
+            "Mock Sonos:volume:50"
+        ]
     );
 }
 

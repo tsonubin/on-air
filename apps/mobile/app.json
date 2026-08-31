@@ -17,6 +17,7 @@
     "android": {
       "package": "app.onair.remote",
       "permissions": ["ACCESS_NETWORK_STATE", "CHANGE_WIFI_MULTICAST_STATE", "INTERNET"]
-    }
+    },
+    "plugins": ["expo-secure-store"]
   }
 }

@@ -33,6 +33,10 @@ export interface ActiveOutput {
   device_name: string;
 }
 
+export interface VolumeResponse {
+  volume: number;
+}
+
 export interface EqResponse {
   gains_db: [number, number, number, number, number];
 }

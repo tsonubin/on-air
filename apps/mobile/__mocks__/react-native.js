@@ -20,4 +20,5 @@ module.exports = {
   TextInput: mock("TextInput"),
   View: mock("View"),
   Platform: { OS: "ios" },
+  useColorScheme: () => "light",
 };

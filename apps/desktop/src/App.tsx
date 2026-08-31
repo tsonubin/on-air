@@ -95,7 +95,7 @@ function App() {
             return miss;
           }
         };
-        const [st, ins, outs, actIn, actOut, eq, sr, pairing, ap] = await Promise.all([
+        const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, pairing, ap] = await Promise.all([
           settle(api<StatusResponse>("/api/status")),
           settle(api<{ inputs: string[] }>("/api/inputs")),
           settle(api<{ outputs: OutputInfo[] }>("/api/outputs")),
@@ -113,6 +113,7 @@ function App() {
               };
             }>("/api/sample-rate"),
           ),
+          settle(api<{ volume: number }>("/api/outputs/active/volume")),
           settle(api<{ pin: string }>("/api/pairing/pin")),
           settle(api<{ mode: string }>("/api/airplay/mode")),
         ]);
@@ -129,6 +130,7 @@ function App() {
           if (sr.output?.supported_hz?.length) setOutputRates(sr.output.supported_hz);
           setOutputRateTransport(sr.output?.transport ?? null);
         }
+        if (savedVolume !== miss) setVolume(savedVolume.volume);
         if (pairing !== miss) setPin(pairing.pin);
         if (ap !== miss) setAirplayMode(ap.mode);
       } while (refreshQueued.current);
@@ -510,6 +512,7 @@ function App() {
             min={0}
             max={100}
             testId="volume-slider"
+            showStepButtons
             onChange={(v) => void applyVolume(v)}
           />
 

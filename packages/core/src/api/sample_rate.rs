@@ -121,6 +121,7 @@ pub async fn set_sample_rate(
         }
     }
 
+    state.remember_sample_rates();
     StatusCode::NO_CONTENT.into_response()
 }
 

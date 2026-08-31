@@ -64,21 +64,34 @@ pub async fn activate_input(
     Json(req): Json<ActivateInputRequest>,
 ) -> Response {
     let _configuration = state.config_lock.lock().await;
+    match activate_input_named(&state, &req.name).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err((status, message)) => (status, message).into_response(),
+    }
+}
+
+/// Activate an input while the caller holds `CoreState::config_lock`.
+pub(crate) async fn activate_input_named(
+    state: &CoreState,
+    requested_name: &str,
+) -> Result<(), (StatusCode, String)> {
     if state.mock {
         let known = state
             .mock_inputs
             .lock()
             .unwrap()
             .iter()
-            .any(|n| n == &req.name);
+            .any(|name| name == requested_name);
         if !known {
-            return (StatusCode::NOT_FOUND, "input device not found").into_response();
+            return Err((StatusCode::NOT_FOUND, "input device not found".into()));
         }
-        *state.active_input.lock().unwrap() = Some(req.name);
-        return StatusCode::NO_CONTENT.into_response();
+        let name = requested_name.to_string();
+        *state.active_input.lock().unwrap() = Some(name.clone());
+        state.remember_input(name);
+        return Ok(());
     }
 
-    let source_name = if req.name == "__loopback__" {
+    let source_name = if requested_name == "__loopback__" {
         let resolved = tokio::task::spawn_blocking(|| {
             let host = cpal::default_host();
             capture::find_preferred_loopback(&host).map(|device| {
@@ -91,22 +104,18 @@ pub async fn activate_input(
         match resolved {
             Ok(Ok(Some(name))) => name,
             Ok(Ok(None)) => {
-                return (StatusCode::NOT_FOUND, "no loopback capture device").into_response()
+                return Err((StatusCode::NOT_FOUND, "no loopback capture device".into()))
             }
-            Ok(Err(error)) => {
-                return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
-            }
-            Err(error) => {
-                return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
-            }
+            Ok(Err(error)) => return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
+            Err(error) => return Err((StatusCode::INTERNAL_SERVER_ERROR, error.to_string())),
         }
     } else {
-        req.name.clone()
+        requested_name.to_string()
     };
 
-    let new_handle = match start_named_capture(&state, source_name.clone()).await {
+    let new_handle = match start_named_capture(state, source_name.clone()).await {
         Ok(handle) => handle,
-        Err((status, msg)) => return (status, msg).into_response(),
+        Err(error) => return Err(error),
     };
 
     let mut guard = state.capture.lock().await;
@@ -114,9 +123,10 @@ pub async fn activate_input(
         let _ = tokio::task::spawn_blocking(move || old.stop()).await;
     }
     *guard = Some(new_handle);
-    *state.active_input.lock().unwrap() = Some(source_name);
+    *state.active_input.lock().unwrap() = Some(source_name.clone());
+    state.remember_input(source_name);
 
-    StatusCode::NO_CONTENT.into_response()
+    Ok(())
 }
 
 /// Rebuild the active capture pipeline after a sample-rate change. The

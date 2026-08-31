@@ -3,8 +3,14 @@ import { apiBase, type FetchLike } from "./http.ts";
 
 export type { DiscoveredHost };
 
-const SCAN_TIMEOUT_MS = 350;
-const SCAN_CONCURRENCY = 32;
+// Expo Go development builds and older phones can spend several hundred
+// milliseconds crossing the JS/native networking boundary before a LAN
+// response is delivered. A sub-second timeout makes a healthy desktop look
+// absent and leaves the pairing form pointed at phone-local 127.0.0.1.
+const SCAN_TIMEOUT_MS = 1_000;
+// Keep the probe fan-out modest for older phones and laptops. Discovery is
+// phased and stops launching work after the first responsive batch.
+const SCAN_CONCURRENCY = 16;
 
 /** True for a private LAN unicast IPv4 we can expand into a /24 probe list. */
 export function isLanUnicast(ip: string): boolean {
@@ -55,11 +61,13 @@ async function mapPool<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R | null>,
+  stopAfterFirst = false,
 ): Promise<R[]> {
   const out: R[] = [];
   let index = 0;
   async function worker() {
     while (index < items.length) {
+      if (stopAfterFirst && out.length > 0) return;
       const current = index;
       index += 1;
       const result = await fn(items[current]);
@@ -68,6 +76,37 @@ async function mapPool<T, R>(
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
   return out;
+}
+
+function uniqueHits(found: DiscoveredHost[]): DiscoveredHost[] {
+  const unique = new Map<string, DiscoveredHost>();
+  for (const hit of found) unique.set(`${hit.host}:${hit.port}`, hit);
+  return [...unique.values()];
+}
+
+function prioritizedSubnet(localIp: string): [string[], string[]] {
+  const localHost = Number(localIp.split(".")[3]);
+  const hosts = subnetHosts(localIp);
+  const quick = hosts.filter((host) => {
+    const candidate = Number(host.split(".")[3]);
+    return candidate <= 32 || Math.abs(candidate - localHost) <= 8;
+  });
+  quick.sort((left, right) => {
+    const a = Number(left.split(".")[3]);
+    const b = Number(right.split(".")[3]);
+    if (a === localHost) return -1;
+    if (b === localHost) return 1;
+    return Math.abs(a - localHost) - Math.abs(b - localHost) || a - b;
+  });
+  const quickSet = new Set(quick);
+  const remaining = hosts
+    .filter((host) => !quickSet.has(host))
+    .sort((left, right) => {
+      const a = Number(left.split(".")[3]);
+      const b = Number(right.split(".")[3]);
+      return Math.abs(a - localHost) - Math.abs(b - localHost) || a - b;
+    });
+  return [quick, remaining];
 }
 
 export async function discoverOnAir(opts: {
@@ -79,17 +118,30 @@ export async function discoverOnAir(opts: {
   const port = opts.port ?? DEFAULT_PORT;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const extra = opts.extraHosts ?? [];
-  const hosts = new Set<string>(["127.0.0.1", ...extra]);
-  if (opts.localIp) {
-    hosts.add(opts.localIp);
-    for (const h of subnetHosts(opts.localIp)) hosts.add(h);
-  }
-  const found = await mapPool([...hosts], SCAN_CONCURRENCY, (host) =>
+  const localIp = opts.localIp;
+  const canScanSubnet = Boolean(localIp && isLanUnicast(localIp));
+  const directHosts = [...new Set<string>([...(canScanSubnet ? [] : ["127.0.0.1"]), ...extra])];
+  const direct = await mapPool(directHosts, Math.min(8, SCAN_CONCURRENCY), (host) =>
     probeOnAir(host, port, SCAN_TIMEOUT_MS, fetchImpl),
   );
-  const unique = new Map<string, DiscoveredHost>();
-  for (const hit of found) {
-    unique.set(`${hit.host}:${hit.port}`, hit);
+  if (direct.length > 0 || !canScanSubnet || !localIp) {
+    return uniqueHits(direct);
   }
-  return [...unique.values()];
+
+  const [quick, remaining] = prioritizedSubnet(localIp);
+  const quickHits = await mapPool(
+    quick,
+    SCAN_CONCURRENCY,
+    (host) => probeOnAir(host, port, SCAN_TIMEOUT_MS, fetchImpl),
+    true,
+  );
+  if (quickHits.length > 0) return uniqueHits(quickHits);
+
+  const found = await mapPool(
+    remaining,
+    SCAN_CONCURRENCY,
+    (host) => probeOnAir(host, port, SCAN_TIMEOUT_MS, fetchImpl),
+    true,
+  );
+  return uniqueHits(found);
 }

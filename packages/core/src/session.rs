@@ -84,14 +84,34 @@ pub async fn activate(
     state
         .activate_sender_as(sender, Some(identity))
         .await
-        .map_err(ActivateError::from)
+        .map_err(ActivateError::from)?;
+    let active = state.active_output.lock().unwrap().clone();
+    if let Some(active) = active {
+        state.remember_output(active);
+    }
+    state.remember_sample_rates();
+    let volume = state
+        .output_volume
+        .load(std::sync::atomic::Ordering::Acquire);
+    if let Err(error) = set_active_sender_volume(state, volume).await {
+        eprintln!("could not restore volume on the active {transport} output: {error}");
+    }
+    Ok(())
 }
 
 pub async fn set_volume(state: &CoreState, volume: u8) -> Result<(), ActivateError> {
+    set_active_sender_volume(state, volume)
+        .await
+        .map_err(ActivateError::from)?;
+    state.remember_volume(volume);
+    Ok(())
+}
+
+async fn set_active_sender_volume(state: &CoreState, volume: u8) -> Result<(), SenderError> {
     let mut guard = state.active_sender.lock().await;
     match guard.as_mut() {
-        Some(sender) => sender.set_volume(volume).await.map_err(ActivateError::from),
-        None => Err(ActivateError::Failed("no active output".into())),
+        Some(sender) => sender.set_volume(volume).await,
+        None => Err(SenderError("no active output".into())),
     }
 }
 
@@ -159,11 +179,14 @@ async fn build_sonos(
         .map_err(|e| ActivateError::Failed(e.to_string()))?;
     let stream_url = format!("http://{lan_ip}:{}/stream/audio.wav", crate::DEFAULT_PORT);
     Ok((
-        Box::new(SonosSender::new(
-            device,
-            crate::sender::sonos::soap::http_client(),
-            stream_url,
-        )),
+        Box::new(
+            SonosSender::new(
+                device,
+                crate::sender::sonos::soap::http_client(),
+                stream_url,
+            )
+            .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone()),
+        ),
         identity,
     ))
 }

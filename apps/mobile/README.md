@@ -7,8 +7,10 @@ LAN remote for the desktop mixer. Lives in this pnpm/turbo monorepo next to
 
 - Discover a running desktop on the LAN (`_on-air._tcp` / port 47990 scan)
 - PIN pair (the code shown on the desktop)
+- Native SwiftUI and Material 3 controls from Expo UI, with automatic light/dark appearance
+- Securely restore the last paired desktop after an app restart
 - Source + destination lists, stereo-pair badge, AirPlay/Bluetooth pairing sheet
-- Volume, 5-band EQ, input/output sample rates
+- Volume slider and arrow controls, 5-band EQ, input/output sample rates
 - Live refresh + WebSocket (`/api/ws?token=`)
 
 Autostart and the macOS AirPlay route picker stay desktop-only.
@@ -27,5 +29,5 @@ simulators. Enter the PIN from the desktop ONAIR chrome.
 
 ```bash
 pnpm test:mobile          # control-client + Expo UI unit tests
-pnpm test:mobile:e2e      # discover → pair → full mixer against mock core
+pnpm test:mobile:e2e      # companion + Expo Go LAN discovery/pairing against mock core
 ```

@@ -31,5 +31,6 @@ pub async fn set_eq(
         .gains_db
         .map(|g| g.clamp(EQ_GAIN_RANGE_DB.0, EQ_GAIN_RANGE_DB.1));
     *state.eq_gains_db.lock().unwrap() = clamped;
+    state.remember_eq(clamped);
     StatusCode::NO_CONTENT
 }

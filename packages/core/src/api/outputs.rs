@@ -6,6 +6,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 
 #[derive(Serialize)]
 pub struct OutputInfo {
@@ -73,6 +74,20 @@ pub async fn activate_output(
 #[derive(Deserialize)]
 pub struct SetVolumeRequest {
     pub volume: u8,
+}
+
+#[derive(Serialize)]
+pub struct OutputVolumeResponse {
+    pub volume: u8,
+}
+
+pub async fn get_output_volume(
+    Paired: Paired,
+    State(state): State<CoreState>,
+) -> Json<OutputVolumeResponse> {
+    Json(OutputVolumeResponse {
+        volume: state.output_volume.load(Ordering::Acquire),
+    })
 }
 
 pub async fn set_output_volume(

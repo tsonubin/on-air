@@ -18,7 +18,7 @@ struct KeepAwake {
 }
 
 impl KeepAwake {
-    fn start() -> Self {
+    fn start(enabled: bool) -> Self {
         let keep_awake = KeepAwake {
             enabled: AtomicBool::new(false),
             child: Mutex::new(None),
@@ -27,7 +27,7 @@ impl KeepAwake {
             #[cfg(target_os = "windows")]
             thread: Mutex::new(None),
         };
-        keep_awake.set_enabled(true);
+        keep_awake.set_enabled(enabled);
         keep_awake
     }
 
@@ -215,10 +215,30 @@ pub fn run() {
             if let Err(error) = app.autolaunch().enable() {
                 eprintln!("could not enable on-air login startup: {error}");
             }
+            let state = if on_air_core::mock_mode_enabled() {
+                tauri::async_runtime::block_on(on_air_core::state::CoreState::new_mock())
+            } else {
+                let settings_path = app.path().app_config_dir()?.join("settings.json");
+                on_air_core::state::CoreState::new_persistent(settings_path)
+            };
+            let service_enabled = state.service_enabled.load(Ordering::Acquire);
+            app.manage(state.clone());
+            app.manage(ShutdownStarted(AtomicBool::new(false)));
+            app.manage(KeepAwake::start(service_enabled));
+
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-            let service =
-                MenuItem::with_id(app, "service", "Turn Service Off", true, None::<&str>)?;
+            let service = MenuItem::with_id(
+                app,
+                "service",
+                if service_enabled {
+                    "Turn Service Off"
+                } else {
+                    "Turn Service On"
+                },
+                true,
+                None::<&str>,
+            )?;
             let menu = Menu::with_items(app, &[&open, &service, &quit])?;
             let service_menu = service.clone();
             let mut tray = TrayIconBuilder::new()
@@ -235,7 +255,7 @@ pub fn run() {
                     "service" => {
                         let state = app.state::<on_air_core::state::CoreState>();
                         let enabled = !state.service_enabled.load(Ordering::Acquire);
-                        state.service_enabled.store(enabled, Ordering::Release);
+                        state.set_service_enabled(enabled);
                         let _ = state
                             .ws_tx
                             .send(on_air_core::api::ws::WsEvent::ServiceStateChanged { enabled });
@@ -246,10 +266,15 @@ pub fn run() {
                             "Turn Service On"
                         });
                         if !enabled {
+                            let _ = service_menu.set_enabled(false);
+                            let service_menu = service_menu.clone();
                             let state = state.inner().clone();
                             tauri::async_runtime::spawn(async move {
                                 state.shutdown().await;
+                                let _ = service_menu.set_enabled(true);
                             });
+                        } else {
+                            state.spawn_saved_session_restore();
                         }
                     }
                     _ => {}
@@ -278,14 +303,6 @@ pub fn run() {
                 Err(error) => return Err(error.into()),
             };
             listener.set_nonblocking(true)?;
-            let state = if on_air_core::mock_mode_enabled() {
-                tauri::async_runtime::block_on(on_air_core::state::CoreState::new_mock())
-            } else {
-                on_air_core::state::CoreState::new()
-            };
-            app.manage(state.clone());
-            app.manage(ShutdownStarted(AtomicBool::new(false)));
-            app.manage(KeepAwake::start());
             tauri::async_runtime::spawn(async move {
                 if let Err(err) = on_air_core::serve_with_state_std(listener, state).await {
                     eprintln!("on-air-core HTTP server failed: {err}");

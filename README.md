@@ -29,8 +29,9 @@ Closing the desktop window hides it to the tray; it does not stop the service.
 The tray menu can open the mixer, turn the audio service on or off, or quit.
 Turning the service off stops capture/output work and releases the system sleep
 assertion, while leaving low-cost LAN discovery and health status online so the
-phone can still find the desktop. Turning it back on makes controls available
-immediately; select the source and destination again before going live.
+phone can still find the desktop. Turning it back on restores the last source,
+destination, volume, EQ, and sample rates as soon as the saved devices are
+discoverable.
 
 While the service is on, the desktop asks macOS, Windows, or systemd-based Linux
 to prevent system/idle sleep while still allowing the display to turn off.

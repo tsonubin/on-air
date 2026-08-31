@@ -10,6 +10,7 @@ export {
   getAirplayMode,
   getEq,
   getSampleRate,
+  getVolume,
   goldenPathSonos,
   HttpError,
   listBluetooth,

@@ -11,6 +11,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
 const MAX_STREAM_CLIENTS: usize = 4;
+const SILENCE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(40);
 
 struct StreamClientGuard(CoreState);
 
@@ -45,6 +46,12 @@ fn wav_header(sample_rate: u32) -> Bytes {
     Bytes::from(h)
 }
 
+fn silence_chunk(sample_rate: u32) -> Bytes {
+    let frames =
+        ((u64::from(sample_rate) * SILENCE_INTERVAL.as_millis() as u64) / 1_000).max(1) as usize;
+    Bytes::from(vec![0; frames.saturating_mul(2)])
+}
+
 pub fn sonos_radio_is_live(state: &CoreState) -> bool {
     state
         .active_output
@@ -75,31 +82,46 @@ pub async fn stream_audio(State(state): State<CoreState>) -> Response {
     let pipeline_hz = *state.target_sample_rate_hz.lock().unwrap();
     let output_hz = *state.output_sample_rate_hz.lock().unwrap();
     let header = wav_header(output_hz);
-    let pcm = BroadcastStream::new(rx)
+    let pcm = BroadcastStream::new(rx).filter_map({
+        let mut bridge = RateBridge::new(pipeline_hz, output_hz, 1);
+        let _client_guard = client_guard;
+        move |item| {
+            let _ = &_client_guard;
+            let Ok(chunk) = item else {
+                return None;
+            };
+            if pipeline_hz == output_hz {
+                return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
+            }
+            let resampled = bridge.process_l16_mono_to_l16(&chunk);
+            if resampled.is_empty() {
+                return None;
+            }
+            Some(Ok(Bytes::from(resampled)))
+        }
+    });
+    let silence = silence_chunk(output_hz);
+    let mut silence_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + SILENCE_INTERVAL,
+        SILENCE_INTERVAL,
+    );
+    silence_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let stream_progress = state.stream_progress.clone();
+    let pcm = pcm
+        .timeout_repeating(silence_interval)
+        .map(move |item| {
+            stream_progress.fetch_add(1, Ordering::Relaxed);
+            match item {
+                Ok(pcm) => pcm,
+                Err(_) => Ok(silence.clone()),
+            }
+        })
         .take_while({
             let stream_generation = state.stream_generation.clone();
             let service_enabled = state.service_enabled.clone();
             move |_| {
                 service_enabled.load(Ordering::Acquire)
                     && stream_generation.load(Ordering::Acquire) == generation
-            }
-        })
-        .filter_map({
-            let mut bridge = RateBridge::new(pipeline_hz, output_hz, 1);
-            let _client_guard = client_guard;
-            move |item| {
-                let _ = &_client_guard;
-                let Ok(chunk) = item else {
-                    return None;
-                };
-                if pipeline_hz == output_hz {
-                    return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
-                }
-                let resampled = bridge.process_l16_mono_to_l16(&chunk);
-                if resampled.is_empty() {
-                    return None;
-                }
-                Some(Ok(Bytes::from(resampled)))
             }
         });
     let body = Body::from_stream(tokio_stream::once(Ok(header)).chain(pcm));

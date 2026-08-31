@@ -1,4 +1,18 @@
-import { Button as ExpoButton, Host, Slider } from "@expo/ui";
+import {
+  BottomSheet,
+  Button,
+  Collapsible,
+  Column,
+  FieldGroup,
+  Host,
+  Picker,
+  RNHostView,
+  Row,
+  Spacer,
+  Text,
+  TextInput,
+  useNativeState,
+} from "@expo/ui";
 import type {
   ActiveOutput,
   DiscoveredHost,
@@ -10,17 +24,7 @@ import { DEFAULT_PORT } from "@on-air/api-types";
 import { StatusBar } from "expo-status-bar";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  AppState,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { AppState, Text as ReactNativeText, useColorScheme, View } from "react-native";
 import {
   activateInput,
   activateOutput,
@@ -32,6 +36,7 @@ import {
   getAirplayMode,
   getEq,
   getSampleRate,
+  getVolume,
   HttpError,
   listInputs,
   listOutputs,
@@ -44,21 +49,43 @@ import {
   verifyPin,
   wsUrl,
 } from "./src/controlClient";
+import { NativeFader } from "./src/native-fader";
+import { clearPairing, loadPairing, savePairing } from "./src/pairing-store";
+import { brandColors, theme } from "./src/theme";
 
-const EQ_LABELS = ["60", "250", "1k", "4k", "12k"] as const;
-const colors = {
-  well: "#0a0908",
-  face: "#1a1814",
-  face2: "#221f1a",
-  ink: "#f3ead4",
-  steel: "#c4b89a",
-  steelDim: "#8a7f68",
-  live: "#ff3b2a",
-  amber: "#e0a24b",
-  border: "#3a342a",
-};
+const EQ_LABELS = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"] as const;
 
 type PairTarget = { transport: string; id: string; name: string };
+type QueuedControl<T> = {
+  base: string;
+  token: string;
+  connection: number;
+  value: T;
+};
+
+function normalizeDesktopHost(value: string): string {
+  return value
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/.*$/, "")
+    .replace(/:\d+$/, "");
+}
+
+function formatRate(hz: number): string {
+  if (hz % 1000 === 0) return `${hz / 1000} kHz`;
+  return `${(hz / 1000).toFixed(1)} kHz`;
+}
+
+function friendlyError(error: unknown, action = "complete that action"): string {
+  if (error instanceof HttpError) {
+    if (error.status === 401) return "Pairing expired or the code was not accepted. Pair again.";
+    if (error.status === 429) return "Too many pairing attempts. Wait a moment and try again.";
+    if (error.status === 503)
+      return "The desktop service is paused. Turn it on from the tray menu.";
+    if (error.status === 404) return "That device is no longer available. Refresh and try again.";
+  }
+  return `Could not ${action}. Check that both devices are on the same Wi-Fi and try again.`;
+}
 
 async function localIpv4(): Promise<string | undefined> {
   try {
@@ -69,84 +96,20 @@ async function localIpv4(): Promise<string | undefined> {
   }
 }
 
-function Fader(props: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  testId: string;
-  onChange: (value: number) => void;
-}) {
-  const step = props.step ?? 1;
-  const clamp = (n: number) => Math.min(props.max, Math.max(props.min, n));
-  const [draft, setDraft] = useState(props.value);
-  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const onChange = useRef(props.onChange);
-  onChange.current = props.onChange;
-
-  useEffect(() => setDraft(props.value), [props.value]);
-  useEffect(
-    () => () => {
-      if (commitTimer.current) clearTimeout(commitTimer.current);
-    },
-    [],
-  );
-
-  const changeNow = (next: number) => {
-    if (commitTimer.current) clearTimeout(commitTimer.current);
-    setDraft(next);
-    onChange.current(next);
-  };
-  const preview = (value: number) => {
-    const next = clamp(value);
-    setDraft(next);
-    if (commitTimer.current) clearTimeout(commitTimer.current);
-    // Avoid a LAN request for every drag sample on older phones and laptops.
-    commitTimer.current = setTimeout(() => onChange.current(next), 180);
-  };
-
+function ErrorNotice({ message }: { message: string }) {
+  const scheme = useColorScheme();
+  const color = brandColors[scheme === "dark" ? "dark" : "light"].error;
   return (
-    <View style={styles.fader} testID={props.testId}>
-      <View style={styles.faderHeader}>
-        <Text style={styles.faderLabel}>{props.label}</Text>
-        <Text style={styles.faderValue}>{draft}</Text>
-      </View>
-      <View style={styles.faderControls}>
-        <Pressable
-          accessibilityLabel={`Decrease ${props.label}`}
-          accessibilityRole="button"
-          onPress={() => changeNow(clamp(draft - step))}
-          style={styles.faderBtn}
-          testID={`${props.testId}-down`}
-        >
-          <Text style={styles.faderBtnText}>−</Text>
-        </Pressable>
-        <Host matchContents style={styles.nativeSliderHost}>
-          <Slider
-            min={props.min}
-            max={props.max}
-            step={step}
-            value={draft}
-            onValueChange={preview}
-            testID={`${props.testId}-native`}
-          />
-        </Host>
-        <Pressable
-          accessibilityLabel={`Increase ${props.label}`}
-          accessibilityRole="button"
-          onPress={() => changeNow(clamp(draft + step))}
-          style={styles.faderBtn}
-          testID={`${props.testId}-up`}
-        >
-          <Text style={styles.faderBtnText}>+</Text>
-        </Pressable>
-      </View>
-    </View>
+    <RNHostView matchContents>
+      <ReactNativeText accessibilityRole="alert" selectable style={{ color, fontSize: 15 }}>
+        {message}
+      </ReactNativeText>
+    </RNHostView>
   );
 }
 
 export default function App(): React.JSX.Element {
+  const [hydrated, setHydrated] = useState(false);
   const [host, setHost] = useState("127.0.0.1");
   const [pin, setPin] = useState("");
   const [token, setToken] = useState<string | null>(null);
@@ -159,10 +122,10 @@ export default function App(): React.JSX.Element {
   const [activeOutput, setActiveOutput] = useState<ActiveOutput | null>(null);
   const [volume, setVolumeValue] = useState(50);
   const [gains, setGains] = useState<[number, number, number, number, number]>([0, 0, 0, 0, 0]);
-  const [sampleRate, setInRate] = useState(44100);
-  const [outputSampleRate, setOutRate] = useState(44100);
-  const [inputRates, setInputRates] = useState<number[]>([44100, 48000]);
-  const [outputRates, setOutputRates] = useState<number[]>([44100, 48000]);
+  const [sampleRate, setInRate] = useState(44_100);
+  const [outputSampleRate, setOutRate] = useState(44_100);
+  const [inputRates, setInputRates] = useState<number[]>([44_100, 48_000]);
+  const [outputRates, setOutputRates] = useState<number[]>([44_100, 48_000]);
   const [airplayMode, setAirplayMode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
@@ -171,16 +134,64 @@ export default function App(): React.JSX.Element {
   const [devicePairing, setDevicePairing] = useState(false);
   const [configuringRate, setConfiguringRate] = useState(false);
   const [busyTarget, setBusyTarget] = useState<string | null>(null);
+  const [toneOpen, setToneOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  const hostInput = useNativeState("127.0.0.1");
+  const pinInput = useNativeState("");
+  const devicePinInput = useNativeState("");
   const didInitialScan = useRef(false);
   const scanInFlight = useRef(false);
+  const scanRevision = useRef(0);
+  const connectionRevision = useRef(0);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshQueued = useRef(false);
+  const gainsRef = useRef(gains);
+  const volumePending = useRef<QueuedControl<number> | null>(null);
+  const volumeSending = useRef(false);
+  const eqPending = useRef<QueuedControl<typeof gains> | null>(null);
+  const eqSending = useRef(false);
+  gainsRef.current = gains;
 
-  const base = apiBase(host, DEFAULT_PORT);
+  const invalidateConnection = useCallback(() => {
+    connectionRevision.current += 1;
+    refreshInFlight.current = null;
+    refreshQueued.current = false;
+    volumePending.current = null;
+    eqPending.current = null;
+  }, []);
+
+  const setDesktopHost = useCallback(
+    (value: string) => {
+      scanRevision.current += 1;
+      hostInput.value = value;
+      setHost(value);
+    },
+    [hostInput],
+  );
+  const normalizedHost = normalizeDesktopHost(host);
+  const base = apiBase(normalizedHost || "127.0.0.1", DEFAULT_PORT);
+
+  useEffect(() => {
+    let mounted = true;
+    void loadPairing().then((saved) => {
+      if (!mounted) return;
+      if (saved) {
+        invalidateConnection();
+        setDesktopHost(saved.host);
+        setToken(saved.token);
+      }
+      setHydrated(true);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [invalidateConnection, setDesktopHost]);
 
   const scan = useCallback(async () => {
     if (scanInFlight.current) return;
+    const revision = scanRevision.current + 1;
+    scanRevision.current = revision;
     scanInFlight.current = true;
     setScanning(true);
     setError(null);
@@ -188,19 +199,25 @@ export default function App(): React.JSX.Element {
       const localIp = await localIpv4();
       const hits = await discoverOnAir({
         localIp,
-        extraHosts: host ? [host] : [],
+        extraHosts: normalizedHost && normalizedHost !== "127.0.0.1" ? [normalizedHost] : [],
       });
+      if (scanRevision.current !== revision) return;
       setFound(hits);
-      if (hits[0] && host === "127.0.0.1") {
-        setHost(hits[0].host);
+      if (hits[0] && (normalizedHost === "127.0.0.1" || !normalizedHost)) {
+        setDesktopHost(hits[0].host);
       }
-    } catch (err) {
-      setError(String(err));
+      if (hits.length === 0) {
+        setError("No desktop was found automatically. Enter its LAN address below.");
+      }
+    } catch (scanError) {
+      if (scanRevision.current === revision) {
+        setError(friendlyError(scanError, "scan the local network"));
+      }
     } finally {
       scanInFlight.current = false;
       setScanning(false);
     }
-  }, [host]);
+  }, [normalizedHost, setDesktopHost]);
 
   const refresh = useCallback((): Promise<void> => {
     if (!token) return Promise.resolve();
@@ -208,8 +225,8 @@ export default function App(): React.JSX.Element {
       refreshQueued.current = true;
       return refreshInFlight.current;
     }
-
     const run = (async () => {
+      const connection = connectionRevision.current;
       do {
         refreshQueued.current = false;
         setError(null);
@@ -222,9 +239,14 @@ export default function App(): React.JSX.Element {
             getActiveOutput(base, token),
             getEq(base, token),
             getSampleRate(base, token),
+            getVolume(base, token),
             getAirplayMode(base, token),
           ]);
-          const [st, ins, outs, actIn, actOut, eq, sr, ap] = results;
+          if (connectionRevision.current !== connection) {
+            refreshQueued.current = false;
+            return;
+          }
+          const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, ap] = results;
           if (st.status === "fulfilled") setStatus(st.value);
           if (ins.status === "fulfilled") setInputs(ins.value);
           if (outs.status === "fulfilled") setOutputs(outs.value);
@@ -234,27 +256,22 @@ export default function App(): React.JSX.Element {
           if (sr.status === "fulfilled") {
             setInRate(sr.value.input.sample_rate_hz);
             setOutRate(sr.value.output.sample_rate_hz);
-            if (sr.value.input.supported_hz.length) {
-              setInputRates(sr.value.input.supported_hz);
-            }
-            if (sr.value.output.supported_hz.length) {
-              setOutputRates(sr.value.output.supported_hz);
-            }
+            if (sr.value.input.supported_hz.length) setInputRates(sr.value.input.supported_hz);
+            if (sr.value.output.supported_hz.length) setOutputRates(sr.value.output.supported_hz);
           }
+          if (savedVolume.status === "fulfilled") setVolumeValue(savedVolume.value);
           if (ap.status === "fulfilled") setAirplayMode(ap.value);
-
           const failure = results.find((result) => result.status === "rejected");
           if (failure?.status === "rejected") throw failure.reason;
-        } catch (err) {
-          if (err instanceof HttpError && err.status === 401) {
+        } catch (refreshError) {
+          if (connectionRevision.current !== connection) return;
+          if (refreshError instanceof HttpError && refreshError.status === 401) {
+            invalidateConnection();
             setToken(null);
             setStatus(null);
-            setError("Pairing expired. Enter the current desktop PIN to reconnect.");
-          } else if (err instanceof HttpError && err.status === 503) {
-            setError("The desktop service is paused. Turn it on from the on-air tray menu.");
-          } else {
-            setError(String(err));
+            void clearPairing().catch(() => {});
           }
+          setError(friendlyError(refreshError, "refresh the mixer"));
           refreshQueued.current = false;
         }
       } while (refreshQueued.current);
@@ -264,13 +281,13 @@ export default function App(): React.JSX.Element {
       if (refreshInFlight.current === run) refreshInFlight.current = null;
     });
     return run;
-  }, [base, token]);
+  }, [base, invalidateConnection, token]);
 
   useEffect(() => {
-    if (didInitialScan.current) return;
+    if (!hydrated || token || didInitialScan.current) return;
     didInitialScan.current = true;
     void scan();
-  }, [scan]);
+  }, [hydrated, scan, token]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
@@ -282,42 +299,58 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     if (!token || !appActive) return;
     void refresh();
-    const id = setInterval(() => void refresh(), 15000);
+    const id = setInterval(() => void refresh(), 15_000);
+    let eventRefresh: ReturnType<typeof setTimeout> | undefined;
     let ws: WebSocket | undefined;
     try {
       ws = new WebSocket(wsUrl(base, token));
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(String(event.data)) as WsEvent;
-          if (message.type !== "LevelMeter") void refresh();
+          if (message.type === "ServiceStateChanged") {
+            setStatus((current) =>
+              current ? { ...current, service_enabled: message.enabled } : current,
+            );
+          } else if (message.type !== "LevelMeter") {
+            if (eventRefresh) clearTimeout(eventRefresh);
+            eventRefresh = setTimeout(() => void refresh(), 300);
+          }
         } catch {
-          // Ignore malformed events; the periodic refresh remains a fallback.
+          // Periodic refresh remains the recovery path for malformed events.
         }
       };
     } catch {
-      /* Expo web / tests may lack WS */
+      // Expo web and unit tests may not provide WebSocket.
     }
     return () => {
       clearInterval(id);
+      if (eventRefresh) clearTimeout(eventRefresh);
       ws?.close();
     };
   }, [token, base, refresh, appActive]);
 
   const pair = async () => {
+    const desktopHost = normalizeDesktopHost(host);
     const normalizedPin = pin.replace(/\D/g, "").slice(0, 6);
-    if (pairing || normalizedPin.length !== 6) {
-      setError("Enter the six-digit PIN shown by the desktop.");
+    if (pairing || normalizedPin.length !== 6 || !desktopHost) {
+      setError("Enter the desktop LAN address and its six-digit pairing code.");
       return;
     }
+    scanRevision.current += 1;
     setPairing(true);
     setError(null);
+    setDesktopHost(desktopHost);
     try {
-      const st = await fetchStatus(base);
-      setStatus(st);
-      const t = await verifyPin(base, normalizedPin);
-      setToken(t);
-    } catch (err) {
-      setError(String(err));
+      const pairingBase = apiBase(desktopHost, DEFAULT_PORT);
+      const nextStatus = await fetchStatus(pairingBase);
+      if (nextStatus.service_enabled === false) throw new HttpError("/api/status", 503);
+      const nextToken = await verifyPin(pairingBase, normalizedPin);
+      invalidateConnection();
+      setStatus(nextStatus);
+      setToken(nextToken);
+      void savePairing({ host: desktopHost, token: nextToken }).catch(() => {});
+    } catch (pairError) {
+      setError(friendlyError(pairError, "pair with the desktop"));
     } finally {
       setPairing(false);
     }
@@ -334,14 +367,14 @@ export default function App(): React.JSX.Element {
   }, [inputs]);
 
   const pickInput = async (name: string) => {
-    if (!token || busyTarget) return;
+    if (!token || busyTarget || !name) return;
     setBusyTarget(`input:${name}`);
     setError(null);
     try {
       await activateInput(base, name, token);
       await refresh();
-    } catch (err) {
-      setError(String(err));
+    } catch (inputError) {
+      setError(friendlyError(inputError, "change the source"));
     } finally {
       setBusyTarget(null);
     }
@@ -362,17 +395,18 @@ export default function App(): React.JSX.Element {
   const chooseOutput = async (output: OutputInfo) => {
     if (output.needs_pair && !output.paired) {
       setPairPin("");
+      devicePinInput.value = "";
       setPairTarget({ transport: output.transport, id: output.id, name: output.name });
       return;
     }
     try {
       await activate(output);
-    } catch (err) {
-      setError(String(err));
+    } catch (outputError) {
+      setError(friendlyError(outputError, "connect that speaker"));
     }
   };
 
-  const submitPair = async () => {
+  const submitDevicePair = async () => {
     if (!pairTarget || !token || devicePairing) return;
     setDevicePairing(true);
     setError(null);
@@ -383,12 +417,13 @@ export default function App(): React.JSX.Element {
         await pairBluetooth(base, pairTarget.id, token);
       }
       const output = outputs.find(
-        (o) => o.transport === pairTarget.transport && o.id === pairTarget.id,
+        (candidate) =>
+          candidate.transport === pairTarget.transport && candidate.id === pairTarget.id,
       );
       setPairTarget(null);
       if (output) await activate(output);
-    } catch (err) {
-      setError(String(err));
+    } catch (deviceError) {
+      setError(friendlyError(deviceError, "pair that speaker"));
     } finally {
       setDevicePairing(false);
     }
@@ -404,16 +439,19 @@ export default function App(): React.JSX.Element {
     try {
       await setSampleRate(base, kind === "input" ? { input_hz: hz } : { output_hz: hz }, token);
       await refresh();
-    } catch (err) {
+    } catch (rateError) {
       if (kind === "input") setInRate(previous);
       else setOutRate(previous);
-      setError(`Could not change the ${kind} sample rate: ${String(err)}`);
+      setError(friendlyError(rateError, `change the ${kind} sample rate`));
     } finally {
       setConfiguringRate(false);
     }
   };
 
   const disconnect = () => {
+    scanRevision.current += 1;
+    invalidateConnection();
+    void clearPairing().catch(() => {});
     setToken(null);
     setStatus(null);
     setInputs([]);
@@ -421,432 +459,454 @@ export default function App(): React.JSX.Element {
     setActiveInput("");
     setActiveOutput(null);
     setError(null);
+    didInitialScan.current = false;
   };
 
-  const applyVolume = async (value: number) => {
+  const drainVolume = async () => {
+    if (volumeSending.current) return;
+    volumeSending.current = true;
+    try {
+      while (volumePending.current) {
+        const pending = volumePending.current;
+        volumePending.current = null;
+        if (pending.connection !== connectionRevision.current) continue;
+        try {
+          await setVolume(pending.base, pending.value, pending.token);
+        } catch (volumeError) {
+          if (pending.connection === connectionRevision.current && volumePending.current === null) {
+            setError(friendlyError(volumeError, "change the volume"));
+          }
+        }
+      }
+    } finally {
+      volumeSending.current = false;
+      if (volumePending.current) void drainVolume();
+    }
+  };
+
+  const applyVolume = (value: number) => {
     setVolumeValue(value);
     if (!token) return;
+    volumePending.current = {
+      base,
+      token,
+      connection: connectionRevision.current,
+      value,
+    };
+    void drainVolume();
+  };
+
+  const drainEq = async () => {
+    if (eqSending.current) return;
+    eqSending.current = true;
     try {
-      await setVolume(base, value, token);
-    } catch (err) {
-      setError(String(err));
+      while (eqPending.current) {
+        const pending = eqPending.current;
+        eqPending.current = null;
+        if (pending.connection !== connectionRevision.current) continue;
+        try {
+          await setEq(pending.base, pending.value, pending.token);
+        } catch (eqError) {
+          if (pending.connection === connectionRevision.current && eqPending.current === null) {
+            setError(friendlyError(eqError, "change the equalizer"));
+          }
+        }
+      }
+    } finally {
+      eqSending.current = false;
+      if (eqPending.current) void drainEq();
     }
   };
 
-  const applyEq = async (next: [number, number, number, number, number]) => {
+  const applyEq = (next: [number, number, number, number, number]) => {
+    gainsRef.current = next;
     setGains(next);
     if (!token) return;
-    try {
-      await setEq(base, next, token);
-    } catch (err) {
-      setError(String(err));
-    }
+    eqPending.current = {
+      base,
+      token,
+      connection: connectionRevision.current,
+      value: next,
+    };
+    void drainEq();
   };
 
   const serviceAvailable = status?.service_enabled !== false;
   const live = serviceAvailable && Boolean(activeOutput);
-  const lampLabel = live
-    ? "on air"
+  const statusLabel = live
+    ? "● Live"
     : !serviceAvailable
-      ? "service paused"
-      : error || !status
-        ? "problem"
-        : "ok";
-  const lampColor = live
-    ? colors.live
-    : error || !status || !serviceAvailable
-      ? colors.amber
-      : "#5a1814";
+      ? "Service paused"
+      : status
+        ? "Ready"
+        : "Connecting";
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar style="light" />
-      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.scroll}>
-        <View style={styles.header}>
-          <View style={[styles.wordmark, live && styles.wordmarkLive]}>
-            <Text style={[styles.wordmarkText, { color: lampColor }]} testID="core-status">
-              ONAIR
-            </Text>
-            <Text style={styles.srOnly}>{status ? "ok" : "wait"}</Text>
-          </View>
-          <Text style={styles.title} testID="remote-title">
+  const pairingScreen = (
+    <FieldGroup testID="pairing-screen">
+      <FieldGroup.Section title="on-air remote">
+        <Column spacing={theme.spacing.sm}>
+          <Text testID="remote-title" textStyle={{ fontSize: 24, fontWeight: "700" }}>
             on-air remote
           </Text>
-          <Text style={styles.meta}>{lampLabel}</Text>
-        </View>
-
-        {!token && (
-          <View style={styles.card}>
-            <Text style={styles.heading}>Find desktop</Text>
-            <Text style={styles.hint}>
-              Scans the LAN for a running on-air mixer (_on-air._tcp / port {DEFAULT_PORT}).
-            </Text>
-            <Host matchContents style={styles.nativeButtonHost}>
-              <ExpoButton
-                label={scanning ? "Scanning…" : "Scan LAN"}
-                onPress={() => void scan()}
-                disabled={scanning}
-                variant="outlined"
-                testID="scan-button"
-              />
-            </Host>
-            {scanning && <ActivityIndicator color={colors.amber} />}
-            {found.map((hit) => (
-              <Pressable
-                key={`${hit.host}:${hit.port}`}
-                style={[styles.row, host === hit.host && styles.rowOn]}
-                onPress={() => setHost(hit.host)}
-                testID={`discovered-${hit.host}`}
-              >
-                <Text style={styles.rowTitle}>{hit.name ?? "on-air"}</Text>
-                <Text style={styles.rowMeta}>
-                  {hit.host}:{hit.port}
-                  {hit.version ? ` v${hit.version}` : ""}
-                </Text>
-              </Pressable>
-            ))}
-            <TextInput
-              style={styles.input}
-              testID="host-input"
-              placeholder="Desktop LAN IP"
-              placeholderTextColor={colors.steelDim}
-              value={host}
-              onChangeText={setHost}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TextInput
-              style={styles.input}
-              testID="pin-input"
-              placeholder="Pairing PIN from the desktop"
-              placeholderTextColor={colors.steelDim}
-              value={pin}
-              onChangeText={(value) => setPin(value.replace(/\D/g, "").slice(0, 6))}
-              keyboardType="number-pad"
-              maxLength={6}
-            />
-            <Host matchContents style={styles.nativeButtonHost}>
-              <ExpoButton
-                label={pairing ? "Pairing…" : "Pair"}
-                onPress={() => void pair()}
-                disabled={pairing || pin.length !== 6}
-                testID="pair-button"
-              />
-            </Host>
-          </View>
+          <Text testID="core-status" textStyle={{ fontSize: 17, fontWeight: "600" }}>
+            ONAIR
+          </Text>
+          <Text>Find the desktop mixer, enter its pairing code, and start listening.</Text>
+        </Column>
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Find desktop">
+        <Button
+          label={scanning ? "Scanning local network…" : "Scan LAN"}
+          disabled={scanning}
+          onPress={() => void scan()}
+          testID="scan-button"
+        />
+        {found.map((hit) => {
+          const selected = normalizeDesktopHost(host) === hit.host;
+          return (
+            <Button
+              key={`${hit.host}:${hit.port}`}
+              variant={selected ? "filled" : "outlined"}
+              onPress={() => setDesktopHost(hit.host)}
+              testID={`discovered-${hit.host}`}
+            >
+              <Row alignment="center" spacing={theme.spacing.sm}>
+                <Column spacing={theme.spacing.xs}>
+                  <Text textStyle={{ fontWeight: "600" }}>{hit.name ?? "on-air desktop"}</Text>
+                  <Text>{`${hit.host}:${hit.port}`}</Text>
+                </Column>
+                <Spacer />
+                <Text>{selected ? "Selected" : "Choose"}</Text>
+              </Row>
+            </Button>
+          );
+        })}
+        {!scanning && found.length === 0 && (
+          <Text>No mixer found yet. Automatic scan and manual address both work in Expo Go.</Text>
         )}
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Connect manually">
+        <Column spacing={theme.spacing.sm}>
+          <Text textStyle={{ fontWeight: "600" }}>Desktop LAN address</Text>
+          <TextInput
+            value={hostInput}
+            onChangeText={setDesktopHost}
+            placeholder="192.168.1.20"
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            returnKeyType="next"
+            testID="host-input"
+            style={{
+              padding: 12,
+              borderWidth: 1,
+              borderColor: theme.seedColor,
+              borderRadius: 12,
+            }}
+          />
+          <Text textStyle={{ fontWeight: "600" }}>Six-digit pairing code</Text>
+          <TextInput
+            value={pinInput}
+            onChangeText={(value) => {
+              const next = value.replace(/\D/g, "").slice(0, 6);
+              pinInput.value = next;
+              setPin(next);
+            }}
+            placeholder="000000"
+            keyboardType="number-pad"
+            inputMode="numeric"
+            maxLength={6}
+            returnKeyType="done"
+            onSubmitEditing={() => void pair()}
+            testID="pin-input"
+            style={{
+              padding: 12,
+              borderWidth: 1,
+              borderColor: theme.seedColor,
+              borderRadius: 12,
+            }}
+            textStyle={{ fontSize: 22, fontWeight: "600", letterSpacing: 4, textAlign: "center" }}
+          />
+          <Button
+            label={pairing ? "Pairing…" : "Pair with desktop"}
+            disabled={pairing || pin.length !== 6 || !normalizeDesktopHost(host)}
+            onPress={() => void pair()}
+            testID="pair-button"
+          />
+          <Text>
+            The code is shown only on the desktop app. Both devices must use the same LAN.
+          </Text>
+          {error && <ErrorNotice message={error} />}
+        </Column>
+      </FieldGroup.Section>
+    </FieldGroup>
+  );
 
-        {token && (
-          <>
-            <View style={styles.sessionRow}>
-              <Text testID="paired-token" style={styles.paired} selectable>
-                paired · {host}:{DEFAULT_PORT} · {airplayMode || "owntone"}
-              </Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={disconnect}
-                style={styles.disconnectButton}
-                testID="disconnect-button"
-              >
-                <Text style={styles.rowMeta}>Disconnect</Text>
-              </Pressable>
-            </View>
-            {status && (
-              <Text style={styles.meta}>
-                core v{status.version} · {serviceAvailable ? "service on" : "service paused"}
-              </Text>
-            )}
-
-            <Text style={styles.heading}>Source</Text>
-            {uniqueInputs.length === 0 && <Text style={styles.hint}>No capture devices</Text>}
-            {uniqueInputs.map((name) => (
-              <Pressable
-                key={name}
-                testID={`input-${name}`}
-                style={[styles.row, activeInput === name && styles.rowOn]}
-                onPress={() => void pickInput(name)}
-                disabled={busyTarget !== null}
-              >
-                <View style={[styles.dot, activeInput === name && styles.dotOn]} />
-                <Text style={styles.rowTitle}>{prettyInput(name)}</Text>
-              </Pressable>
-            ))}
-
-            <Text style={styles.heading}>Destination</Text>
-            {airplayMode === "avroute-picker" && (
-              <Text style={styles.hint}>
-                macOS requires AirPlay selection on the desktop. Use the AirPlay picker in on-air.
-              </Text>
-            )}
-            <Text testID="active-output" style={styles.srOnly}>
-              {activeOutput ? `${activeOutput.transport}: ${activeOutput.device_name}` : "none"}
+  const mixerScreen = (
+    <FieldGroup testID="mixer-screen">
+      <FieldGroup.Section title="on-air remote">
+        <Column spacing={theme.spacing.sm}>
+          <Row alignment="center" spacing={theme.spacing.sm}>
+            <Text testID="remote-title" textStyle={{ fontSize: 24, fontWeight: "700" }}>
+              on-air remote
             </Text>
-            {outputs.length === 0 && (
-              <Text style={styles.hint}>Waiting for a speaker on the LAN</Text>
-            )}
-            {outputs.map((output) => {
-              const on =
-                activeOutput?.transport === output.transport &&
-                activeOutput?.device_id === output.id;
-              const desktopPickerOnly =
-                output.transport === "airplay" && airplayMode === "avroute-picker";
-              const pairMark = (output.member_count ?? 1) >= 2 || output.kind === "pair";
-              return (
-                <Pressable
-                  key={`${output.transport}-${output.id}`}
-                  testID={`output-${output.transport}-${output.id}`}
-                  style={[styles.row, on && styles.rowOn, desktopPickerOnly && styles.disabled]}
-                  onPress={() => void chooseOutput(output)}
-                  disabled={busyTarget !== null || desktopPickerOnly}
-                >
-                  <View style={[styles.dot, on && styles.dotOn]} />
-                  <Text style={styles.rowTitle}>{output.name}</Text>
-                  <Text style={styles.rowMeta}>
-                    {pairMark ? "pair · " : ""}
-                    {desktopPickerOnly
-                      ? "desktop picker"
-                      : output.needs_pair && !output.paired
-                        ? "pin"
-                        : output.transport}
-                  </Text>
-                </Pressable>
-              );
-            })}
-
-            <View style={styles.mixer}>
-              <Fader
-                label="volume"
-                value={volume}
-                min={0}
-                max={100}
-                testId="volume-slider"
-                onChange={(v) => void applyVolume(v)}
+            <Spacer />
+            <Text testID="core-status" textStyle={{ fontWeight: "700" }}>
+              {statusLabel}
+            </Text>
+          </Row>
+          <Text testID="paired-token">{`paired · ${normalizedHost}:${DEFAULT_PORT}`}</Text>
+          <Text>{status ? `Core ${status.version}` : "Waiting for desktop status"}</Text>
+          <Row alignment="center" spacing={theme.spacing.sm}>
+            <Button
+              label="Refresh"
+              variant="outlined"
+              onPress={() => void refresh()}
+              testID="refresh-button"
+            />
+            <Spacer />
+            <Button
+              label="Disconnect"
+              variant="text"
+              onPress={disconnect}
+              testID="disconnect-button"
+            />
+          </Row>
+          {!serviceAvailable && (
+            <Text>Turn the service on from the desktop tray before changing audio controls.</Text>
+          )}
+          {error && <ErrorNotice message={error} />}
+        </Column>
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Now playing">
+        <Column spacing={theme.spacing.sm}>
+          <Text textStyle={{ fontWeight: "600" }}>Source</Text>
+          <Text>{activeInput ? prettyInput(activeInput) : "Choose an input below"}</Text>
+          <Text textStyle={{ fontWeight: "600" }}>Speaker</Text>
+          <Text testID="active-output">
+            {activeOutput ? activeOutput.device_name : "Choose a destination below"}
+          </Text>
+        </Column>
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Source" disabled={!serviceAvailable}>
+        <Column spacing={theme.spacing.sm}>
+          <Text>Capture device</Text>
+          <Picker
+            selectedValue={activeInput}
+            onValueChange={(name) => void pickInput(String(name))}
+            appearance="menu"
+            enabled={serviceAvailable && busyTarget === null && uniqueInputs.length > 0}
+            testID="source-picker"
+          >
+            <Picker.Item label="Choose a source" value="" />
+            {uniqueInputs.map((name) => (
+              <Picker.Item key={name} label={prettyInput(name)} value={name} />
+            ))}
+          </Picker>
+          {uniqueInputs.length === 0 && <Text>No capture devices are available.</Text>}
+        </Column>
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Destination" disabled={!serviceAvailable}>
+        {outputs.length === 0 && <Text>Waiting for speakers on the LAN…</Text>}
+        {airplayMode === "avroute-picker" && (
+          <Text>AirPlay selection is available from the desktop picker on macOS.</Text>
+        )}
+        {outputs.map((output) => {
+          const selected =
+            activeOutput?.transport === output.transport && activeOutput.device_id === output.id;
+          const desktopOnly = output.transport === "airplay" && airplayMode === "avroute-picker";
+          const working = busyTarget === `${output.transport}:${output.id}`;
+          const pair = (output.member_count ?? 1) >= 2 || output.kind === "pair";
+          const action = desktopOnly
+            ? "Desktop only"
+            : working
+              ? "Connecting…"
+              : selected
+                ? "Connected"
+                : output.needs_pair && !output.paired
+                  ? "Pair"
+                  : "Connect";
+          return (
+            <Button
+              key={`${output.transport}-${output.id}`}
+              variant={selected ? "filled" : "outlined"}
+              disabled={!serviceAvailable || busyTarget !== null || desktopOnly}
+              onPress={() => void chooseOutput(output)}
+              testID={`output-${output.transport}-${output.id}`}
+            >
+              <Row alignment="center" spacing={theme.spacing.sm}>
+                <Column spacing={theme.spacing.xs}>
+                  <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
+                  <Text>{`${pair ? "Stereo pair · " : ""}${output.transport}`}</Text>
+                </Column>
+                <Spacer />
+                <Text>{action}</Text>
+              </Row>
+            </Button>
+          );
+        })}
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Volume" disabled={!serviceAvailable || !activeOutput}>
+        <NativeFader
+          label="Volume"
+          value={volume}
+          min={0}
+          max={100}
+          testId="volume-slider"
+          disabled={!serviceAvailable || !activeOutput}
+          showStepButtons
+          onChange={(value) => void applyVolume(value)}
+        />
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Sound" disabled={!serviceAvailable}>
+        <Collapsible
+          label="Equalizer"
+          isOpen={toneOpen}
+          onOpenChange={setToneOpen}
+          labelStyle={{ fontWeight: "600" }}
+        >
+          <Column spacing={theme.spacing.md}>
+            {gains.map((gain, index) => (
+              <NativeFader
+                key={EQ_LABELS[index]}
+                label={EQ_LABELS[index]}
+                value={gain}
+                min={-12}
+                max={12}
+                step={0.5}
+                testId={`eq-band-${index}`}
+                disabled={!serviceAvailable}
+                onChange={(value) => {
+                  const next = [...gainsRef.current] as typeof gains;
+                  next[index] = value;
+                  void applyEq(next);
+                }}
               />
-              {gains.map((gain, i) => (
-                <Fader
-                  key={EQ_LABELS[i]}
-                  label={EQ_LABELS[i]}
-                  value={gain}
-                  min={-12}
-                  max={12}
-                  step={0.5}
-                  testId={`eq-band-${i}`}
-                  onChange={(v) => {
-                    const next = [...gains] as typeof gains;
-                    next[i] = v;
-                    void applyEq(next);
+            ))}
+            <Button
+              label="Reset equalizer"
+              variant="outlined"
+              disabled={!serviceAvailable || gains.every((gain) => gain === 0)}
+              onPress={() => void applyEq([0, 0, 0, 0, 0])}
+              testID="eq-reset-button"
+            />
+          </Column>
+        </Collapsible>
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Audio quality" disabled={!serviceAvailable}>
+        <Collapsible
+          label="Sample rates"
+          isOpen={advancedOpen}
+          onOpenChange={setAdvancedOpen}
+          labelStyle={{ fontWeight: "600" }}
+        >
+          <Column spacing={theme.spacing.md}>
+            <Column spacing={theme.spacing.sm}>
+              <Text textStyle={{ fontWeight: "600" }}>Input rate</Text>
+              <Picker
+                selectedValue={sampleRate}
+                onValueChange={(value) => void applyRate("input", Number(value))}
+                appearance="menu"
+                enabled={serviceAvailable && !configuringRate}
+                testID="sample-rate-picker"
+              >
+                {inputRates.map((hz) => (
+                  <Picker.Item key={`in-${hz}`} label={formatRate(hz)} value={hz} />
+                ))}
+              </Picker>
+            </Column>
+            <Column spacing={theme.spacing.sm}>
+              <Text textStyle={{ fontWeight: "600" }}>Output rate</Text>
+              <Picker
+                selectedValue={outputSampleRate}
+                onValueChange={(value) => void applyRate("output", Number(value))}
+                appearance="menu"
+                enabled={serviceAvailable && !configuringRate}
+                testID="output-sample-rate-picker"
+              >
+                {outputRates.map((hz) => (
+                  <Picker.Item key={`out-${hz}`} label={formatRate(hz)} value={hz} />
+                ))}
+              </Picker>
+            </Column>
+          </Column>
+        </Collapsible>
+      </FieldGroup.Section>
+    </FieldGroup>
+  );
+
+  return (
+    <View style={{ flex: 1 }}>
+      <StatusBar style="auto" />
+      <Host style={{ flex: 1 }} useViewportSizeMeasurement seedColor={theme.seedColor}>
+        {!hydrated ? (
+          <FieldGroup testID="pairing-restore">
+            <FieldGroup.Section title="on-air remote">
+              <Text>Restoring your desktop connection…</Text>
+            </FieldGroup.Section>
+          </FieldGroup>
+        ) : token ? (
+          mixerScreen
+        ) : (
+          pairingScreen
+        )}
+        {pairTarget && (
+          <BottomSheet
+            isPresented
+            onDismiss={() => setPairTarget(null)}
+            showDragIndicator
+            testID="pair-sheet"
+          >
+            <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
+              <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>
+                {`Pair ${pairTarget.name}`}
+              </Text>
+              <Text>
+                {pairTarget.transport === "airplay"
+                  ? "Enter the code shown by the speaker. If no code appears, leave it blank."
+                  : "Confirm pairing on the Bluetooth device, then continue."}
+              </Text>
+              {pairTarget.transport === "airplay" && (
+                <TextInput
+                  value={devicePinInput}
+                  onChangeText={(value) => {
+                    const next = value.replace(/\D/g, "").slice(0, 8);
+                    devicePinInput.value = next;
+                    setPairPin(next);
+                  }}
+                  placeholder="Speaker code"
+                  keyboardType="number-pad"
+                  inputMode="numeric"
+                  maxLength={8}
+                  testID="device-pin-input"
+                  style={{
+                    padding: 12,
+                    borderWidth: 1,
+                    borderColor: theme.seedColor,
+                    borderRadius: 12,
                   }}
                 />
-              ))}
-            </View>
-            <TextInput
-              testID="volume-input"
-              style={styles.hidden}
-              value={String(volume)}
-              onChangeText={(t) => void applyVolume(Number(t) || 0)}
-            />
-
-            <View style={styles.rates}>
-              <Text style={styles.heading}>In</Text>
-              <View style={styles.rateRow}>
-                {inputRates.map((hz) => (
-                  <Pressable
-                    key={`in-${hz}`}
-                    testID={hz === sampleRate ? "sample-rate" : `sample-rate-${hz}`}
-                    style={[styles.chip, hz === sampleRate && styles.chipOn]}
-                    disabled={configuringRate}
-                    onPress={() => void applyRate("input", hz)}
-                  >
-                    <Text style={styles.chipText}>{hz}</Text>
-                  </Pressable>
-                ))}
-              </View>
-              <Text style={styles.heading}>Out</Text>
-              <View style={styles.rateRow}>
-                {outputRates.map((hz) => (
-                  <Pressable
-                    key={`out-${hz}`}
-                    testID={
-                      hz === outputSampleRate ? "output-sample-rate" : `output-sample-rate-${hz}`
-                    }
-                    style={[styles.chip, hz === outputSampleRate && styles.chipOn]}
-                    disabled={configuringRate}
-                    onPress={() => void applyRate("output", hz)}
-                  >
-                    <Text style={styles.chipText}>{hz}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            </View>
-          </>
+              )}
+              <Row alignment="center" spacing={theme.spacing.sm}>
+                <Button
+                  label="Cancel"
+                  variant="text"
+                  disabled={devicePairing}
+                  onPress={() => setPairTarget(null)}
+                  testID="device-pair-cancel"
+                />
+                <Spacer />
+                <Button
+                  label={devicePairing ? "Pairing…" : "Pair and connect"}
+                  disabled={devicePairing}
+                  onPress={() => void submitDevicePair()}
+                  testID="device-pair-submit"
+                />
+              </Row>
+            </Column>
+          </BottomSheet>
         )}
-
-        {error && (
-          <Text style={styles.error} selectable accessibilityRole="alert">
-            {error}
-          </Text>
-        )}
-      </ScrollView>
-
-      {pairTarget && (
-        <View style={styles.sheet} testID="pair-sheet">
-          <Text style={styles.heading}>Pair {pairTarget.name}</Text>
-          <Text style={styles.hint}>
-            {pairTarget.transport === "airplay"
-              ? "Only if this speaker shows a code. HomePod mini usually has no PIN."
-              : "Confirm pairing on the Bluetooth device, then continue."}
-          </Text>
-          {pairTarget.transport === "airplay" && (
-            <TextInput
-              style={styles.input}
-              testID="device-pin-input"
-              placeholder="PIN"
-              placeholderTextColor={colors.steelDim}
-              value={pairPin}
-              onChangeText={setPairPin}
-              keyboardType="number-pad"
-            />
-          )}
-          <View style={styles.sheetActions}>
-            <Pressable
-              style={styles.button}
-              testID="device-pair-cancel"
-              disabled={devicePairing}
-              onPress={() => setPairTarget(null)}
-            >
-              <Text style={styles.buttonText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.buttonLive, devicePairing && styles.disabled]}
-              testID="device-pair-submit"
-              disabled={devicePairing}
-              onPress={() => void submitPair()}
-            >
-              <Text style={styles.buttonLiveText}>
-                {devicePairing ? "Pairing…" : "Pair & go live"}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      )}
-    </SafeAreaView>
+      </Host>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.well },
-  scroll: { padding: 16, gap: 8, paddingBottom: 48 },
-  header: { alignItems: "flex-start", gap: 6, marginBottom: 8 },
-  wordmark: {
-    borderWidth: 2,
-    borderColor: "#1a1612",
-    backgroundColor: "#1a1814",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 2,
-  },
-  wordmarkLive: { backgroundColor: "#2a0c0a" },
-  wordmarkText: { fontSize: 18, fontWeight: "700", letterSpacing: 4 },
-  title: { color: colors.ink, fontSize: 16, fontWeight: "600" },
-  meta: { color: colors.steelDim, fontSize: 11, fontFamily: "monospace" },
-  paired: { color: colors.amber, fontSize: 12, marginBottom: 4 },
-  sessionRow: { flexDirection: "row", alignItems: "center", gap: 8 },
-  disconnectButton: { marginLeft: "auto", paddingHorizontal: 8, paddingVertical: 8 },
-  card: { gap: 8, marginBottom: 12 },
-  heading: {
-    color: colors.steelDim,
-    fontSize: 10,
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    marginTop: 12,
-    marginBottom: 6,
-  },
-  hint: { color: colors.steelDim, fontSize: 12, marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.face,
-    color: colors.ink,
-    padding: 10,
-    borderRadius: 6,
-  },
-  button: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.face2,
-    padding: 12,
-    borderRadius: 6,
-    alignItems: "center",
-  },
-  buttonText: { color: colors.ink },
-  buttonLive: {
-    borderWidth: 1,
-    borderColor: "#6a2a22",
-    backgroundColor: "#3a1814",
-    padding: 12,
-    borderRadius: 6,
-    alignItems: "center",
-  },
-  buttonLiveText: { color: "#ffd4cc", fontWeight: "600" },
-  disabled: { opacity: 0.5 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderColor: "#322e26",
-    backgroundColor: colors.face,
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 6,
-  },
-  rowOn: { borderColor: "#6a2a22", backgroundColor: "#3a221c" },
-  rowTitle: { color: colors.ink, flex: 1 },
-  rowMeta: { color: colors.steelDim, fontSize: 10, textTransform: "uppercase" },
-  dot: { width: 9, height: 9, borderRadius: 5, borderWidth: 1, borderColor: colors.steelDim },
-  dotOn: { backgroundColor: colors.live, borderColor: colors.live },
-  mixer: { gap: 6, marginTop: 16 },
-  fader: { width: "100%", gap: 2 },
-  faderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  faderControls: { flexDirection: "row", alignItems: "center", gap: 8 },
-  faderValue: { color: colors.amber, fontSize: 12, fontFamily: "monospace" },
-  faderLabel: { color: colors.steelDim, fontSize: 11, textTransform: "uppercase" },
-  faderBtn: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 4,
-  },
-  faderBtnText: { color: colors.ink, fontSize: 20 },
-  nativeSliderHost: { flex: 1, minHeight: 44 },
-  nativeButtonHost: { width: "100%", minHeight: 44 },
-  rates: { marginTop: 8 },
-  rateRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  chipOn: { borderColor: colors.amber },
-  chipText: { color: colors.ink, fontFamily: "monospace", fontSize: 11 },
-  error: { color: "#f0b4ac", marginTop: 12 },
-  hidden: { height: 0, opacity: 0 },
-  srOnly: { height: 0, opacity: 0 },
-  sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: colors.face2,
-    borderTopWidth: 1,
-    borderColor: colors.border,
-    padding: 16,
-    gap: 8,
-  },
-  sheetActions: { flexDirection: "row", gap: 8 },
-});
