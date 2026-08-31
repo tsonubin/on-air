@@ -7,6 +7,7 @@ fn advertisement_identity_matches_spec() {
     let txt = txt_records("0.1.0", 47990);
     assert_eq!(txt.iter().find(|(k, _)| k == "version").unwrap().1, "0.1.0");
     assert_eq!(txt.iter().find(|(k, _)| k == "port").unwrap().1, "47990");
+    assert!(txt.iter().any(|(k, v)| k == "name" && !v.is_empty()));
 }
 
 #[test]

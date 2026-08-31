@@ -193,8 +193,18 @@ fn build_airplay(
         ));
     }
     let base = state.owntone_base.lock().unwrap().clone();
+    let peer: std::net::IpAddr = device
+        .address
+        .parse()
+        .unwrap_or_else(|_| std::net::IpAddr::from([8, 8, 8, 8]));
+    let lan_ip = crate::sender::sonos::net::local_lan_ip_toward(peer)
+        .or_else(|_| crate::sender::sonos::net::local_lan_ip())
+        .map_err(|e| ActivateError::Failed(e.to_string()))?;
+    let stream_url = format!("http://{lan_ip}:{}/stream/audio.wav", crate::DEFAULT_PORT);
     Ok((
-        Box::new(AirPlaySender::new(device.name, device.id, base)),
+        Box::new(
+            AirPlaySender::new(device.name, device.id, base).with_radio(stream_url, device.address),
+        ),
         identity,
     ))
 }

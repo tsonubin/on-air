@@ -74,6 +74,27 @@ async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
 }
 
 #[tokio::test]
+async fn stream_is_live_when_airplay_is_the_exclusive_output() {
+    let state = CoreState::new();
+    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+        transport: "airplay".into(),
+        device_id: "EE:C7:74:A7:D8:56".into(),
+        device_name: "卧室".into(),
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = on_air_core::build_router(state);
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let response = reqwest::get(format!("http://{addr}/stream/audio.wav"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+}
+
+#[tokio::test]
 async fn sonos_radio_is_live_before_play_pulls_the_uri() {
     use axum::extract::State;
     use axum::http::HeaderMap;

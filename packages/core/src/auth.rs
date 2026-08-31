@@ -4,6 +4,23 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 
+fn bearer_token(authorization: Option<&str>) -> Option<&str> {
+    authorization.and_then(|h| h.strip_prefix("Bearer "))
+}
+
+fn query_token(query: Option<&str>) -> Option<String> {
+    let query = query?;
+    for pair in query.split('&') {
+        let Some((k, v)) = pair.split_once('=') else {
+            continue;
+        };
+        if k == "token" && !v.is_empty() {
+            return Some(v.replace("%2F", "/").replace("%2B", "+").replace("%3D", "="));
+        }
+    }
+    None
+}
+
 pub fn is_public_path(path: &str) -> bool {
     matches!(
         path,
@@ -23,11 +40,9 @@ pub fn authorize(
     if is_public_path(path) {
         return true;
     }
-    if let Some(header) = authorization {
-        if let Some(token) = header.strip_prefix("Bearer ") {
-            if pairing.token_valid(token) {
-                return true;
-            }
+    if let Some(token) = bearer_token(authorization) {
+        if pairing.token_valid(token) {
+            return true;
         }
     }
     if require_token {
@@ -47,10 +62,12 @@ impl FromRequestParts<CoreState> for Paired {
         state: &CoreState,
     ) -> Result<Self, Self::Rejection> {
         let path = parts.uri.path();
-        let authorization = parts
+        let header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok());
+        let query_bearer = query_token(parts.uri.query()).map(|t| format!("Bearer {t}"));
+        let authorization = header.or(query_bearer.as_deref());
         let connect_loopback = parts
             .extensions
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()

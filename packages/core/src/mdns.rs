@@ -3,9 +3,13 @@ pub const SERVICE_TYPE: &str = "_on-air._tcp.local.";
 pub const INSTANCE_NAME: &str = "on-air";
 
 pub fn txt_records(version: &str, port: u16) -> Vec<(String, String)> {
+    let name = std::env::var("HOST")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| INSTANCE_NAME.into());
     vec![
         ("version".into(), version.into()),
         ("port".into(), port.to_string()),
+        ("name".into(), name),
     ]
 }
 

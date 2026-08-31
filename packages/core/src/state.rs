@@ -19,6 +19,7 @@ pub struct CatalogDevice {
     pub paired: bool,
     pub kind: &'static str,
     pub member_count: u8,
+    pub address: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -93,6 +94,7 @@ impl CoreState {
             paired: true,
             kind: "solo",
             member_count: 1,
+            address: String::new(),
         }];
         state.bluetooth = Arc::new(MockBluetoothAdapter::with_devices(vec![BluetoothDevice {
             id: "bt-speaker".into(),

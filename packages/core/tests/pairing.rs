@@ -135,3 +135,39 @@ async fn control_routes_require_token_when_require_auth_is_set() {
         .unwrap();
     assert_eq!(allowed.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn websocket_style_query_token_authorizes_remote_clients() {
+    let mut state = CoreState::new_mock().await;
+    state.require_auth = true;
+    let app = on_air_core::build_router(state);
+
+    let verify = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/pairing/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(r#"{{"pin":"{MOCK_PIN}"}}"#)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(verify.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let token = json["token"].as_str().unwrap();
+
+    let allowed = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/outputs?token={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), StatusCode::OK);
+}

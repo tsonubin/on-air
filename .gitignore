@@ -19,8 +19,11 @@ e2e/**/playwright-report
 /result
 /result-*
 
-# React Native
+# React Native / Expo
 apps/mobile/ios/build
 apps/mobile/ios/Pods
 apps/mobile/android/.gradle
 apps/mobile/android/app/build
+apps/mobile/.expo
+apps/mobile/dist
+.expo

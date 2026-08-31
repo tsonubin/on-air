@@ -44,6 +44,7 @@ fn stereo_homepods_collapse_to_the_group_leader() {
     assert_eq!(listed[0].kind, "pair");
     assert_eq!(listed[0].member_count, 2);
     assert!(!listed[0].needs_pair);
+    assert_eq!(listed[0].address, "192.168.5.14");
 }
 
 #[test]

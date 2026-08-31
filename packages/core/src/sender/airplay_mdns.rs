@@ -71,6 +71,7 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
                 paired: !leader.password,
                 kind: "pair",
                 member_count: members.len().min(255) as u8,
+                address: leader.ip.to_string(),
             });
         } else {
             solos.extend(members);
@@ -91,6 +92,7 @@ fn to_catalog(device: AirPlayDevice, member_count: u8, kind: &'static str) -> Ca
         paired: !device.password,
         kind,
         member_count,
+        address: device.ip.to_string(),
     }
 }
 

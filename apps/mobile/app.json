@@ -1,4 +1,27 @@
 {
-  "name": "OnAirMobile",
-  "displayName": "OnAirMobile"
+  "expo": {
+    "name": "on-air remote",
+    "slug": "on-air-remote",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "onair",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.onair.remote",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "on-air remote finds the desktop mixer on your LAN.",
+        "NSBonjourServices": ["_on-air._tcp."]
+      }
+    },
+    "android": {
+      "package": "app.onair.remote",
+      "permissions": [
+        "ACCESS_NETWORK_STATE",
+        "CHANGE_WIFI_MULTICAST_STATE",
+        "INTERNET"
+      ]
+    },
+    "plugins": ["expo-network"]
+  }
 }

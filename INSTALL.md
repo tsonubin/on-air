@@ -264,15 +264,20 @@ sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
 
 ## Mobile remote
 
-The iOS/Android app is a LAN remote (discovery + PIN pairing + transport
-controls). It is not shipped through App Store / Play in v0.1.0. From this
-tree:
+The iOS/Android app is an **Expo** LAN remote (discovery + PIN pairing + the
+same mixer controls as the Tauri UI). It is not shipped through App Store /
+Play in v0.1.0. From this tree, with the desktop already open:
 
 ```bash
-pnpm --dir apps/mobile start
-# iOS (macOS host):  pnpm --dir apps/mobile ios
-# Android:           pnpm --dir apps/mobile android
+pnpm --filter mobile start          # Expo Go / simulators
+pnpm --filter mobile ios
+pnpm --filter mobile android
+pnpm --filter mobile test
+pnpm --filter @on-air/control-client test
 ```
+
+The phone must be on the same LAN. Scan finds a running core on port `47990`;
+you can still type the desktop IP. Pair with the PIN on the desktop.
 
 ## After install
 

@@ -143,9 +143,30 @@
   border-color: #6a2a22;
   background: linear-gradient(180deg, #3a221c, #1e1410);
 }
-@utility fader-thumb {
-  background: linear-gradient(180deg, #f0d9a0, #e0a24b 55%, #8a6230);
-  box-shadow:
-    0 1px 2px #000,
-    inset 0 1px 0 #ffe6b0;
+@layer components {
+  .fader-thumb {
+    display: block;
+    width: 22px;
+    height: 22px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    border-radius: 50%;
+    overflow: hidden;
+    cursor: grab;
+    border: 0;
+    outline: none;
+    background-color: #b8bcc4;
+    background-image: url("./assets/fader-thumb-silver.png");
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 100% 100%;
+    box-shadow:
+      0 1px 1px rgba(0, 0, 0, 0.5),
+      0 0 0 1px rgba(24, 26, 30, 0.45);
+  }
+  .fader-thumb:focus-visible {
+    box-shadow:
+      0 0 0 2px #e0a24b,
+      0 1px 1px rgba(0, 0, 0, 0.5);
+  }
 }

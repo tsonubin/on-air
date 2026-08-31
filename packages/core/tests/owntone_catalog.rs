@@ -2,6 +2,7 @@ use axum::Json;
 use axum::routing::get;
 use axum::Router;
 use on_air_core::sender::airplay::fetch_owntone_outputs;
+use on_air_core::sender::AudioSender;
 use tokio::net::TcpListener;
 
 #[tokio::test]
@@ -28,4 +29,19 @@ async fn fetch_owntone_outputs_maps_sidecar_json_into_catalog() {
     assert_eq!(devices.len(), 2);
     assert_eq!(devices[0].name, "HomePod");
     assert_eq!(devices[1].id, "2");
+}
+
+#[tokio::test]
+async fn start_without_owntone_or_receiver_host_explains_the_sidecar() {
+    let mut sender = on_air_core::sender::airplay::AirPlaySender::new(
+        "HomePod",
+        "1",
+        "http://127.0.0.1:1",
+    );
+    let err = sender.start().await.unwrap_err();
+    assert!(
+        err.0.contains("OwnTone") || err.0.contains("pyatv"),
+        "unexpected error: {}",
+        err.0
+    );
 }

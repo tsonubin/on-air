@@ -3,6 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "turbo run dev",
+    "dev:desktop": "pnpm --filter desktop tauri dev",
+    "dev:mobile": "pnpm --filter mobile start",
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
@@ -10,5 +12,10 @@
   "devDependencies": {
     "turbo": "^2.3.0"
   },
-  "packageManager": "pnpm@9.15.0"
+  "packageManager": "pnpm@9.15.0",
+  "pnpm": {
+    "overrides": {
+      "@react-native/jest-preset": "0.86.3"
+    }
+  }
 }

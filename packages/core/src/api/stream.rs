@@ -40,7 +40,7 @@ pub fn sonos_radio_is_live(state: &CoreState) -> bool {
         .lock()
         .unwrap()
         .as_ref()
-        .is_some_and(|o| o.transport == "sonos")
+        .is_some_and(|o| o.transport == "sonos" || o.transport == "airplay")
 }
 
 pub async fn stream_audio(State(state): State<CoreState>) -> Response {
