@@ -1,5 +1,7 @@
 use on_air_core::pipeline::capture::parse_pactl_monitor_sources;
-use on_air_core::pipeline::local_sink::{is_local_hardware_sink, parse_sink_names};
+use on_air_core::pipeline::local_sink::{
+    is_local_hardware_sink, parse_mute_state, parse_sink_names,
+};
 
 #[test]
 fn pactl_short_lists_analog_monitor() {
@@ -16,6 +18,13 @@ fn pactl_short_lists_analog_monitor() {
             "alsa_output.pci-0000_00_1b.0.analog-stereo.monitor",
         ]
     );
+}
+
+#[test]
+fn parses_pulse_mute_state_without_guessing() {
+    assert_eq!(parse_mute_state("Mute: yes\n"), Some(true));
+    assert_eq!(parse_mute_state("Mute: no\n"), Some(false));
+    assert_eq!(parse_mute_state("unavailable\n"), None);
 }
 
 #[test]
@@ -40,7 +49,9 @@ fn dsp_and_bluez_are_not_treated_as_laptop_speakers() {
     assert!(is_local_hardware_sink(
         "alsa_output.pci-0000_00_1b.0.analog-stereo"
     ));
-    assert!(is_local_hardware_sink("alsa_output.pci-0000_00_1b.0.hdmi-stereo"));
+    assert!(is_local_hardware_sink(
+        "alsa_output.pci-0000_00_1b.0.hdmi-stereo"
+    ));
     assert!(!is_local_hardware_sink("effect_input.macbookpro11_dsp"));
     assert!(!is_local_hardware_sink("bluez_output.58_EA_1F_87_56_45.1"));
     assert!(!is_local_hardware_sink("easyeffects_sink"));

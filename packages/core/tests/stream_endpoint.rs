@@ -1,5 +1,6 @@
 use futures_util::StreamExt;
 use on_air_core::state::{ActiveOutput, CoreState};
+use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
 
 #[tokio::test]
@@ -36,10 +37,7 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
     let response = reqwest::get(format!("http://{addr}/stream/audio.wav"))
         .await
         .unwrap();
-    assert_eq!(
-        response.headers().get("content-type").unwrap(),
-        "audio/wav"
-    );
+    assert_eq!(response.headers().get("content-type").unwrap(), "audio/wav");
 
     let mut stream = response.bytes_stream();
     let first_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
@@ -47,7 +45,10 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
         .expect("received a chunk before timing out")
         .expect("stream not closed")
         .expect("chunk read ok");
-    assert!(first_chunk.starts_with(b"RIFF"), "wav header first: {first_chunk:?}");
+    assert!(
+        first_chunk.starts_with(b"RIFF"),
+        "wav header first: {first_chunk:?}"
+    );
 
     let pcm_chunk = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
         .await
@@ -71,6 +72,31 @@ async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
         .await
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn stream_is_unavailable_while_service_is_disabled() {
+    let state = CoreState::new();
+    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:test".into(),
+        device_name: "Test".into(),
+    });
+    state.service_enabled.store(false, Ordering::Release);
+    let app = on_air_core::build_router(state);
+    let response = tower::ServiceExt::oneshot(
+        app,
+        axum::http::Request::builder()
+            .uri("/stream/audio.wav")
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 #[tokio::test]

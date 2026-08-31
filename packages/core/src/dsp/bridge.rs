@@ -36,8 +36,10 @@ impl RateBridge {
 }
 
 pub fn l16_le_to_f32(pcm: &[u8]) -> Vec<f32> {
-    pcm.chunks_exact(2)
-        .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]) as f32 / i16::MAX as f32)
+    let (samples, _) = pcm.as_chunks::<2>();
+    samples
+        .iter()
+        .map(|sample| i16::from_le_bytes(*sample) as f32 / i16::MAX as f32)
         .collect()
 }
 

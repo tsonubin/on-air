@@ -7,7 +7,7 @@
 use std::process::Command;
 use std::sync::Mutex;
 
-static MUTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+static SAVED_MUTE_STATES: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
 static SAVED_DEFAULT: Mutex<Option<String>> = Mutex::new(None);
 
 /// Built-in analog/HDMI only — not EasyEffects/DSP, null sinks, or A2DP.
@@ -43,7 +43,11 @@ pub fn parse_sink_names(text: &str) -> Vec<String> {
 }
 
 fn pactl(args: &[&str]) -> bool {
-    Command::new("pactl").args(args).status().map(|s| s.success()).unwrap_or(false)
+    Command::new("pactl")
+        .args(args)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 fn listed_sinks() -> Vec<String> {
@@ -58,7 +62,10 @@ fn listed_sinks() -> Vec<String> {
 }
 
 fn current_default_sink() -> Option<String> {
-    let output = Command::new("pactl").args(["get-default-sink"]).output().ok()?;
+    let output = Command::new("pactl")
+        .args(["get-default-sink"])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -68,6 +75,25 @@ fn current_default_sink() -> Option<String> {
     } else {
         Some(name)
     }
+}
+
+pub fn parse_mute_state(text: &str) -> Option<bool> {
+    match text.trim().to_ascii_lowercase().as_str() {
+        "mute: yes" | "yes" | "1" | "true" => Some(true),
+        "mute: no" | "no" | "0" | "false" => Some(false),
+        _ => None,
+    }
+}
+
+fn sink_is_muted(name: &str) -> Option<bool> {
+    let output = Command::new("pactl")
+        .args(["get-sink-mute", name])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_mute_state(&String::from_utf8_lossy(&output.stdout))
 }
 
 /// Remember the user's default sink if it is not already a Bluetooth speaker.
@@ -100,7 +126,7 @@ pub fn forget_pinned_default() {
 pub fn silence_local_speakers(keep: Option<&str>) {
     restore_muted_only();
     pin_default_sink();
-    let mut muted = Vec::new();
+    let mut saved_states = Vec::new();
     for name in listed_sinks() {
         if keep.is_some_and(|k| name == k) {
             continue;
@@ -108,18 +134,22 @@ pub fn silence_local_speakers(keep: Option<&str>) {
         if !is_local_hardware_sink(&name) {
             continue;
         }
-        if pactl(&["set-sink-mute", &name, "1"]) {
-            muted.push(name);
+        let Some(was_muted) = sink_is_muted(&name) else {
+            continue;
+        };
+        if was_muted || pactl(&["set-sink-mute", &name, "1"]) {
+            saved_states.push((name, was_muted));
         }
     }
-    *MUTED.lock().unwrap() = muted;
+    *SAVED_MUTE_STATES.lock().unwrap() = saved_states;
     restore_default_sink();
 }
 
 fn restore_muted_only() {
-    let muted = std::mem::take(&mut *MUTED.lock().unwrap());
-    for name in muted {
-        let _ = pactl(&["set-sink-mute", &name, "0"]);
+    let saved_states = std::mem::take(&mut *SAVED_MUTE_STATES.lock().unwrap());
+    for (name, was_muted) in saved_states {
+        let value = if was_muted { "1" } else { "0" };
+        let _ = pactl(&["set-sink-mute", &name, value]);
     }
 }
 

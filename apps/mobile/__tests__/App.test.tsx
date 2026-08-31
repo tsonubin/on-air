@@ -1,4 +1,3 @@
-import React from "react";
 import ReactTestRenderer from "react-test-renderer";
 import App from "../App";
 import * as client from "../src/controlClient";
@@ -180,7 +179,7 @@ test("pairing with the desktop PIN opens the full mixer", async () => {
   expect(text).toContain("Locked HomePod");
   expect(text).toContain("Mock Bluetooth Speaker");
   expect(text).toContain("level");
-  expect(text).toContain("\"60\"");
+  expect(text).toContain('"60"');
   expect(mocked.verifyPin).toHaveBeenCalledWith("http://192.168.5.14:47990", "123456");
   expect((global as { WebSocket: { lastUrl: string } }).WebSocket.lastUrl).toContain(
     "/api/ws?token=onair-test",
@@ -241,6 +240,36 @@ test("source, destination, volume, EQ, and sample-rate drive the control API", a
     { output_hz: 48000 },
     "onair-test",
   );
+});
+
+test("native Expo sliders batch drag updates before calling the LAN API", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  jest.useFakeTimers();
+  try {
+    mocked.setVolume.mockClear();
+    ReactTestRenderer.act(() => {
+      tree.root.findByProps({ testID: "volume-slider-native" }).props.onValueChange(73);
+    });
+    expect(mocked.setVolume).not.toHaveBeenCalled();
+    await ReactTestRenderer.act(async () => {
+      jest.advanceTimersByTime(180);
+      await Promise.resolve();
+    });
+    expect(mocked.setVolume).toHaveBeenCalledWith("http://192.168.5.14:47990", 73, "onair-test");
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
+test("disconnect returns to discovery without restarting the app", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "disconnect-button" }).props.onPress();
+  });
+  expect(screen(tree)).toContain("Find desktop");
+  expect(screen(tree)).not.toContain("Mock Sonos");
 });
 
 test("unpaired AirPlay opens the PIN sheet then pairs and goes live", async () => {

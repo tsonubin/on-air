@@ -22,7 +22,11 @@ pub struct SetEqRequest {
     pub gains_db: [f32; 5],
 }
 
-pub async fn set_eq(Paired: Paired, State(state): State<CoreState>, Json(req): Json<SetEqRequest>) -> StatusCode {
+pub async fn set_eq(
+    Paired: Paired,
+    State(state): State<CoreState>,
+    Json(req): Json<SetEqRequest>,
+) -> StatusCode {
     let clamped = req
         .gains_db
         .map(|g| g.clamp(EQ_GAIN_RANGE_DB.0, EQ_GAIN_RANGE_DB.1));

@@ -5,6 +5,8 @@ const CHUNK_SIZE: usize = 1024;
 
 pub struct MonoResampler {
     inner: Async<f32>,
+    input_data: Vec<Vec<f32>>,
+    output_data: Vec<Vec<f32>>,
 }
 
 impl MonoResampler {
@@ -19,7 +21,13 @@ impl MonoResampler {
             FixedAsync::Input,
         )
         .expect("valid resample ratio");
-        MonoResampler { inner }
+        let input_data = vec![vec![0.0; inner.input_frames_next()]];
+        let output_data = vec![vec![0.0; inner.output_frames_max()]];
+        MonoResampler {
+            inner,
+            input_data,
+            output_data,
+        }
     }
 
     pub fn input_frames_next(&self) -> usize {
@@ -27,26 +35,33 @@ impl MonoResampler {
     }
 
     pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
+        let mut output = Vec::with_capacity(self.inner.output_frames_max());
+        self.process_into(input, &mut output);
+        output
+    }
+
+    pub fn process_into(&mut self, input: &[f32], output: &mut Vec<f32>) {
         assert_eq!(
             input.len(),
             self.inner.input_frames_next(),
             "MonoResampler::process requires exactly input_frames_next() samples"
         );
-        let input_data = vec![input.to_vec()];
+        self.input_data[0].copy_from_slice(input);
         let out_capacity = self.inner.output_frames_max();
-        let mut output_data = vec![vec![0.0f32; out_capacity]];
 
-        let in_adapter = SequentialSliceOfVecs::new(&input_data, 1, input.len())
+        let in_adapter = SequentialSliceOfVecs::new(&self.input_data, 1, input.len())
             .expect("valid input adapter shape");
-        let mut out_adapter = SequentialSliceOfVecs::new_mut(&mut output_data, 1, out_capacity)
-            .expect("valid output adapter shape");
+        let mut out_adapter =
+            SequentialSliceOfVecs::new_mut(&mut self.output_data, 1, out_capacity)
+                .expect("valid output adapter shape");
 
         let (_frames_read, frames_written) = self
             .inner
             .process_into_buffer(&in_adapter, &mut out_adapter, None)
             .expect("resample succeeds for a full, correctly-sized chunk");
 
-        output_data.remove(0).into_iter().take(frames_written).collect()
+        output.clear();
+        output.extend_from_slice(&self.output_data[0][..frames_written]);
     }
 }
 
@@ -88,13 +103,19 @@ impl StreamingMonoResampler {
         };
         self.pending.extend_from_slice(input);
         let mut output = Vec::new();
+        let mut resampled = Vec::new();
+        let mut consumed = 0;
         loop {
             let need = resampler.input_frames_next();
-            if self.pending.len() < need {
+            if self.pending.len() - consumed < need {
                 break;
             }
-            let chunk: Vec<f32> = self.pending.drain(..need).collect();
-            output.extend(resampler.process(&chunk));
+            resampler.process_into(&self.pending[consumed..consumed + need], &mut resampled);
+            output.extend_from_slice(&resampled);
+            consumed += need;
+        }
+        if consumed > 0 {
+            self.pending.drain(..consumed);
         }
         output
     }

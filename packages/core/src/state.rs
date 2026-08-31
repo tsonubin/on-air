@@ -1,15 +1,19 @@
 use crate::api::ws::WsEvent;
 use crate::pairing::PairingState;
 use crate::sender::bluetooth::{
-    BluetoothAdapter, BluetoothDevice, MockBluetoothAdapter, RecordingPcmSink, SystemBluetoothAdapter,
+    BluetoothAdapter, BluetoothDevice, MockBluetoothAdapter, RecordingPcmSink,
+    SystemBluetoothAdapter,
 };
 use crate::sender::sonos::discovery::{DeviceRegistry, SonosDevice};
 use crate::sender::{AudioSender, SenderError};
 use bytes::Bytes;
 use std::net::{IpAddr, Ipv4Addr};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
+
+type BluetoothDeviceCache = Option<(Instant, Vec<BluetoothDevice>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogDevice {
@@ -31,9 +35,12 @@ pub struct ActiveOutput {
 
 #[derive(Clone)]
 pub struct CoreState {
+    /// Serializes configuration changes that rebuild capture or sender state.
+    pub config_lock: Arc<Mutex<()>>,
     pub active_sender: Arc<Mutex<Option<Box<dyn AudioSender>>>>,
     pub eq_gains_db: Arc<StdMutex<[f32; 5]>>,
     pub target_sample_rate_hz: Arc<StdMutex<u32>>,
+    pub input_supported_hz: Arc<StdMutex<Vec<u32>>>,
     pub output_sample_rate_hz: Arc<StdMutex<u32>>,
     pub audio_tx: broadcast::Sender<Bytes>,
     pub capture: Arc<Mutex<Option<crate::pipeline::CaptureHandle>>>,
@@ -44,24 +51,69 @@ pub struct CoreState {
     pub active_input: Arc<StdMutex<Option<String>>>,
     pub airplay_outputs: Arc<StdMutex<Vec<CatalogDevice>>>,
     pub bluetooth: Arc<dyn BluetoothAdapter>,
+    bluetooth_cache: Arc<Mutex<BluetoothDeviceCache>>,
     pub pcm_sink: Arc<RecordingPcmSink>,
     pub require_auth: bool,
     pub pairing: Arc<StdMutex<PairingState>>,
     pub active_output: Arc<StdMutex<Option<ActiveOutput>>>,
+    /// Controls whether remote clients may start or configure audio work. The
+    /// lightweight HTTP and discovery services remain online while disabled.
+    pub service_enabled: Arc<AtomicBool>,
+    pub stream_generation: Arc<AtomicU64>,
+    pub stream_clients: Arc<AtomicUsize>,
     pub mock_log: Arc<tokio::sync::Mutex<Vec<String>>>,
     pub owntone_base: Arc<StdMutex<String>>,
 }
 
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
+const AIRPLAY_EMPTY_SCANS_BEFORE_EVICTION: u8 = 3;
+const SONOS_NAME_LOOKUP_CONCURRENCY: usize = 4;
+const MAX_SONOS_NAME_LOOKUPS_PER_SCAN: usize = 64;
+
+fn apply_airplay_scan(
+    current: &mut Vec<CatalogDevice>,
+    found: Vec<CatalogDevice>,
+    consecutive_empty_scans: &mut u8,
+) {
+    if found.is_empty() {
+        *consecutive_empty_scans = consecutive_empty_scans.saturating_add(1);
+        if *consecutive_empty_scans >= AIRPLAY_EMPTY_SCANS_BEFORE_EVICTION {
+            current.clear();
+        }
+        return;
+    }
+    *consecutive_empty_scans = 0;
+    if *current != found {
+        *current = found;
+    }
+}
+
+fn spawn_sonos_name_lookup(
+    tasks: &mut tokio::task::JoinSet<SonosDevice>,
+    http: &reqwest::Client,
+    mut device: SonosDevice,
+) {
+    let http = http.clone();
+    tasks.spawn(async move {
+        if let Some(name) =
+            crate::sender::sonos::discovery::fetch_friendly_name(&http, &device.location).await
+        {
+            device.friendly_name = name;
+        }
+        device
+    });
+}
 
 impl CoreState {
     pub fn new() -> Self {
         let (audio_tx, _) = broadcast::channel(64);
         let (ws_tx, _) = broadcast::channel(64);
         CoreState {
+            config_lock: Arc::new(Mutex::new(())),
             active_sender: Arc::new(Mutex::new(None)),
             eq_gains_db: Arc::new(StdMutex::new([0.0; 5])),
             target_sample_rate_hz: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE_DEFAULT_HZ)),
+            input_supported_hz: Arc::new(StdMutex::new(crate::dsp::rates::INPUT_RATES_HZ.to_vec())),
             output_sample_rate_hz: Arc::new(StdMutex::new(TARGET_SAMPLE_RATE_DEFAULT_HZ)),
             audio_tx,
             capture: Arc::new(Mutex::new(None)),
@@ -72,10 +124,14 @@ impl CoreState {
             active_input: Arc::new(StdMutex::new(None)),
             airplay_outputs: Arc::new(StdMutex::new(Vec::new())),
             bluetooth: Arc::new(SystemBluetoothAdapter::from_host()),
+            bluetooth_cache: Arc::new(Mutex::new(None)),
             pcm_sink: Arc::new(RecordingPcmSink::default()),
             require_auth: false,
             pairing: Arc::new(StdMutex::new(PairingState::new())),
             active_output: Arc::new(StdMutex::new(None)),
+            service_enabled: Arc::new(AtomicBool::new(true)),
+            stream_generation: Arc::new(AtomicU64::new(0)),
+            stream_clients: Arc::new(AtomicUsize::new(0)),
             mock_log: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             owntone_base: Arc::new(StdMutex::new("http://127.0.0.1:3689".into())),
         }
@@ -116,22 +172,82 @@ impl CoreState {
         let outputs = self.airplay_outputs.clone();
         let base = self.owntone_base.clone();
         tokio::spawn(async move {
+            let owntone_http = crate::sender::sonos::soap::lan_client(Duration::from_millis(500));
+            let mut consecutive_empty_scans = 0;
             loop {
-                let mut found = crate::sender::airplay_mdns::search_mdns(Duration::from_secs(2)).await;
+                let mut found =
+                    crate::sender::airplay_mdns::search_mdns(Duration::from_secs(2)).await;
                 let url = base.lock().unwrap().clone();
-                if let Ok(owntone) = crate::sender::airplay::fetch_owntone_outputs(&url).await {
+                if let Ok(owntone) =
+                    crate::sender::airplay::fetch_owntone_outputs_with_client(&owntone_http, &url)
+                        .await
+                {
                     crate::sender::airplay_mdns::merge_owntone(&mut found, owntone);
                 }
-                if !found.is_empty() {
-                    *outputs.lock().unwrap() = found;
-                }
+                apply_airplay_scan(
+                    &mut outputs.lock().unwrap(),
+                    found,
+                    &mut consecutive_empty_scans,
+                );
                 tokio::time::sleep(Duration::from_secs(15)).await;
             }
         })
     }
 
-    pub async fn activate_sender(&self, new_sender: Box<dyn AudioSender>) -> Result<(), SenderError> {
+    /// Cache synchronous OS Bluetooth enumeration briefly. This prevents the
+    /// desktop and phone refresh loops from launching duplicate `pactl`/CPAL
+    /// probes while still making newly connected devices appear promptly.
+    pub async fn bluetooth_devices(&self) -> Result<Vec<BluetoothDevice>, String> {
+        const CACHE_TTL: Duration = Duration::from_secs(15);
+        let mut cache = self.bluetooth_cache.lock().await;
+        if let Some((updated, devices)) = cache.as_ref() {
+            if updated.elapsed() < CACHE_TTL {
+                return Ok(devices.clone());
+            }
+        }
+        let adapter = self.bluetooth.clone();
+        let devices = tokio::task::spawn_blocking(move || adapter.list())
+            .await
+            .map_err(|error| format!("Bluetooth discovery task failed: {error}"))?;
+        *cache = Some((Instant::now(), devices.clone()));
+        Ok(devices)
+    }
+
+    pub async fn invalidate_bluetooth_cache(&self) {
+        *self.bluetooth_cache.lock().await = None;
+    }
+
+    pub async fn activate_sender(
+        &self,
+        new_sender: Box<dyn AudioSender>,
+    ) -> Result<(), SenderError> {
         self.activate_sender_as(new_sender, None).await
+    }
+
+    fn invalidate_radio_streams(&self) {
+        self.stream_generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    async fn apply_local_sink_for(&self, identity: &ActiveOutput) {
+        if self.mock {
+            return;
+        }
+        let transport = identity.transport.clone();
+        let device_id = identity.device_id.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            crate::pipeline::local_sink::apply_for_transport(&transport, &device_id);
+        })
+        .await;
+    }
+
+    async fn restore_local_sink(&self) {
+        if self.mock {
+            return;
+        }
+        let _ = tokio::task::spawn_blocking(|| {
+            crate::pipeline::local_sink::restore_local_speakers();
+        })
+        .await;
     }
 
     pub async fn activate_sender_as(
@@ -140,22 +256,30 @@ impl CoreState {
         identity: Option<ActiveOutput>,
     ) -> Result<(), SenderError> {
         let mut guard = self.active_sender.lock().await;
-        if let Some(mut current) = guard.take() {
-            let previous = self.active_output.lock().unwrap().take();
-            let transport = previous
+        let mut previous_sender = guard.take();
+        let previous_identity = self.active_output.lock().unwrap().take();
+        if let Some(current) = previous_sender.as_mut() {
+            let transport = previous_identity
                 .as_ref()
                 .map(|o| o.transport.clone())
                 .unwrap_or_else(|| current.transport().to_string());
-            let device_name = previous
+            let device_name = previous_identity
                 .as_ref()
                 .map(|o| o.device_name.clone())
                 .unwrap_or_else(|| current.name().to_string());
-            let _ = current.stop().await;
+            if let Err(error) = current.stop().await {
+                *self.active_output.lock().unwrap() = previous_identity;
+                *guard = previous_sender;
+                return Err(SenderError(format!(
+                    "could not stop the active output before switching: {error}"
+                )));
+            }
             let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
                 transport,
                 device_name,
                 active: false,
             });
+            self.invalidate_radio_streams();
         }
         let mut new_sender = new_sender;
         let identity = identity.unwrap_or_else(|| ActiveOutput {
@@ -168,17 +292,35 @@ impl CoreState {
         *self.active_output.lock().unwrap() = Some(identity.clone());
         if let Err(e) = new_sender.start().await {
             *self.active_output.lock().unwrap() = None;
-            if !self.mock {
-                crate::pipeline::local_sink::restore_local_speakers();
+            let cleanup_error = new_sender.stop().await.err();
+            self.invalidate_radio_streams();
+            if let Some(mut previous) = previous_sender {
+                *self.active_output.lock().unwrap() = previous_identity.clone();
+                if previous.start().await.is_ok() {
+                    if let Some(previous_identity) = previous_identity.as_ref() {
+                        self.apply_local_sink_for(previous_identity).await;
+                        let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
+                            transport: previous_identity.transport.clone(),
+                            device_name: previous_identity.device_name.clone(),
+                            active: true,
+                        });
+                    }
+                    *guard = Some(previous);
+                } else {
+                    *self.active_output.lock().unwrap() = None;
+                    self.restore_local_sink().await;
+                }
+            } else {
+                self.restore_local_sink().await;
             }
-            return Err(e);
+            return match cleanup_error {
+                Some(cleanup) => Err(SenderError(format!(
+                    "{e}; cleanup after failed start also failed: {cleanup}"
+                ))),
+                None => Err(e),
+            };
         }
-        if !self.mock {
-            crate::pipeline::local_sink::apply_for_transport(
-                &identity.transport,
-                &identity.device_id,
-            );
-        }
+        self.apply_local_sink_for(&identity).await;
         let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
             transport: identity.transport.clone(),
             device_name: identity.device_name.clone(),
@@ -200,10 +342,13 @@ impl CoreState {
                 .as_ref()
                 .map(|o| o.device_name.clone())
                 .unwrap_or_else(|| current.name().to_string());
-            current.stop().await?;
-            if !self.mock {
-                crate::pipeline::local_sink::restore_local_speakers();
+            if let Err(error) = current.stop().await {
+                *self.active_output.lock().unwrap() = previous;
+                *guard = Some(current);
+                return Err(error);
             }
+            self.invalidate_radio_streams();
+            self.restore_local_sink().await;
             let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
                 transport,
                 device_name,
@@ -211,6 +356,18 @@ impl CoreState {
             });
         }
         Ok(())
+    }
+
+    /// Stop all live audio resources before the host process exits.
+    pub async fn shutdown(&self) {
+        let _configuration = self.config_lock.lock().await;
+        let _ = self.deactivate_sender().await;
+        if let Some(capture) = self.capture.lock().await.take() {
+            let _ = tokio::task::spawn_blocking(move || capture.stop()).await;
+        }
+        *self.active_input.lock().unwrap() = None;
+        *self.input_supported_hz.lock().unwrap() = crate::dsp::rates::INPUT_RATES_HZ.to_vec();
+        self.restore_local_sink().await;
     }
 
     /// Spawns a background task that periodically SSDP-searches for Sonos
@@ -236,20 +393,28 @@ impl CoreState {
                 );
                 let mut found = ssdp.unwrap_or_default();
                 found.extend(mdns);
-                let mut named = Vec::new();
                 let mut seen = std::collections::HashSet::new();
-                for mut device in found {
-                    if !seen.insert(crate::sender::sonos::discovery::rincon_key(&device.usn)) {
-                        continue;
-                    }
-                    if let Some(name) =
-                        crate::sender::sonos::discovery::fetch_friendly_name(&http, &device.location)
-                            .await
-                    {
-                        device.friendly_name = name;
-                    }
-                    named.push(device);
+                let unique = found
+                    .into_iter()
+                    .filter(|device| {
+                        seen.insert(crate::sender::sonos::discovery::rincon_key(&device.usn))
+                    })
+                    .take(MAX_SONOS_NAME_LOOKUPS_PER_SCAN);
+                let mut pending = unique;
+                let mut name_tasks = tokio::task::JoinSet::new();
+                for device in pending.by_ref().take(SONOS_NAME_LOOKUP_CONCURRENCY) {
+                    spawn_sonos_name_lookup(&mut name_tasks, &http, device);
                 }
+                let mut named = Vec::new();
+                while let Some(result) = name_tasks.join_next().await {
+                    if let Ok(device) = result {
+                        named.push(device);
+                    }
+                    if let Some(device) = pending.next() {
+                        spawn_sonos_name_lookup(&mut name_tasks, &http, device);
+                    }
+                }
+                named.sort_by(|a, b| a.usn.cmp(&b.usn));
 
                 let topology = named
                     .iter()
@@ -257,9 +422,7 @@ impl CoreState {
                     .find(|ip| ip.is_ipv4())
                     .or_else(|| named.first().map(|d| d.ip));
                 let topology = match topology {
-                    Some(ip) => {
-                        crate::sender::sonos::discovery::fetch_zone_groups(&http, ip).await
-                    }
+                    Some(ip) => crate::sender::sonos::discovery::fetch_zone_groups(&http, ip).await,
                     None => None,
                 };
 
@@ -299,5 +462,41 @@ impl CoreState {
 impl Default for CoreState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn receiver(id: &str) -> CatalogDevice {
+        CatalogDevice {
+            id: id.into(),
+            name: format!("Receiver {id}"),
+            needs_pair: false,
+            paired: true,
+            kind: "solo",
+            member_count: 1,
+            address: "192.168.1.2".into(),
+        }
+    }
+
+    #[test]
+    fn airplay_catalog_tolerates_transient_misses_then_evicts_stale_receivers() {
+        let mut current = vec![receiver("old")];
+        let mut misses = 0;
+
+        apply_airplay_scan(&mut current, Vec::new(), &mut misses);
+        apply_airplay_scan(&mut current, Vec::new(), &mut misses);
+        assert_eq!(current, vec![receiver("old")]);
+
+        apply_airplay_scan(&mut current, vec![receiver("new")], &mut misses);
+        assert_eq!(current, vec![receiver("new")]);
+        assert_eq!(misses, 0);
+
+        for _ in 0..AIRPLAY_EMPTY_SCANS_BEFORE_EVICTION {
+            apply_airplay_scan(&mut current, Vec::new(), &mut misses);
+        }
+        assert!(current.is_empty());
     }
 }

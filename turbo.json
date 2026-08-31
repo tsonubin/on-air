@@ -1,5 +1,15 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "API_BASE",
+    "BIND",
+    "E2E_PORT",
+    "ON_AIR_MOCK",
+    "PORT",
+    "TAURI_DEV_HOST",
+    "TAURI_DRIVER_URL",
+    "UI_BASE"
+  ],
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**", "target/**"] },
     "dev": { "cache": false, "persistent": true },

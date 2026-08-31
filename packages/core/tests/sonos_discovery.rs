@@ -1,6 +1,6 @@
 use on_air_core::sender::sonos::discovery::{
-    device_from_mdns_fields, fetch_friendly_name, parse_zone_groups, search_once, DeviceRegistry,
-    SonosDevice,
+    device_from_mdns_fields, fetch_friendly_name, ip_from_http_location, parse_zone_groups,
+    DeviceRegistry, SonosDevice,
 };
 use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
@@ -149,6 +149,41 @@ fn device_registry_expires_stale_entries() {
     let later = t0 + Duration::from_secs(200);
     registry.expire_stale(later, Duration::from_secs(120));
     assert_eq!(registry.list().len(), 0);
+}
+
+#[test]
+fn device_registry_is_bounded_and_evicts_the_oldest_device() {
+    let mut registry = DeviceRegistry::new();
+    let t0 = Instant::now();
+    for index in 0..150 {
+        registry.upsert(
+            SonosDevice::discovered(
+                format!("uuid:test-device-{index:03}"),
+                format!("http://127.0.0.1:{}/device.xml", 1400 + index),
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                format!("Speaker {index:03}"),
+            ),
+            t0 + Duration::from_millis(index),
+        );
+    }
+
+    let listed = registry.list();
+    assert_eq!(listed.len(), 128);
+    assert!(!listed
+        .iter()
+        .any(|device| device.usn == "uuid:test-device-000"));
+    assert!(listed
+        .iter()
+        .any(|device| device.usn == "uuid:test-device-149"));
+}
+
+#[test]
+fn location_parser_supports_ipv6_and_rejects_non_http_urls() {
+    assert_eq!(
+        ip_from_http_location("http://[fe80::1]:1400/device.xml"),
+        Some("fe80::1".parse().unwrap())
+    );
+    assert_eq!(ip_from_http_location("file:///tmp/device.xml"), None);
 }
 
 #[test]

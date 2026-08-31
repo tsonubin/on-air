@@ -51,7 +51,11 @@ export async function probeOnAir(
   }
 }
 
-async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R | null>): Promise<R[]> {
+async function mapPool<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R | null>,
+): Promise<R[]> {
   const out: R[] = [];
   let index = 0;
   async function worker() {

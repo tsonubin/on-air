@@ -94,7 +94,7 @@ async fn deactivate_with_no_active_sender_is_a_no_op() {
 }
 
 #[tokio::test]
-async fn failed_stop_does_not_block_activating_the_next_sender() {
+async fn failed_stop_blocks_activating_the_next_sender_and_preserves_the_active_sender() {
     let state = CoreState::new();
     let log = Arc::new(Mutex::new(Vec::new()));
 
@@ -105,11 +105,30 @@ async fn failed_stop_does_not_block_activating_the_next_sender() {
         }))
         .await
         .unwrap();
-    state
+    let error = state
         .activate_sender(Box::new(NullSender::new("B", log.clone())))
+        .await
+        .unwrap_err();
+
+    let entries = log.lock().await.clone();
+    assert_eq!(entries, vec!["A:start", "A:stop"]);
+    assert!(error.0.contains("could not stop"));
+    assert!(state.active_sender.lock().await.is_some());
+}
+
+#[tokio::test]
+async fn failed_deactivation_preserves_the_active_sender() {
+    let state = CoreState::new();
+    let log = Arc::new(Mutex::new(Vec::new()));
+
+    state
+        .activate_sender(Box::new(FailingStopSender {
+            name: "A".into(),
+            log,
+        }))
         .await
         .unwrap();
 
-    let entries = log.lock().await.clone();
-    assert_eq!(entries, vec!["A:start", "A:stop", "B:start"]);
+    assert!(state.deactivate_sender().await.is_err());
+    assert!(state.active_sender.lock().await.is_some());
 }

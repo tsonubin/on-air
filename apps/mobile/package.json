@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo/ui": "~57.0.14",
     "@on-air/api-types": "workspace:*",
     "@on-air/control-client": "workspace:*",
     "expo": "~57.0.18",

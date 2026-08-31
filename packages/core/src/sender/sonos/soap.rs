@@ -138,7 +138,11 @@ impl SonosControlClient {
         .await
     }
 
-    pub async fn set_volume(&self, rendering_control_url: &str, volume: u8) -> Result<(), SoapError> {
+    pub async fn set_volume(
+        &self,
+        rendering_control_url: &str,
+        volume: u8,
+    ) -> Result<(), SoapError> {
         let volume = volume.min(100);
         let body = format!(
             r#"<?xml version="1.0" encoding="utf-8"?>

@@ -1,6 +1,24 @@
 use crate::sender::{AudioSender, SenderError};
-use reqwest::Client;
+use reqwest::{Client, Url};
 use std::process::{Child, Command, Stdio};
+use std::sync::OnceLock;
+
+const MAX_CATALOG_BYTES: usize = 512 * 1024;
+const MAX_CATALOG_DEVICES: usize = 64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ActiveBackend {
+    OwnTone,
+    Pyatv,
+}
+
+#[derive(Clone, Copy)]
+enum PyatvLauncher {
+    Python3,
+    Uv(&'static str),
+}
+
+static PYATV_LAUNCHER: OnceLock<Option<PyatvLauncher>> = OnceLock::new();
 
 /// OwnTone sidecar when present; otherwise pyatv RAOP to the receiver's IP.
 pub struct AirPlaySender {
@@ -11,10 +29,15 @@ pub struct AirPlaySender {
     host: String,
     http: Client,
     child: Option<Child>,
+    active_backend: Option<ActiveBackend>,
 }
 
 impl AirPlaySender {
-    pub fn new(name: impl Into<String>, output_id: impl Into<String>, base_url: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        output_id: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
         AirPlaySender {
             name: name.into(),
             output_id: output_id.into(),
@@ -23,6 +46,7 @@ impl AirPlaySender {
             host: String::new(),
             http: crate::sender::sonos::soap::http_client(),
             child: None,
+            active_backend: None,
         }
     }
 
@@ -33,14 +57,19 @@ impl AirPlaySender {
     }
 
     async fn put_json(&self, path: &str, body: serde_json::Value) -> Result<(), SenderError> {
-        let url = format!("{}{path}", self.base_url);
+        self.put_json_url(endpoint_url(&self.base_url, path)?, body)
+            .await
+    }
+
+    async fn put_json_url(&self, url: Url, body: serde_json::Value) -> Result<(), SenderError> {
+        let path = url.path().to_string();
         let response = self
             .http
-            .put(&url)
+            .put(url)
             .json(&body)
             .send()
             .await
-            .map_err(|e| SenderError(e.to_string()))?;
+            .map_err(|e| SenderError(format!("OwnTone {path} failed: {e}")))?;
         if response.status().is_success() {
             Ok(())
         } else {
@@ -53,99 +82,171 @@ impl AirPlaySender {
     }
 
     async fn owntone_reachable(&self) -> bool {
-        let url = format!("{}/api/outputs", self.base_url);
+        let Ok(url) = endpoint_url(&self.base_url, "/api/outputs") else {
+            return false;
+        };
         let probe = crate::sender::sonos::soap::lan_client(std::time::Duration::from_millis(400));
         probe
-            .get(&url)
+            .get(url)
             .send()
             .await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
     }
 
-    async fn start_owntone(&self) -> Result<(), SenderError> {
-        self.put_json(
-            &format!("/api/outputs/{}", self.output_id),
-            serde_json::json!({ "selected": true }),
-        )
-        .await?;
-        if !self.stream_url.is_empty() {
-            let add = format!(
-                "{}/api/queue/items/add?uris={}",
-                self.base_url,
-                urlencoding_loose(&self.stream_url)
-            );
-            let _ = self.http.post(&add).send().await;
-        }
-        self.put_json("/api/player/play", serde_json::json!({})).await
+    async fn select_owntone_output(&self, selected: bool) -> Result<(), SenderError> {
+        let url = output_url(&self.base_url, &self.output_id)?;
+        self.put_json_url(url, serde_json::json!({ "selected": selected }))
+            .await
     }
 
-    fn start_pyatv(&mut self) -> Result<(), SenderError> {
+    async fn add_owntone_stream(&self) -> Result<(), SenderError> {
+        let mut url = endpoint_url(&self.base_url, "/api/queue/items/add")?;
+        url.query_pairs_mut().append_pair("uris", &self.stream_url);
+        let response = self
+            .http
+            .post(url)
+            .send()
+            .await
+            .map_err(|e| SenderError(format!("OwnTone queue add failed: {e}")))?;
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(SenderError(format!(
+                "OwnTone queue add failed: {}",
+                response.status()
+            )))
+        }
+    }
+
+    async fn rollback_owntone_start(&self, player_may_be_running: bool) -> Option<SenderError> {
+        let mut failures = Vec::new();
+        if player_may_be_running {
+            if let Err(error) = self
+                .put_json("/api/player/stop", serde_json::json!({}))
+                .await
+            {
+                failures.push(error.to_string());
+            }
+        }
+        if let Err(error) = self.select_owntone_output(false).await {
+            failures.push(error.to_string());
+        }
+        if failures.is_empty() {
+            None
+        } else {
+            Some(SenderError(failures.join("; ")))
+        }
+    }
+
+    async fn start_owntone(&self) -> Result<(), SenderError> {
+        self.select_owntone_output(true).await?;
+        if !self.stream_url.is_empty() {
+            if let Err(error) = self.add_owntone_stream().await {
+                return match self.rollback_owntone_start(false).await {
+                    Some(rollback) => Err(SenderError(format!(
+                        "{error}; OwnTone rollback also failed: {rollback}"
+                    ))),
+                    None => Err(error),
+                };
+            }
+        }
+        if let Err(error) = self
+            .put_json("/api/player/play", serde_json::json!({}))
+            .await
+        {
+            return match self.rollback_owntone_start(true).await {
+                Some(rollback) => Err(SenderError(format!(
+                    "{error}; OwnTone rollback also failed: {rollback}"
+                ))),
+                None => Err(error),
+            };
+        }
+        Ok(())
+    }
+
+    async fn start_pyatv(&mut self) -> Result<(), SenderError> {
         if self.host.is_empty() || self.stream_url.is_empty() {
             return Err(SenderError(format!(
                 "OwnTone is not running at {} (Linux AirPlay sidecar)",
                 self.base_url
             )));
         }
-        let script = std::env::temp_dir().join("on-air-airplay-play.py");
-        std::fs::write(&script, include_str!("airplay_play.py"))
-            .map_err(|e| SenderError(format!("write airplay helper: {e}")))?;
-        let mut cmd = pyatv_command()?;
-        cmd.arg(&script)
-            .arg("--host")
-            .arg(&self.host)
-            .arg("--url")
-            .arg(&self.stream_url)
-            .arg("--volume")
-            .arg("22")
-            .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            cmd.process_group(0);
-        }
-        let child = cmd
-            .spawn()
-            .map_err(|e| SenderError(format!("start AirPlay helper: {e}")))?;
+        let host = self.host.clone();
+        let stream_url = self.stream_url.clone();
+        let child = tokio::task::spawn_blocking(move || spawn_pyatv(&host, &stream_url))
+            .await
+            .map_err(|e| SenderError(format!("start AirPlay helper task: {e}")))??;
         self.child = Some(child);
         Ok(())
     }
 
-    fn stop_child(&mut self) {
+    async fn stop_child(&mut self) -> Result<(), SenderError> {
         if let Some(mut child) = self.child.take() {
-            #[cfg(unix)]
-            {
-                let pid = child.id();
-                let _ = Command::new("kill")
-                    .args(["-TERM", "--", &format!("-{pid}")])
-                    .status();
-            }
-            let _ = child.kill();
-            let _ = child.wait();
+            tokio::task::spawn_blocking(move || terminate_child(&mut child))
+                .await
+                .map_err(|e| SenderError(format!("stop AirPlay helper task: {e}")))??;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AirPlaySender {
+    fn drop(&mut self) {
+        // A process outliving the sender keeps the radio stream and helper
+        // runtime alive forever. Normal shutdown uses the async stop path;
+        // this is the panic/cancellation safety net.
+        if let Some(mut child) = self.child.take() {
+            let _ = terminate_child(&mut child);
         }
     }
 }
 
-fn urlencoding_loose(url: &str) -> String {
-    url.replace(':', "%3A").replace('/', "%2F")
+fn endpoint_url(base: &str, path: &str) -> Result<Url, SenderError> {
+    Url::parse(&format!("{}{}", base.trim_end_matches('/'), path))
+        .map_err(|e| SenderError(format!("invalid OwnTone URL: {e}")))
+}
+
+fn output_url(base: &str, output_id: &str) -> Result<Url, SenderError> {
+    let mut url = endpoint_url(base, "/api/outputs/")?;
+    url.path_segments_mut()
+        .map_err(|_| SenderError("invalid OwnTone base URL".into()))?
+        .pop_if_empty()
+        .push(output_id);
+    Ok(url)
 }
 
 fn pyatv_command() -> Result<Command, SenderError> {
-    if python_has_pyatv("python3") {
-        return Ok(Command::new("python3"));
-    }
-    for uv in ["uv", "/home/linuxbrew/.linuxbrew/bin/uv", "/usr/bin/uv"] {
-        if command_ok(uv, &["--version"]) {
+    match PYATV_LAUNCHER.get_or_init(detect_pyatv_launcher) {
+        Some(PyatvLauncher::Python3) => Ok(Command::new("python3")),
+        Some(PyatvLauncher::Uv(uv)) => {
             let mut cmd = Command::new(uv);
-            cmd.args(["run", "--with", "pyatv", "--python", "python3"]);
-            return Ok(cmd);
+            cmd.args([
+                "run",
+                "--offline",
+                "--with",
+                "pyatv",
+                "--python",
+                "python3",
+                "python3",
+            ]);
+            Ok(cmd)
         }
+        None => Err(SenderError(
+            "AirPlay needs OwnTone on :3689 or a locally installed pyatv (`pip install pyatv`)"
+                .into(),
+        )),
     }
-    Err(SenderError(
-        "AirPlay needs OwnTone on :3689 or pyatv (`pip install pyatv` / `uv run --with pyatv`)".into(),
-    ))
+}
+
+fn detect_pyatv_launcher() -> Option<PyatvLauncher> {
+    if python_has_pyatv("python3") {
+        return Some(PyatvLauncher::Python3);
+    }
+    ["uv", "/home/linuxbrew/.linuxbrew/bin/uv", "/usr/bin/uv"]
+        .into_iter()
+        .find(|uv| uv_has_cached_pyatv(uv))
+        .map(PyatvLauncher::Uv)
 }
 
 fn python_has_pyatv(bin: &str) -> bool {
@@ -158,9 +259,19 @@ fn python_has_pyatv(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn command_ok(bin: &str, args: &[&str]) -> bool {
+fn uv_has_cached_pyatv(bin: &str) -> bool {
     Command::new(bin)
-        .args(args)
+        .args([
+            "run",
+            "--offline",
+            "--with",
+            "pyatv",
+            "--python",
+            "python3",
+            "python3",
+            "-c",
+            "import pyatv",
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -168,34 +279,97 @@ fn command_ok(bin: &str, args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
+fn spawn_pyatv(host: &str, stream_url: &str) -> Result<Child, SenderError> {
+    let mut cmd = pyatv_command()?;
+    cmd.arg("-c")
+        .arg(include_str!("airplay_play.py"))
+        .arg("--host")
+        .arg(host)
+        .arg("--url")
+        .arg(stream_url)
+        .arg("--volume")
+        .arg("22")
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn()
+        .map_err(|e| SenderError(format!("start AirPlay helper: {e}")))
+}
+
+fn terminate_child(child: &mut Child) -> Result<(), SenderError> {
+    #[cfg(unix)]
+    {
+        let pid = child.id();
+        let _ = Command::new("kill")
+            .args(["-TERM", "--", &format!("-{pid}")])
+            .status();
+    }
+    let _ = child.kill();
+    child
+        .wait()
+        .map(|_| ())
+        .map_err(|e| SenderError(format!("reap AirPlay helper: {e}")))
+}
+
 #[async_trait::async_trait]
 impl AudioSender for AirPlaySender {
     async fn start(&mut self) -> Result<(), SenderError> {
-        if self.owntone_reachable().await {
-            self.start_owntone().await
-        } else {
-            self.start_pyatv()
+        if self.active_backend.is_some() {
+            return Ok(());
         }
+        if self.owntone_reachable().await {
+            self.start_owntone().await?;
+            self.active_backend = Some(ActiveBackend::OwnTone);
+        } else {
+            self.start_pyatv().await?;
+            self.active_backend = Some(ActiveBackend::Pyatv);
+        }
+        Ok(())
     }
 
     async fn stop(&mut self) -> Result<(), SenderError> {
-        if self.child.is_some() {
-            self.stop_child();
-            return Ok(());
+        match self.active_backend {
+            Some(ActiveBackend::Pyatv) => {
+                self.stop_child().await?;
+            }
+            Some(ActiveBackend::OwnTone) => {
+                let mut failures = Vec::new();
+                if let Err(error) = self
+                    .put_json("/api/player/stop", serde_json::json!({}))
+                    .await
+                {
+                    failures.push(error.to_string());
+                }
+                if let Err(error) = self.select_owntone_output(false).await {
+                    failures.push(error.to_string());
+                }
+                if !failures.is_empty() {
+                    return Err(SenderError(failures.join("; ")));
+                }
+            }
+            None => return Ok(()),
         }
-        let _ = self.put_json("/api/player/stop", serde_json::json!({})).await;
+        self.active_backend = None;
         Ok(())
     }
 
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError> {
-        if self.child.is_some() {
-            return Ok(());
+        match self.active_backend {
+            Some(ActiveBackend::OwnTone) => {
+                self.put_json(
+                    "/api/player/volume",
+                    serde_json::json!({ "volume": volume.min(100) }),
+                )
+                .await
+            }
+            Some(ActiveBackend::Pyatv) => Ok(()),
+            None => Err(SenderError("AirPlay output is not active".into())),
         }
-        self.put_json(
-            "/api/player/volume",
-            serde_json::json!({ "volume": volume.min(100) }),
-        )
-        .await
     }
 
     fn name(&self) -> &str {
@@ -231,20 +405,34 @@ struct OwnToneOutput {
     needs_auth: bool,
     #[serde(default)]
     has_password: bool,
-    #[serde(default)]
-    r#type: String,
 }
 
-pub async fn fetch_owntone_outputs(base: &str) -> Result<Vec<crate::state::CatalogDevice>, SenderError> {
-    let url = format!("{}/api/outputs", base.trim_end_matches('/'));
-    let body: OwnToneOutputs = crate::sender::sonos::soap::http_client()
-        .get(&url)
+pub async fn fetch_owntone_outputs(
+    base: &str,
+) -> Result<Vec<crate::state::CatalogDevice>, SenderError> {
+    let http = crate::sender::sonos::soap::http_client();
+    fetch_owntone_outputs_with_client(&http, base).await
+}
+
+pub(crate) async fn fetch_owntone_outputs_with_client(
+    http: &Client,
+    base: &str,
+) -> Result<Vec<crate::state::CatalogDevice>, SenderError> {
+    let url = endpoint_url(base, "/api/outputs")?;
+    let response = http
+        .get(url)
         .send()
         .await
-        .map_err(|e| SenderError(e.to_string()))?
-        .json()
-        .await
-        .map_err(|e| SenderError(e.to_string()))?;
+        .map_err(|e| SenderError(format!("OwnTone output catalog failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(SenderError(format!(
+            "OwnTone output catalog failed: {}",
+            response.status()
+        )));
+    }
+    let body = read_bounded(response, MAX_CATALOG_BYTES).await?;
+    let body: OwnToneOutputs = serde_json::from_slice(&body)
+        .map_err(|e| SenderError(format!("invalid OwnTone output catalog: {e}")))?;
     Ok(body
         .outputs
         .into_iter()
@@ -260,17 +448,19 @@ pub async fn fetch_owntone_outputs(base: &str) -> Result<Vec<crate::state::Catal
             member_count: 1,
             address: String::new(),
         })
-        .filter(|d| !d.name.is_empty())
+        .filter(|device| {
+            !device.name.trim().is_empty() && !device.id.trim().is_empty() && device.id != "null"
+        })
+        .take(MAX_CATALOG_DEVICES)
         .collect())
 }
 
 pub async fn pair_owntone(base: &str, device_id: &str, pin: &str) -> Result<(), SenderError> {
     let http = crate::sender::sonos::soap::http_client();
-    let base = base.trim_end_matches('/');
     let pin_body = serde_json::json!({ "pin": pin, "pairing_code": pin });
     for path in ["/api/pairing", "/api/pair"] {
         let response = http
-            .post(format!("{base}{path}"))
+            .post(endpoint_url(base, path)?)
             .json(&pin_body)
             .send()
             .await;
@@ -281,7 +471,7 @@ pub async fn pair_owntone(base: &str, device_id: &str, pin: &str) -> Result<(), 
         }
     }
     let selected = http
-        .put(format!("{base}/api/outputs/{device_id}"))
+        .put(output_url(base, device_id)?)
         .json(&serde_json::json!({ "selected": true, "pin": pin }))
         .send()
         .await
@@ -294,4 +484,37 @@ pub async fn pair_owntone(base: &str, device_id: &str, pin: &str) -> Result<(), 
             selected.status()
         )))
     }
+}
+
+async fn read_bounded(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Vec<u8>, SenderError> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Err(SenderError(format!(
+            "OwnTone response exceeds {limit} bytes"
+        )));
+    }
+    let mut body = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(limit as u64) as usize,
+    );
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| SenderError(format!("read OwnTone response: {e}")))?
+    {
+        if body.len().saturating_add(chunk.len()) > limit {
+            return Err(SenderError(format!(
+                "OwnTone response exceeds {limit} bytes"
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }

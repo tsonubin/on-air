@@ -13,7 +13,9 @@ async fn activate_unknown_output_returns_404() {
                 .method("POST")
                 .uri("/api/outputs/active")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"transport":"sonos","device_id":"does-not-exist"}"#))
+                .body(Body::from(
+                    r#"{"transport":"sonos","device_id":"does-not-exist"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -39,4 +41,21 @@ async fn volume_with_no_active_output_returns_409() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn volume_above_one_hundred_is_rejected() {
+    let app = on_air_core::build_router(CoreState::new());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/outputs/active/volume")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"volume":101}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }

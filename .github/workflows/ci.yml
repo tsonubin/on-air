@@ -9,22 +9,76 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  EXPO_NO_TELEMETRY: "1"
+
 jobs:
-  test-core:
-    name: cargo test (core)
+  check-web:
+    name: biome / typecheck / JS tests and bundles
     runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Check native project contracts
+        run: node --test e2e/mobile/native-project.test.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: Biome
+        run: pnpm check:ci
+      - name: Typecheck web workspaces
+        run: pnpm typecheck:web
+      - name: Test control client and mobile UI
+        run: pnpm test:mobile
+      - name: Build desktop frontend
+        run: pnpm --filter desktop build
+      - name: Bundle Expo app for iOS and Android
+        run: |
+          pnpm --filter mobile exec expo export --platform ios --output-dir "${{ runner.temp }}/on-air-expo-export-ios" --clear --max-workers 2
+          pnpm --filter mobile exec expo export --platform android --output-dir "${{ runner.temp }}/on-air-expo-export-android" --max-workers 2
+
+  test-core:
+    name: fmt / clippy / core tests / phone integration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
       - uses: swatinem/rust-cache@v2
       - name: Install ALSA (cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev pkg-config
+      - run: pnpm install --frozen-lockfile
+      - name: Install desktop API test runner
+        run: npm ci --prefix e2e/desktop
+      - name: Lint core
+        run: cargo clippy --locked -p on-air-core --all-targets -- -D warnings
       - name: Test core
-        run: cargo test -p on-air-core
+        run: cargo test --locked -p on-air-core
+      - name: Test phone client against the mock core
+        run: pnpm test:mobile:e2e
+      - name: Test desktop client paths against the mock core
+        run: npm --prefix e2e/desktop run test:api
 
   check-desktop:
     name: cargo check (desktop)
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +103,62 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev libssl-dev pkg-config
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - name: Check desktop crate
-        run: cargo check -p on-air-desktop
+        run: cargo check --locked -p on-air-desktop
+
+  build-mobile-android:
+    name: build Android debug app
+    needs: check-web
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: pnpm install --frozen-lockfile
+      - name: Compile Android app and native modules
+        working-directory: apps/mobile/android
+        run: ./gradlew :app:assembleDebug --no-daemon --max-workers=2 -PreactNativeArchitectures=x86_64
+
+  build-mobile-ios:
+    name: build iOS simulator app
+    needs: check-web
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: apps/mobile
+      - run: pnpm install --frozen-lockfile
+      - name: Install iOS pods
+        working-directory: apps/mobile
+        run: bundle exec pod install --project-directory=ios
+      - name: Compile iOS app and native modules
+        working-directory: apps/mobile
+        run: >-
+          xcodebuild
+          -workspace ios/OnAirMobile.xcworkspace
+          -scheme OnAirMobile
+          -configuration Debug
+          -sdk iphonesimulator
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath "${{ runner.temp }}/on-air-ios"
+          CODE_SIGNING_ALLOWED=NO
+          build

@@ -8,12 +8,14 @@ module.exports = {
     "ios.debug": {
       type: "ios.app",
       binaryPath: "apps/mobile/ios/build/Build/Products/Debug-iphonesimulator/OnAirMobile.app",
-      build: "xcodebuild -workspace apps/mobile/ios/OnAirMobile.xcworkspace -scheme OnAirMobile -configuration Debug -sdk iphonesimulator -derivedDataPath apps/mobile/ios/build",
+      build:
+        "xcodebuild -workspace apps/mobile/ios/OnAirMobile.xcworkspace -scheme OnAirMobile -configuration Debug -sdk iphonesimulator -derivedDataPath apps/mobile/ios/build",
     },
     "android.debug": {
       type: "android.apk",
       binaryPath: "apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk",
-      build: "cd apps/mobile/android && ./gradlew assembleDebug assembleAndroidTest -DtestBuildType=debug",
+      build:
+        "cd apps/mobile/android && ./gradlew assembleDebug assembleAndroidTest -DtestBuildType=debug",
     },
   },
   devices: {

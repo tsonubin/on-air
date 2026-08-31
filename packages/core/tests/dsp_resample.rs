@@ -9,7 +9,10 @@ fn upsamples_44100_to_48000_with_correct_ratio() {
 
     assert!(!out.is_empty());
     let ratio = out.len() as f64 / n as f64;
-    assert!((ratio - 48000.0 / 44100.0).abs() < 0.05, "ratio was {ratio}");
+    assert!(
+        (ratio - 48000.0 / 44100.0).abs() < 0.05,
+        "ratio was {ratio}"
+    );
 }
 
 #[test]

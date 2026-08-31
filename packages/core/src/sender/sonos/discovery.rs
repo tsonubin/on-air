@@ -8,6 +8,10 @@ pub const SSDP_MULTICAST_ADDR: &str = "239.255.255.250:1900";
 pub const SSDP_SEARCH_TARGET: &str = "urn:schemas-upnp-org:device:ZonePlayer:1";
 pub const DEVICE_TTL: Duration = Duration::from_secs(120);
 pub const DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_DISCOVERED_DEVICES: usize = 64;
+const MAX_REGISTRY_DEVICES: usize = 128;
+const MAX_DEVICE_DESCRIPTION_BYTES: usize = 256 * 1024;
+const MAX_TOPOLOGY_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SonosDevice {
@@ -44,13 +48,22 @@ impl SonosDevice {
 
 impl SonosDevice {
     fn control_base_url(&self) -> String {
+        if let Ok(mut url) = reqwest::Url::parse(&self.location) {
+            url.set_path("");
+            url.set_query(None);
+            url.set_fragment(None);
+            return url.as_str().trim_end_matches('/').to_string();
+        }
         let without_scheme = self.location.trim_start_matches("http://");
         let host_port = without_scheme.split('/').next().unwrap_or(without_scheme);
         format!("http://{host_port}")
     }
 
     pub fn av_transport_control_url(&self) -> String {
-        format!("{}/MediaRenderer/AVTransport/Control", self.control_base_url())
+        format!(
+            "{}/MediaRenderer/AVTransport/Control",
+            self.control_base_url()
+        )
     }
 
     pub fn rendering_control_url(&self) -> String {
@@ -72,6 +85,16 @@ impl DeviceRegistry {
     }
 
     pub fn upsert(&mut self, device: SonosDevice, seen_at: Instant) {
+        if !self.devices.contains_key(&device.usn) && self.devices.len() >= MAX_REGISTRY_DEVICES {
+            if let Some(oldest) = self
+                .devices
+                .iter()
+                .min_by_key(|(_, (_, last_seen))| *last_seen)
+                .map(|(id, _)| id.clone())
+            {
+                self.devices.remove(&oldest);
+            }
+        }
         self.devices.insert(device.usn.clone(), (device, seen_at));
     }
 
@@ -81,11 +104,18 @@ impl DeviceRegistry {
     }
 
     pub fn list(&self) -> Vec<SonosDevice> {
-        self.devices
+        let mut devices: Vec<_> = self
+            .devices
             .values()
             .filter(|(d, _)| d.playable)
             .map(|(d, _)| d.clone())
-            .collect()
+            .collect();
+        devices.sort_by(|a, b| {
+            a.friendly_name
+                .cmp(&b.friendly_name)
+                .then_with(|| a.usn.cmp(&b.usn))
+        });
+        devices
     }
 
     pub fn apply_zone_groups(&mut self, groups: &[ZoneGroup]) {
@@ -98,7 +128,7 @@ impl DeviceRegistry {
             for group in groups {
                 if rincon_key(&group.coordinator) == key {
                     device.playable = true;
-                    device.member_count = group.members.len().max(1) as u8;
+                    device.member_count = group.members.len().clamp(1, u8::MAX as usize) as u8;
                     if let Some(name) = group
                         .members
                         .iter()
@@ -151,7 +181,11 @@ pub fn rincon_key(usn: &str) -> String {
     let raw = raw.split(':').next().unwrap_or(raw);
     let upper = raw.to_ascii_uppercase();
     if let Some(rest) = upper.strip_prefix("RINCON_") {
-        let mac: String = rest.chars().filter(|c| c.is_ascii_hexdigit()).take(12).collect();
+        let mac: String = rest
+            .chars()
+            .filter(|c| c.is_ascii_hexdigit())
+            .take(12)
+            .collect();
         if mac.len() == 12 {
             return format!("RINCON_{mac}");
         }
@@ -171,9 +205,15 @@ pub fn canonical_usn(usn: &str) -> String {
 }
 
 pub fn ip_from_http_location(location: &str) -> Option<IpAddr> {
-    let rest = location.strip_prefix("http://")?;
-    let host = rest.split(['/', ':']).next()?;
-    host.parse().ok()
+    let url = reqwest::Url::parse(location).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    url.host_str()?
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse()
+        .ok()
 }
 
 /// SOAP always goes to the IPv4 in `location`; mDNS may list IPv6 first.
@@ -229,14 +269,18 @@ pub fn parse_zone_groups(xml: &str) -> Vec<ZoneGroup> {
 }
 
 pub async fn fetch_zone_groups(client: &reqwest::Client, ip: IpAddr) -> Option<Vec<ZoneGroup>> {
-    let url = format!("http://{ip}:1400/ZoneGroupTopology/Control");
+    let host = match ip {
+        IpAddr::V4(ip) => ip.to_string(),
+        IpAddr::V6(ip) => format!("[{ip}]"),
+    };
+    let url = format!("http://{host}:1400/ZoneGroupTopology/Control");
     let body = r#"<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
     <u:GetZoneGroupState xmlns:u="urn:schemas-upnp-org:service:ZoneGroupTopology:1"></u:GetZoneGroupState>
   </s:Body>
 </s:Envelope>"#;
-    let text = client
+    let response = client
         .post(&url)
         .header("Content-Type", r#"text/xml; charset="utf-8""#)
         .header(
@@ -246,10 +290,11 @@ pub async fn fetch_zone_groups(client: &reqwest::Client, ip: IpAddr) -> Option<V
         .body(body)
         .send()
         .await
-        .ok()?
-        .text()
-        .await
         .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let text = read_limited_text(response, MAX_TOPOLOGY_BYTES).await?;
     let groups = parse_zone_groups(&text);
     if groups.is_empty() {
         None
@@ -283,10 +328,15 @@ fn parse_ssdp_response(data: &[u8], source_ip: IpAddr) -> Option<SonosDevice> {
             _ => {}
         }
     }
+    let location = location?;
+    // Real Sonos LOCATION headers use a numeric LAN address. Reject malformed
+    // or DNS-based responses before later discovery passes spend time probing
+    // an unrelated endpoint.
+    let location_ip = ip_from_http_location(&location)?;
     Some(SonosDevice::discovered(
         usn?,
-        location.clone()?,
-        source_ip,
+        location,
+        location_ip,
         source_ip.to_string(),
     ))
 }
@@ -296,7 +346,7 @@ async fn search_to(target: SocketAddr, duration: Duration) -> std::io::Result<Ve
     let msearch = build_msearch();
     socket.send_to(msearch.as_bytes(), target).await?;
 
-    let mut found = Vec::new();
+    let mut found = HashMap::new();
     let mut buf = [0u8; 2048];
     let deadline = tokio::time::Instant::now() + duration;
     loop {
@@ -307,12 +357,17 @@ async fn search_to(target: SocketAddr, duration: Duration) -> std::io::Result<Ve
         match tokio_timeout(remaining, socket.recv_from(&mut buf)).await {
             Ok(Ok((len, src))) => {
                 if let Some(device) = parse_ssdp_response(&buf[..len], src.ip()) {
-                    found.push(device);
+                    let key = rincon_key(&device.usn);
+                    if found.len() < MAX_DISCOVERED_DEVICES || found.contains_key(&key) {
+                        found.insert(key, device);
+                    }
                 }
             }
             _ => break,
         }
     }
+    let mut found: Vec<_> = found.into_values().collect();
+    found.sort_by(|a, b| a.usn.cmp(&b.usn));
     Ok(found)
 }
 
@@ -338,14 +393,14 @@ pub fn device_from_mdns_fields(uuid: &str, location: &str, ip: IpAddr) -> SonosD
 
 fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<SonosDevice> {
     let location = info.get_property_val_str("location")?.to_string();
+    let location_ip = ip_from_http_location(&location)?;
     let uuid = info.get_property_val_str("uuid").unwrap_or("");
     let ip = info
         .get_addresses()
         .iter()
         .copied()
         .find(|ip| ip.is_ipv4())
-        .or_else(|| ip_from_http_location(&location))
-        .or_else(|| info.get_addresses().iter().copied().next())?;
+        .unwrap_or(location_ip);
     Some(device_from_mdns_fields(uuid, &location, ip))
 }
 
@@ -354,16 +409,20 @@ fn search_mdns_blocking(duration: Duration) -> Vec<SonosDevice> {
         return Vec::new();
     };
     let Ok(rx) = mdns.browse(SONOS_MDNS_TYPE) else {
+        let _ = mdns.shutdown();
         return Vec::new();
     };
     let deadline = Instant::now() + duration;
-    let mut found = Vec::new();
+    let mut found = HashMap::new();
     while Instant::now() < deadline {
         let wait = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(wait) {
             Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
                 if let Some(device) = device_from_mdns_info(&info) {
-                    found.push(device);
+                    let key = rincon_key(&device.usn);
+                    if found.len() < MAX_DISCOVERED_DEVICES || found.contains_key(&key) {
+                        found.insert(key, device);
+                    }
                 }
             }
             Ok(_) => {}
@@ -371,6 +430,8 @@ fn search_mdns_blocking(duration: Duration) -> Vec<SonosDevice> {
         }
     }
     let _ = mdns.shutdown();
+    let mut found: Vec<_> = found.into_values().collect();
+    found.sort_by(|a, b| a.usn.cmp(&b.usn));
     found
 }
 
@@ -400,6 +461,32 @@ fn extract_xml_tag_text(xml: &str, tag: &str) -> Option<String> {
 }
 
 pub async fn fetch_friendly_name(client: &reqwest::Client, location: &str) -> Option<String> {
-    let body = client.get(location).send().await.ok()?.text().await.ok()?;
+    let response = client.get(location).send().await.ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    let body = read_limited_text(response, MAX_DEVICE_DESCRIPTION_BYTES).await?;
     extract_xml_tag_text(&body, "roomName").or_else(|| extract_xml_tag_text(&body, "friendlyName"))
+}
+
+async fn read_limited_text(mut response: reqwest::Response, limit: usize) -> Option<String> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return None;
+    }
+    let mut body = Vec::with_capacity(
+        response
+            .content_length()
+            .unwrap_or_default()
+            .min(limit as u64) as usize,
+    );
+    while let Some(chunk) = response.chunk().await.ok()? {
+        if body.len().saturating_add(chunk.len()) > limit {
+            return None;
+        }
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).ok()
 }

@@ -1,10 +1,10 @@
 import {
-  DEFAULT_PORT,
-  apiBase,
   type ActiveInputResponse,
   type ActiveOutput,
   type AirPlayModeResponse,
+  apiBase,
   type BluetoothDeviceInfo,
+  DEFAULT_PORT,
   type EqResponse,
   type OutputInfo,
   type SampleRateResponse,
@@ -14,6 +14,19 @@ import {
 export { apiBase, DEFAULT_PORT };
 
 export type FetchLike = typeof fetch;
+export const REQUEST_TIMEOUT_MS = 5_000;
+
+export class HttpError extends Error {
+  readonly path: string;
+  readonly status: number;
+
+  constructor(path: string, status: number) {
+    super(`${path} ${status}`);
+    this.name = "HttpError";
+    this.path = path;
+    this.status = status;
+  }
+}
 
 function authHeaders(token?: string, json = false): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -28,27 +41,35 @@ async function request<T>(
   init: RequestInit = {},
   fetchImpl: FetchLike = fetch,
 ): Promise<T> {
-  const response = await fetchImpl(`${base}${path}`, init);
-  if (!response.ok) {
-    throw new Error(`${path} ${response.status}`);
+  const controller = new AbortController();
+  const callerSignal = init.signal;
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetchImpl(`${base}${path}`, { ...init, signal: controller.signal });
+    if (!response.ok) {
+      throw new HttpError(path, response.status);
+    }
+    if (response.status === 204) {
+      return undefined as T;
+    }
+    const text = await response.text();
+    if (!text) return undefined as T;
+    return JSON.parse(text) as T;
+  } finally {
+    clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  const text = await response.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
 }
 
 export async function fetchStatus(base: string, fetchImpl?: FetchLike): Promise<StatusResponse> {
   return request<StatusResponse>(base, "/api/status", {}, fetchImpl);
 }
 
-export async function verifyPin(
-  base: string,
-  pin: string,
-  fetchImpl?: FetchLike,
-): Promise<string> {
+export async function verifyPin(base: string, pin: string, fetchImpl?: FetchLike): Promise<string> {
   const body = await request<{ token: string }>(
     base,
     "/api/pairing/verify",
@@ -176,7 +197,12 @@ export async function getEq(
   token?: string,
   fetchImpl?: FetchLike,
 ): Promise<[number, number, number, number, number]> {
-  const body = await request<EqResponse>(base, "/api/eq", { headers: authHeaders(token) }, fetchImpl);
+  const body = await request<EqResponse>(
+    base,
+    "/api/eq",
+    { headers: authHeaders(token) },
+    fetchImpl,
+  );
   return body.gains_db;
 }
 
@@ -329,7 +355,11 @@ export function prettyInput(name: string): string {
   return name;
 }
 
-export async function goldenPathSonos(base: string, pin: string, fetchImpl?: FetchLike): Promise<void> {
+export async function goldenPathSonos(
+  base: string,
+  pin: string,
+  fetchImpl?: FetchLike,
+): Promise<void> {
   await fetchStatus(base, fetchImpl);
   const token = await verifyPin(base, pin, fetchImpl);
   const inputs = await listInputs(base, token, fetchImpl);
@@ -342,7 +372,11 @@ export async function goldenPathSonos(base: string, pin: string, fetchImpl?: Fet
   await setEq(base, [3, 0, 0, 0, -3], token, fetchImpl);
 }
 
-export async function switchTransports(base: string, token?: string, fetchImpl?: FetchLike): Promise<string[]> {
+export async function switchTransports(
+  base: string,
+  token?: string,
+  fetchImpl?: FetchLike,
+): Promise<string[]> {
   const outputs = await listOutputs(base, token, fetchImpl);
   const order = ["sonos", "airplay", "bluetooth"] as const;
   const activated: string[] = [];

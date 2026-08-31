@@ -1,4 +1,4 @@
-const path = require("path");
+const path = require("node:path");
 const { getDefaultConfig } = require("expo/metro-config");
 
 const projectRoot = __dirname;
@@ -10,6 +10,5 @@ config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, "node_modules"),
   path.resolve(workspaceRoot, "node_modules"),
 ];
-config.resolver.disableHierarchicalLookup = true;
 
 module.exports = config;

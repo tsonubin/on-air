@@ -6,12 +6,19 @@
     "dev:desktop": "pnpm --filter desktop tauri dev",
     "dev:mobile": "pnpm --filter mobile start",
     "build": "turbo run build",
+    "check": "biome check .",
+    "check:ci": "biome ci .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
     "test": "turbo run test",
     "test:mobile": "pnpm --filter @on-air/control-client test && pnpm --filter mobile test",
     "test:mobile:e2e": "node --experimental-strip-types --test e2e/mobile/companion.e2e.ts",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "typecheck:web": "pnpm --filter @on-air/api-types typecheck && pnpm --filter @on-air/control-client typecheck && pnpm --filter desktop typecheck && pnpm --filter mobile typecheck"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.11",
     "turbo": "^2.3.0"
   },
   "packageManager": "pnpm@9.15.0",

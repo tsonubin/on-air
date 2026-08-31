@@ -1,0 +1,6 @@
+{
+  "apple.privacyManifestAggregationEnabled": "true",
+  "expo.jsEngine": "hermes",
+  "ios.deploymentTarget": "16.4",
+  "newArchEnabled": "true"
+}

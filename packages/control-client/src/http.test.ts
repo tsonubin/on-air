@@ -3,10 +3,12 @@ import { test } from "node:test";
 import {
   activateOutput,
   apiBase,
+  fetchStatus,
   goldenPathSonos,
   pairAirplay,
   pairBluetooth,
   prettyInput,
+  REQUEST_TIMEOUT_MS,
   setEq,
   setSampleRate,
   setVolume,
@@ -20,6 +22,16 @@ test("apiBase strips scheme and trailing slash", () => {
   assert.equal(apiBase("http://192.168.5.14/", 48000), "http://192.168.5.14:48000");
 });
 
+test("requests carry a bounded abort signal", async () => {
+  assert.equal(REQUEST_TIMEOUT_MS, 5_000);
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    assert.ok(init?.signal);
+    assert.equal(init.signal.aborted, false);
+    return new Response(JSON.stringify({ status: "ok", version: "0.1.0" }), { status: 200 });
+  };
+  await fetchStatus("http://127.0.0.1:47990", fetchImpl);
+});
+
 test("prettyInput matches desktop labels", () => {
   assert.equal(prettyInput("Discard all samples (playback)"), "Null device");
   assert.equal(prettyInput("alsa_output.pci.analog-stereo.monitor"), "Analog monitor");
@@ -27,7 +39,10 @@ test("prettyInput matches desktop labels", () => {
 });
 
 test("wsUrl puts the pairing token on the query string", () => {
-  assert.equal(wsUrl("http://192.168.5.14:47990", "onair-1"), "ws://192.168.5.14:47990/api/ws?token=onair-1");
+  assert.equal(
+    wsUrl("http://192.168.5.14:47990", "onair-1"),
+    "ws://192.168.5.14:47990/api/ws?token=onair-1",
+  );
 });
 
 test("verifyPin posts JSON and returns the token", async () => {
@@ -44,7 +59,10 @@ test("verifyPin posts JSON and returns the token", async () => {
 test("activateOutput posts transport and device_id with bearer token", async () => {
   const fetchImpl: typeof fetch = async (input, init) => {
     assert.equal(String(input), "http://10.0.0.2:47990/api/outputs/active");
-    assert.match(String(init?.headers && (init.headers as Record<string, string>).authorization), /Bearer tok/);
+    assert.match(
+      String(init?.headers && (init.headers as Record<string, string>).authorization),
+      /Bearer tok/,
+    );
     assert.equal(init?.body, JSON.stringify({ transport: "sonos", device_id: "uuid:x" }));
     return new Response(null, { status: 204 });
   };

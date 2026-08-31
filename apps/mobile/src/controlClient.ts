@@ -11,6 +11,7 @@ export {
   getEq,
   getSampleRate,
   goldenPathSonos,
+  HttpError,
   listBluetooth,
   listInputs,
   listOutputs,

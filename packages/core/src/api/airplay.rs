@@ -11,7 +11,7 @@ pub struct AirPlayModeResponse {
     pub mode: &'static str,
 }
 
-pub async fn mode() -> Json<AirPlayModeResponse> {
+pub async fn mode(Paired: Paired) -> Json<AirPlayModeResponse> {
     Json(AirPlayModeResponse {
         mode: airplay::platform_mode(),
     })

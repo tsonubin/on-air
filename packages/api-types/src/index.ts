@@ -1,6 +1,7 @@
 export interface StatusResponse {
   status: string;
   version: string;
+  service_enabled: boolean;
 }
 
 export interface InputsResponse {
@@ -71,7 +72,8 @@ export type WsEvent =
   | { type: "OutputStateChanged"; transport: string; device_name: string; active: boolean }
   | { type: "LevelMeter"; rms: number; peak: number }
   | { type: "DeviceJoined"; transport: string; id: string; name: string }
-  | { type: "DeviceLeft"; transport: string; id: string };
+  | { type: "DeviceLeft"; transport: string; id: string }
+  | { type: "ServiceStateChanged"; enabled: boolean };
 
 export interface DiscoveredHost {
   host: string;

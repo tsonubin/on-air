@@ -42,8 +42,14 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
 
     let soap_captured = Captured::default();
     let soap_app = Router::new()
-        .route("/MediaRenderer/AVTransport/Control", axum::routing::post(capture))
-        .route("/MediaRenderer/RenderingControl/Control", axum::routing::post(capture))
+        .route(
+            "/MediaRenderer/AVTransport/Control",
+            axum::routing::post(capture),
+        )
+        .route(
+            "/MediaRenderer/RenderingControl/Control",
+            axum::routing::post(capture),
+        )
         .with_state(soap_captured.clone());
     let soap_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let soap_addr = soap_listener.local_addr().unwrap();
@@ -115,10 +121,17 @@ async fn mock_http_golden_path_picks_input_activates_and_sets_eq_volume() {
 
     let inputs = app
         .clone()
-        .oneshot(Request::builder().uri("/api/inputs").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/inputs")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(inputs.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(inputs.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["inputs"][0], "Mock Monitor");
 
@@ -138,10 +151,17 @@ async fn mock_http_golden_path_picks_input_activates_and_sets_eq_volume() {
 
     let outputs = app
         .clone()
-        .oneshot(Request::builder().uri("/api/outputs").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/outputs")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
-    let body = axum::body::to_bytes(outputs.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(outputs.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let sonos = json["outputs"]
         .as_array()

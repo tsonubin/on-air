@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import {
+  type ActiveOutput,
   API_BASE,
   DEFAULT_PORT,
-  type ActiveOutput,
   type OutputInfo,
   type StatusResponse,
+  type WsEvent,
 } from "@on-air/api-types";
 import { Fader } from "./ui/Fader";
 import { RateSelect } from "./ui/RateSelect";
@@ -56,9 +57,7 @@ function App() {
   const [activeInput, setActiveInput] = useState<string>("");
   const [activeOutput, setActiveOutput] = useState<ActiveOutput | null>(null);
   const [volume, setVolume] = useState(50);
-  const [gains, setGains] = useState<[number, number, number, number, number]>([
-    0, 0, 0, 0, 0,
-  ]);
+  const [gains, setGains] = useState<[number, number, number, number, number]>([0, 0, 0, 0, 0]);
   const [sampleRate, setSampleRate] = useState(44100);
   const [outputSampleRate, setOutputSampleRate] = useState(44100);
   const [inputRates, setInputRates] = useState<number[]>([44100, 48000]);
@@ -70,70 +69,112 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
   const [pairPin, setPairPin] = useState("");
+  const [pairing, setPairing] = useState(false);
+  const pairPinInput = useRef<HTMLInputElement>(null);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refreshQueued = useRef(false);
 
-  const refresh = useCallback(async () => {
-    setError(null);
-    const miss = Symbol("miss");
-    const settle = async <T,>(p: Promise<T>): Promise<T | typeof miss> => {
-      try {
-        return await p;
-      } catch (e) {
-        const msg = String(e);
-        if (!msg.includes("AbortError") && !msg.includes("aborted")) {
-          setError(msg);
+  const refresh = useCallback((): Promise<void> => {
+    if (refreshInFlight.current) {
+      refreshQueued.current = true;
+      return refreshInFlight.current;
+    }
+    const run = (async () => {
+      do {
+        refreshQueued.current = false;
+        setError(null);
+        const miss = Symbol("miss");
+        const settle = async <T,>(p: Promise<T>): Promise<T | typeof miss> => {
+          try {
+            return await p;
+          } catch (e) {
+            const msg = String(e);
+            if (!msg.includes("AbortError") && !msg.includes("aborted")) {
+              setError(msg);
+            }
+            return miss;
+          }
+        };
+        const [st, ins, outs, actIn, actOut, eq, sr, pairing, ap] = await Promise.all([
+          settle(api<StatusResponse>("/api/status")),
+          settle(api<{ inputs: string[] }>("/api/inputs")),
+          settle(api<{ outputs: OutputInfo[] }>("/api/outputs")),
+          settle(api<{ name: string | null; backend: string }>("/api/inputs/active")),
+          settle(api<ActiveOutput | null>("/api/outputs/active")),
+          settle(api<{ gains_db: [number, number, number, number, number] }>("/api/eq")),
+          settle(
+            api<{
+              sample_rate_hz: number;
+              input?: { sample_rate_hz: number; supported_hz: number[] };
+              output?: {
+                sample_rate_hz: number;
+                supported_hz: number[];
+                transport?: string;
+              };
+            }>("/api/sample-rate"),
+          ),
+          settle(api<{ pin: string }>("/api/pairing/pin")),
+          settle(api<{ mode: string }>("/api/airplay/mode")),
+        ]);
+        if (st !== miss) setStatus(st);
+        if (ins !== miss) setInputs(ins.inputs);
+        if (outs !== miss) setOutputs(outs.outputs);
+        if (actIn !== miss) setActiveInput(actIn.name ?? "");
+        if (actOut !== miss) setActiveOutput(actOut);
+        if (eq !== miss) setGains(eq.gains_db);
+        if (sr !== miss) {
+          setSampleRate(sr.input?.sample_rate_hz ?? sr.sample_rate_hz);
+          setOutputSampleRate(sr.output?.sample_rate_hz ?? sr.sample_rate_hz);
+          if (sr.input?.supported_hz?.length) setInputRates(sr.input.supported_hz);
+          if (sr.output?.supported_hz?.length) setOutputRates(sr.output.supported_hz);
+          setOutputRateTransport(sr.output?.transport ?? null);
         }
-        return miss;
-      }
-    };
-    const [st, ins, outs, actIn, actOut, eq, sr, pairing, ap] = await Promise.all([
-      settle(api<StatusResponse>("/api/status")),
-      settle(api<{ inputs: string[] }>("/api/inputs")),
-      settle(api<{ outputs: OutputInfo[] }>("/api/outputs")),
-      settle(api<{ name: string | null; backend: string }>("/api/inputs/active")),
-      settle(api<ActiveOutput | null>("/api/outputs/active")),
-      settle(api<{ gains_db: [number, number, number, number, number] }>("/api/eq")),
-      settle(
-        api<{
-          sample_rate_hz: number;
-          input?: { sample_rate_hz: number; supported_hz: number[] };
-          output?: {
-            sample_rate_hz: number;
-            supported_hz: number[];
-            transport?: string;
-          };
-        }>("/api/sample-rate"),
-      ),
-      settle(api<{ pin: string }>("/api/pairing/pin")),
-      settle(api<{ mode: string }>("/api/airplay/mode")),
-    ]);
-    if (st !== miss) setStatus(st);
-    if (ins !== miss) setInputs(ins.inputs);
-    if (outs !== miss) setOutputs(outs.outputs);
-    if (actIn !== miss) setActiveInput(actIn.name ?? "");
-    if (actOut !== miss) setActiveOutput(actOut);
-    if (eq !== miss) setGains(eq.gains_db);
-    if (sr !== miss) {
-      setSampleRate(sr.input?.sample_rate_hz ?? sr.sample_rate_hz);
-      setOutputSampleRate(sr.output?.sample_rate_hz ?? sr.sample_rate_hz);
-      if (sr.input?.supported_hz?.length) setInputRates(sr.input.supported_hz);
-      if (sr.output?.supported_hz?.length) setOutputRates(sr.output.supported_hz);
-      setOutputRateTransport(sr.output?.transport ?? null);
-    }
-    if (pairing !== miss) setPin(pairing.pin);
-    if (ap !== miss) setAirplayMode(ap.mode);
-    try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      setAutostart(await invoke<boolean>("autostart_enabled"));
-    } catch {
-      setAutostart(null);
-    }
+        if (pairing !== miss) setPin(pairing.pin);
+        if (ap !== miss) setAirplayMode(ap.mode);
+      } while (refreshQueued.current);
+    })();
+    refreshInFlight.current = run;
+    void run.finally(() => {
+      if (refreshInFlight.current === run) refreshInFlight.current = null;
+    });
+    return run;
   }, []);
 
   useEffect(() => {
-    void refresh();
-    const id = setInterval(() => void refresh(), 4000);
-    return () => clearInterval(id);
+    const refreshIfVisible = () => {
+      if (!document.hidden) void refresh();
+    };
+    refreshIfVisible();
+    const id = setInterval(refreshIfVisible, 15000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
+    const ws = new WebSocket(`${API_BASE.replace(/^http/i, "ws")}/api/ws`);
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as WsEvent;
+        if (message.type !== "LevelMeter") refreshIfVisible();
+      } catch {
+        // The interval remains the recovery path for malformed events.
+      }
+    };
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      ws.close();
+    };
   }, [refresh]);
+
+  useEffect(() => {
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke<boolean>("autostart_enabled"))
+      .then(setAutostart)
+      .catch(() => setAutostart(null));
+  }, []);
+
+  useEffect(() => {
+    if (pairTarget?.transport === "airplay") {
+      pairPinInput.current?.focus();
+    }
+  }, [pairTarget]);
 
   const uniqueInputs = useMemo(() => {
     const seen = new Set<string>();
@@ -145,23 +186,37 @@ function App() {
     });
   }, [inputs]);
 
-  const pickInput = async (name: string) => {
-    await api("/api/inputs/active", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    await refresh();
+  const perform = async (action: () => Promise<void>): Promise<boolean> => {
+    setError(null);
+    try {
+      await action();
+      return true;
+    } catch (err) {
+      setError(String(err));
+      return false;
+    }
   };
 
-  const activate = async (output: OutputInfo) => {
-    await api("/api/outputs/active", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ transport: output.transport, device_id: output.id }),
+  const pickInput = async (name: string) => {
+    await perform(async () => {
+      await api("/api/inputs/active", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      await refresh();
     });
-    await refresh();
   };
+
+  const activate = async (output: OutputInfo): Promise<boolean> =>
+    perform(async () => {
+      await api("/api/outputs/active", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ transport: output.transport, device_id: output.id }),
+      });
+      await refresh();
+    });
 
   const chooseOutput = async (output: OutputInfo) => {
     if (output.needs_pair && !output.paired) {
@@ -177,55 +232,89 @@ function App() {
   };
 
   const submitPair = async () => {
-    if (!pairTarget) return;
-    if (pairTarget.transport === "airplay") {
-      await api("/api/airplay/pair", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ device_id: pairTarget.id, pin: pairPin }),
-      });
-    } else if (pairTarget.transport === "bluetooth") {
-      await api("/api/bluetooth/pair", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: pairTarget.id }),
-      });
-    }
+    if (!pairTarget || pairing) return;
+    setPairing(true);
+    const paired = await perform(async () => {
+      if (pairTarget.transport === "airplay") {
+        await api("/api/airplay/pair", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ device_id: pairTarget.id, pin: pairPin }),
+        });
+      } else if (pairTarget.transport === "bluetooth") {
+        await api("/api/bluetooth/pair", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: pairTarget.id }),
+        });
+      }
+    });
+    setPairing(false);
+    if (!paired) return;
     const output = outputs.find(
       (o) => o.transport === pairTarget.transport && o.id === pairTarget.id,
     );
-    setPairTarget(null);
-    if (output) await activate(output);
+    if (!output || (await activate(output))) setPairTarget(null);
   };
 
   const applyVolume = async (value: number) => {
+    const previous = volume;
     setVolume(value);
-    await api("/api/outputs/active/volume", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ volume: value }),
-    });
+    const updated = await perform(() =>
+      api("/api/outputs/active/volume", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ volume: value }),
+      }),
+    );
+    if (!updated) setVolume(previous);
   };
 
   const applyEq = async (next: [number, number, number, number, number]) => {
+    const previous = gains;
     setGains(next);
-    await api("/api/eq", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ gains_db: next }),
-    });
+    const updated = await perform(() =>
+      api("/api/eq", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ gains_db: next }),
+      }),
+    );
+    if (!updated) setGains(previous);
   };
 
-  const live = Boolean(activeOutput);
-  const lampMode = live ? "live" : error || !status ? "warn" : "ok";
-  const lampLabel = live ? "on air" : error || !status ? "problem" : "ok";
+  const applyRate = async (kind: "input" | "output", hz: number) => {
+    const previous = kind === "input" ? sampleRate : outputSampleRate;
+    if (kind === "input") setSampleRate(hz);
+    else setOutputSampleRate(hz);
+    const updated = await perform(() =>
+      api("/api/sample-rate", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(kind === "input" ? { input_hz: hz } : { output_hz: hz }),
+      }),
+    );
+    if (!updated) {
+      if (kind === "input") setSampleRate(previous);
+      else setOutputSampleRate(previous);
+    } else {
+      await refresh();
+    }
+  };
+
+  const serviceAvailable = status?.service_enabled !== false;
+  const live = serviceAvailable && Boolean(activeOutput);
+  const lampMode = live ? "live" : error || !status || !serviceAvailable ? "warn" : "ok";
+  const lampLabel = live
+    ? "on air"
+    : !serviceAvailable
+      ? "service paused"
+      : error || !status
+        ? "problem"
+        : "ok";
 
   const wordmarkTone =
-    lampMode === "live"
-      ? "wordmark-live"
-      : lampMode === "warn"
-        ? "wordmark-warn"
-        : "wordmark-ok";
+    lampMode === "live" ? "wordmark-live" : lampMode === "warn" ? "wordmark-warn" : "wordmark-ok";
   const wordmarkFace =
     lampMode === "live"
       ? "wordmark-live-face"
@@ -279,15 +368,15 @@ function App() {
               />
               <div className="absolute top-[calc(100%+8px)] right-0 z-30 flex min-w-[7.5rem] flex-col gap-1.5 rounded-b bg-linear-to-b from-[#2a261f] to-[#16140f] px-2.5 py-2 font-mono text-[11px] text-ink shadow-[inset_0_1px_0_#4a4338,0_10px_22px_rgba(0,0,0,0.5)] border border-[#3a342a]">
                 <span>v{status?.version ?? "—"}</span>
+                <span>{serviceAvailable ? "service on" : "service paused"}</span>
                 <span>:{DEFAULT_PORT}</span>
                 <span data-testid="airplay-mode">{airplayMode || "—"}</span>
                 {autostart !== null && (
-                  <span data-testid="autostart-hint">
-                    {autostart ? "autostart" : "manual"}
-                  </span>
+                  <span data-testid="autostart-hint">{autostart ? "autostart" : "manual"}</span>
                 )}
                 {airplayMode === "avroute-picker" && (
                   <button
+                    type="button"
                     className="cursor-pointer rounded-sm border border-[#3a342a] bg-[#141210] px-2 py-0.5 hover:border-amber hover:text-amber"
                     data-testid="airplay-picker"
                     onClick={() => {
@@ -324,6 +413,7 @@ function App() {
               {uniqueInputs.map((name) => (
                 <li key={name}>
                   <button
+                    type="button"
                     className={`device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-[#322e26] px-2.5 py-2 text-left hover:border-[#4a4336] ${activeInput === name ? "device-row-on" : ""}`}
                     data-testid={`input-${name}`}
                     onClick={() => void pickInput(name)}
@@ -342,13 +432,26 @@ function App() {
           </section>
 
           <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-[#2e2a24] p-3 min-[721px]:border-t-0 min-[721px]:border-l">
-            <h2 className="mb-2 shrink-0 font-mono text-[10px] tracking-[0.22em] text-steel-dim uppercase">
-              Destination
-            </h2>
+            <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
+              <h2 className="m-0 font-mono text-[10px] tracking-[0.22em] text-steel-dim uppercase">
+                Destination
+              </h2>
+              {airplayMode === "avroute-picker" && (
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-sm border border-[#3a342a] bg-[#141210] px-2 py-1 font-mono text-[10px] hover:border-amber hover:text-amber"
+                  onClick={() => {
+                    void import("@tauri-apps/api/core")
+                      .then(({ invoke }) => invoke("open_airplay_picker"))
+                      .catch((err) => setError(String(err)));
+                  }}
+                >
+                  AirPlay picker
+                </button>
+              )}
+            </div>
             <p data-testid="active-output" hidden>
-              {activeOutput
-                ? `${activeOutput.transport}: ${activeOutput.device_name}`
-                : "none"}
+              {activeOutput ? `${activeOutput.transport}: ${activeOutput.device_name}` : "none"}
             </p>
             <ul
               className="flex min-h-0 flex-1 list-none flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain p-0 pr-0.5 m-0"
@@ -364,12 +467,16 @@ function App() {
                   activeOutput?.transport === output.transport &&
                   activeOutput?.device_id === output.id;
                 const pair = (output.member_count ?? 1) >= 2 || output.kind === "pair";
+                const pickerOnly =
+                  output.transport === "airplay" && airplayMode === "avroute-picker";
                 return (
                   <li key={`${output.transport}-${output.id}`}>
                     <button
-                      className={`device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-[#322e26] px-2.5 py-2 text-left hover:border-[#4a4336] ${on ? "device-row-on" : ""}`}
+                      type="button"
+                      className={`device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-[#322e26] px-2.5 py-2 text-left hover:border-[#4a4336] disabled:cursor-not-allowed disabled:opacity-50 ${on ? "device-row-on" : ""}`}
                       data-testid={`output-${output.transport}-${output.id}`}
                       onClick={() => void chooseOutput(output)}
+                      disabled={pickerOnly}
                     >
                       <span
                         className={`size-[9px] rounded-full border border-steel-dim ${on ? "border-live bg-live" : ""}`}
@@ -382,7 +489,11 @@ function App() {
                             <i className="block h-2.5 w-1.5 rounded-[1px_3px_3px_1px] border border-amber" />
                           </span>
                         )}
-                        {output.needs_pair && !output.paired ? "pin" : output.transport}
+                        {pickerOnly
+                          ? "picker"
+                          : output.needs_pair && !output.paired
+                            ? "pin"
+                            : output.transport}
                       </span>
                     </button>
                   </li>
@@ -405,7 +516,7 @@ function App() {
           <div className="flex min-w-0 items-end justify-center gap-3">
             {gains.map((gain, i) => (
               <Fader
-                key={i}
+                key={EQ_LABELS[i]}
                 label={EQ_LABELS[i]}
                 value={gain}
                 min={-12}
@@ -427,28 +538,14 @@ function App() {
               value={sampleRate}
               options={inputRates}
               testId="sample-rate"
-              onChange={(hz) => {
-                setSampleRate(hz);
-                void api("/api/sample-rate", {
-                  method: "PUT",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ input_hz: hz }),
-                });
-              }}
+              onChange={(hz) => void applyRate("input", hz)}
             />
             <RateSelect
               label="Out"
               value={outputSampleRate}
               options={outputRates}
               testId="output-sample-rate"
-              onChange={(hz) => {
-                setOutputSampleRate(hz);
-                void api("/api/sample-rate", {
-                  method: "PUT",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify({ output_hz: hz }),
-                });
-              }}
+              onChange={(hz) => void applyRate("output", hz)}
             />
           </div>
         </footer>
@@ -468,9 +565,9 @@ function App() {
             </p>
             {pairTarget.transport === "airplay" && (
               <input
+                ref={pairPinInput}
                 type="text"
                 inputMode="numeric"
-                autoFocus
                 placeholder="••••"
                 value={pairPin}
                 onChange={(e) => setPairPin(e.target.value)}
@@ -480,6 +577,7 @@ function App() {
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
+                disabled={pairing}
                 className="flex-1 cursor-pointer rounded border border-[#3a342a] bg-[#141210] py-2.5"
                 onClick={() => setPairTarget(null)}
               >
@@ -488,9 +586,10 @@ function App() {
               <button
                 className="flex-1 cursor-pointer rounded border border-[#6a2a22] bg-[#3a1814] py-2.5 text-[#ffd4cc]"
                 type="button"
+                disabled={pairing}
                 onClick={() => void submitPair()}
               >
-                Pair &amp; go live
+                {pairing ? "Pairing…" : "Pair & go live"}
               </button>
             </div>
           </div>

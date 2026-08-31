@@ -16,7 +16,7 @@ export default defineConfig({
       stdout: "pipe",
       stderr: "pipe",
       cwd: "../..",
-      env: { ...process.env, ON_AIR_MOCK: "1", PORT: "47990" },
+      env: { ...process.env, ON_AIR_MOCK: "1", PORT: "47990", BIND: "127.0.0.1" },
     },
   ],
 });

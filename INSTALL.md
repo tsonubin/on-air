@@ -279,6 +279,11 @@ pnpm --filter @on-air/control-client test
 The phone must be on the same LAN. Scan finds a running core on port `47990`;
 you can still type the desktop IP. Pair with the PIN on the desktop.
 
+The native projects use Expo module autolinking and `@expo/ui` native controls.
+Android release builds are intentionally unsigned until a private production
+keystore is configured; the repository never signs release artifacts with the
+public debug key.
+
 ## After install
 
 1. Launch **on-air** (tray icon). Autostart on login is available from the

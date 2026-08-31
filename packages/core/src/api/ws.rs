@@ -26,9 +26,16 @@ pub enum WsEvent {
         transport: String,
         id: String,
     },
+    ServiceStateChanged {
+        enabled: bool,
+    },
 }
 
-pub async fn ws_handler(Paired: Paired, ws: WebSocketUpgrade, State(state): State<CoreState>) -> Response {
+pub async fn ws_handler(
+    Paired: Paired,
+    ws: WebSocketUpgrade,
+    State(state): State<CoreState>,
+) -> Response {
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 

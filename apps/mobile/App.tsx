@@ -1,16 +1,26 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Button as ExpoButton, Host, Slider } from "@expo/ui";
+import type {
+  ActiveOutput,
+  DiscoveredHost,
+  OutputInfo,
+  StatusResponse,
+  WsEvent,
+} from "@on-air/api-types";
+import { DEFAULT_PORT } from "@on-air/api-types";
+import { StatusBar } from "expo-status-bar";
+import type React from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  AppState,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
-import type { ActiveOutput, DiscoveredHost, OutputInfo, StatusResponse } from "@on-air/api-types";
-import { DEFAULT_PORT } from "@on-air/api-types";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   activateInput,
   activateOutput,
@@ -22,6 +32,7 @@ import {
   getAirplayMode,
   getEq,
   getSampleRate,
+  HttpError,
   listInputs,
   listOutputs,
   pairAirplay,
@@ -69,28 +80,68 @@ function Fader(props: {
 }) {
   const step = props.step ?? 1;
   const clamp = (n: number) => Math.min(props.max, Math.max(props.min, n));
-  const fill = ((props.value - props.min) / (props.max - props.min)) * 100;
+  const [draft, setDraft] = useState(props.value);
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChange = useRef(props.onChange);
+  onChange.current = props.onChange;
+
+  useEffect(() => setDraft(props.value), [props.value]);
+  useEffect(
+    () => () => {
+      if (commitTimer.current) clearTimeout(commitTimer.current);
+    },
+    [],
+  );
+
+  const changeNow = (next: number) => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    setDraft(next);
+    onChange.current(next);
+  };
+  const preview = (value: number) => {
+    const next = clamp(value);
+    setDraft(next);
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+    // Avoid a LAN request for every drag sample on older phones and laptops.
+    commitTimer.current = setTimeout(() => onChange.current(next), 180);
+  };
+
   return (
     <View style={styles.fader} testID={props.testId}>
-      <Text style={styles.faderValue}>{props.value}</Text>
-      <Pressable
-        onPress={() => props.onChange(clamp(props.value + step))}
-        style={styles.faderBtn}
-        testID={`${props.testId}-up`}
-      >
-        <Text style={styles.faderBtnText}>+</Text>
-      </Pressable>
-      <View style={styles.faderTrack}>
-        <View style={[styles.faderFill, { height: (fill / 100) * 80 }]} />
+      <View style={styles.faderHeader}>
+        <Text style={styles.faderLabel}>{props.label}</Text>
+        <Text style={styles.faderValue}>{draft}</Text>
       </View>
-      <Pressable
-        onPress={() => props.onChange(clamp(props.value - step))}
-        style={styles.faderBtn}
-        testID={`${props.testId}-down`}
-      >
-        <Text style={styles.faderBtnText}>−</Text>
-      </Pressable>
-      <Text style={styles.faderLabel}>{props.label}</Text>
+      <View style={styles.faderControls}>
+        <Pressable
+          accessibilityLabel={`Decrease ${props.label}`}
+          accessibilityRole="button"
+          onPress={() => changeNow(clamp(draft - step))}
+          style={styles.faderBtn}
+          testID={`${props.testId}-down`}
+        >
+          <Text style={styles.faderBtnText}>−</Text>
+        </Pressable>
+        <Host matchContents style={styles.nativeSliderHost}>
+          <Slider
+            min={props.min}
+            max={props.max}
+            step={step}
+            value={draft}
+            onValueChange={preview}
+            testID={`${props.testId}-native`}
+          />
+        </Host>
+        <Pressable
+          accessibilityLabel={`Increase ${props.label}`}
+          accessibilityRole="button"
+          onPress={() => changeNow(clamp(draft + step))}
+          style={styles.faderBtn}
+          testID={`${props.testId}-up`}
+        >
+          <Text style={styles.faderBtnText}>+</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -116,10 +167,21 @@ export default function App(): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
   const [pairPin, setPairPin] = useState("");
+  const [pairing, setPairing] = useState(false);
+  const [devicePairing, setDevicePairing] = useState(false);
+  const [configuringRate, setConfiguringRate] = useState(false);
+  const [busyTarget, setBusyTarget] = useState<string | null>(null);
+  const [appActive, setAppActive] = useState(AppState.currentState === "active");
+  const didInitialScan = useRef(false);
+  const scanInFlight = useRef(false);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const refreshQueued = useRef(false);
 
   const base = apiBase(host, DEFAULT_PORT);
 
   const scan = useCallback(async () => {
+    if (scanInFlight.current) return;
+    scanInFlight.current = true;
     setScanning(true);
     setError(null);
     try {
@@ -135,53 +197,102 @@ export default function App(): React.JSX.Element {
     } catch (err) {
       setError(String(err));
     } finally {
+      scanInFlight.current = false;
       setScanning(false);
     }
   }, [host]);
 
-  const refresh = useCallback(async () => {
-    if (!token) return;
-    setError(null);
-    try {
-      const [st, ins, outs, actIn, actOut, eq, sr, ap] = await Promise.all([
-        fetchStatus(base),
-        listInputs(base, token),
-        listOutputs(base, token),
-        getActiveInput(base, token),
-        getActiveOutput(base, token),
-        getEq(base, token),
-        getSampleRate(base, token),
-        getAirplayMode(base, token),
-      ]);
-      setStatus(st);
-      setInputs(ins);
-      setOutputs(outs);
-      setActiveInput(actIn.name ?? "");
-      setActiveOutput(actOut);
-      setGains(eq);
-      setInRate(sr.input.sample_rate_hz);
-      setOutRate(sr.output.sample_rate_hz);
-      if (sr.input.supported_hz.length) setInputRates(sr.input.supported_hz);
-      if (sr.output.supported_hz.length) setOutputRates(sr.output.supported_hz);
-      setAirplayMode(ap);
-    } catch (err) {
-      setError(String(err));
+  const refresh = useCallback((): Promise<void> => {
+    if (!token) return Promise.resolve();
+    if (refreshInFlight.current) {
+      refreshQueued.current = true;
+      return refreshInFlight.current;
     }
+
+    const run = (async () => {
+      do {
+        refreshQueued.current = false;
+        setError(null);
+        try {
+          const results = await Promise.allSettled([
+            fetchStatus(base),
+            listInputs(base, token),
+            listOutputs(base, token),
+            getActiveInput(base, token),
+            getActiveOutput(base, token),
+            getEq(base, token),
+            getSampleRate(base, token),
+            getAirplayMode(base, token),
+          ]);
+          const [st, ins, outs, actIn, actOut, eq, sr, ap] = results;
+          if (st.status === "fulfilled") setStatus(st.value);
+          if (ins.status === "fulfilled") setInputs(ins.value);
+          if (outs.status === "fulfilled") setOutputs(outs.value);
+          if (actIn.status === "fulfilled") setActiveInput(actIn.value.name ?? "");
+          if (actOut.status === "fulfilled") setActiveOutput(actOut.value);
+          if (eq.status === "fulfilled") setGains(eq.value);
+          if (sr.status === "fulfilled") {
+            setInRate(sr.value.input.sample_rate_hz);
+            setOutRate(sr.value.output.sample_rate_hz);
+            if (sr.value.input.supported_hz.length) {
+              setInputRates(sr.value.input.supported_hz);
+            }
+            if (sr.value.output.supported_hz.length) {
+              setOutputRates(sr.value.output.supported_hz);
+            }
+          }
+          if (ap.status === "fulfilled") setAirplayMode(ap.value);
+
+          const failure = results.find((result) => result.status === "rejected");
+          if (failure?.status === "rejected") throw failure.reason;
+        } catch (err) {
+          if (err instanceof HttpError && err.status === 401) {
+            setToken(null);
+            setStatus(null);
+            setError("Pairing expired. Enter the current desktop PIN to reconnect.");
+          } else if (err instanceof HttpError && err.status === 503) {
+            setError("The desktop service is paused. Turn it on from the on-air tray menu.");
+          } else {
+            setError(String(err));
+          }
+          refreshQueued.current = false;
+        }
+      } while (refreshQueued.current);
+    })();
+    refreshInFlight.current = run;
+    void run.finally(() => {
+      if (refreshInFlight.current === run) refreshInFlight.current = null;
+    });
+    return run;
   }, [base, token]);
 
   useEffect(() => {
+    if (didInitialScan.current) return;
+    didInitialScan.current = true;
     void scan();
+  }, [scan]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (next) => {
+      setAppActive(next === "active");
+    });
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || !appActive) return;
     void refresh();
-    const id = setInterval(() => void refresh(), 4000);
+    const id = setInterval(() => void refresh(), 15000);
     let ws: WebSocket | undefined;
     try {
       ws = new WebSocket(wsUrl(base, token));
-      ws.onmessage = () => {
-        void refresh();
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(String(event.data)) as WsEvent;
+          if (message.type !== "LevelMeter") void refresh();
+        } catch {
+          // Ignore malformed events; the periodic refresh remains a fallback.
+        }
       };
     } catch {
       /* Expo web / tests may lack WS */
@@ -190,17 +301,25 @@ export default function App(): React.JSX.Element {
       clearInterval(id);
       ws?.close();
     };
-  }, [token, base, refresh]);
+  }, [token, base, refresh, appActive]);
 
   const pair = async () => {
+    const normalizedPin = pin.replace(/\D/g, "").slice(0, 6);
+    if (pairing || normalizedPin.length !== 6) {
+      setError("Enter the six-digit PIN shown by the desktop.");
+      return;
+    }
+    setPairing(true);
     setError(null);
     try {
       const st = await fetchStatus(base);
       setStatus(st);
-      const t = await verifyPin(base, pin);
+      const t = await verifyPin(base, normalizedPin);
       setToken(t);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setPairing(false);
     }
   };
 
@@ -215,19 +334,29 @@ export default function App(): React.JSX.Element {
   }, [inputs]);
 
   const pickInput = async (name: string) => {
-    if (!token) return;
+    if (!token || busyTarget) return;
+    setBusyTarget(`input:${name}`);
+    setError(null);
     try {
       await activateInput(base, name, token);
       await refresh();
     } catch (err) {
       setError(String(err));
+    } finally {
+      setBusyTarget(null);
     }
   };
 
   const activate = async (output: OutputInfo) => {
-    if (!token) return;
-    await activateOutput(base, output.transport, output.id, token);
-    await refresh();
+    if (!token || busyTarget) return;
+    setBusyTarget(`${output.transport}:${output.id}`);
+    setError(null);
+    try {
+      await activateOutput(base, output.transport, output.id, token);
+      await refresh();
+    } finally {
+      setBusyTarget(null);
+    }
   };
 
   const chooseOutput = async (output: OutputInfo) => {
@@ -244,7 +373,9 @@ export default function App(): React.JSX.Element {
   };
 
   const submitPair = async () => {
-    if (!pairTarget || !token) return;
+    if (!pairTarget || !token || devicePairing) return;
+    setDevicePairing(true);
+    setError(null);
     try {
       if (pairTarget.transport === "airplay") {
         await pairAirplay(base, pairTarget.id, pairPin, token);
@@ -258,7 +389,38 @@ export default function App(): React.JSX.Element {
       if (output) await activate(output);
     } catch (err) {
       setError(String(err));
+    } finally {
+      setDevicePairing(false);
     }
+  };
+
+  const applyRate = async (kind: "input" | "output", hz: number) => {
+    if (!token || configuringRate) return;
+    const previous = kind === "input" ? sampleRate : outputSampleRate;
+    setConfiguringRate(true);
+    setError(null);
+    if (kind === "input") setInRate(hz);
+    else setOutRate(hz);
+    try {
+      await setSampleRate(base, kind === "input" ? { input_hz: hz } : { output_hz: hz }, token);
+      await refresh();
+    } catch (err) {
+      if (kind === "input") setInRate(previous);
+      else setOutRate(previous);
+      setError(`Could not change the ${kind} sample rate: ${String(err)}`);
+    } finally {
+      setConfiguringRate(false);
+    }
+  };
+
+  const disconnect = () => {
+    setToken(null);
+    setStatus(null);
+    setInputs([]);
+    setOutputs([]);
+    setActiveInput("");
+    setActiveOutput(null);
+    setError(null);
   };
 
   const applyVolume = async (value: number) => {
@@ -281,13 +443,25 @@ export default function App(): React.JSX.Element {
     }
   };
 
-  const live = Boolean(activeOutput);
-  const lampLabel = live ? "on air" : error || !status ? "problem" : "ok";
-  const lampColor = live ? colors.live : error || !status ? colors.amber : "#5a1814";
+  const serviceAvailable = status?.service_enabled !== false;
+  const live = serviceAvailable && Boolean(activeOutput);
+  const lampLabel = live
+    ? "on air"
+    : !serviceAvailable
+      ? "service paused"
+      : error || !status
+        ? "problem"
+        : "ok";
+  const lampColor = live
+    ? colors.live
+    : error || !status || !serviceAvailable
+      ? colors.amber
+      : "#5a1814";
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <StatusBar style="light" />
+      <ScrollView contentInsetAdjustmentBehavior="automatic" contentContainerStyle={styles.scroll}>
         <View style={styles.header}>
           <View style={[styles.wordmark, live && styles.wordmarkLive]}>
             <Text style={[styles.wordmarkText, { color: lampColor }]} testID="core-status">
@@ -307,9 +481,15 @@ export default function App(): React.JSX.Element {
             <Text style={styles.hint}>
               Scans the LAN for a running on-air mixer (_on-air._tcp / port {DEFAULT_PORT}).
             </Text>
-            <Pressable style={styles.button} onPress={() => void scan()} testID="scan-button">
-              <Text style={styles.buttonText}>{scanning ? "Scanning…" : "Scan LAN"}</Text>
-            </Pressable>
+            <Host matchContents style={styles.nativeButtonHost}>
+              <ExpoButton
+                label={scanning ? "Scanning…" : "Scan LAN"}
+                onPress={() => void scan()}
+                disabled={scanning}
+                variant="outlined"
+                testID="scan-button"
+              />
+            </Host>
             {scanning && <ActivityIndicator color={colors.amber} />}
             {found.map((hit) => (
               <Pressable
@@ -341,23 +521,39 @@ export default function App(): React.JSX.Element {
               placeholder="Pairing PIN from the desktop"
               placeholderTextColor={colors.steelDim}
               value={pin}
-              onChangeText={setPin}
+              onChangeText={(value) => setPin(value.replace(/\D/g, "").slice(0, 6))}
               keyboardType="number-pad"
+              maxLength={6}
             />
-            <Pressable style={styles.buttonLive} onPress={() => void pair()} testID="pair-button">
-              <Text style={styles.buttonLiveText}>Pair</Text>
-            </Pressable>
+            <Host matchContents style={styles.nativeButtonHost}>
+              <ExpoButton
+                label={pairing ? "Pairing…" : "Pair"}
+                onPress={() => void pair()}
+                disabled={pairing || pin.length !== 6}
+                testID="pair-button"
+              />
+            </Host>
           </View>
         )}
 
         {token && (
           <>
-            <Text testID="paired-token" style={styles.paired}>
-              paired · {host}:{DEFAULT_PORT} · {airplayMode || "owntone"}
-            </Text>
+            <View style={styles.sessionRow}>
+              <Text testID="paired-token" style={styles.paired} selectable>
+                paired · {host}:{DEFAULT_PORT} · {airplayMode || "owntone"}
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={disconnect}
+                style={styles.disconnectButton}
+                testID="disconnect-button"
+              >
+                <Text style={styles.rowMeta}>Disconnect</Text>
+              </Pressable>
+            </View>
             {status && (
               <Text style={styles.meta}>
-                core v{status.version}
+                core v{status.version} · {serviceAvailable ? "service on" : "service paused"}
               </Text>
             )}
 
@@ -369,6 +565,7 @@ export default function App(): React.JSX.Element {
                 testID={`input-${name}`}
                 style={[styles.row, activeInput === name && styles.rowOn]}
                 onPress={() => void pickInput(name)}
+                disabled={busyTarget !== null}
               >
                 <View style={[styles.dot, activeInput === name && styles.dotOn]} />
                 <Text style={styles.rowTitle}>{prettyInput(name)}</Text>
@@ -376,26 +573,41 @@ export default function App(): React.JSX.Element {
             ))}
 
             <Text style={styles.heading}>Destination</Text>
+            {airplayMode === "avroute-picker" && (
+              <Text style={styles.hint}>
+                macOS requires AirPlay selection on the desktop. Use the AirPlay picker in on-air.
+              </Text>
+            )}
             <Text testID="active-output" style={styles.srOnly}>
               {activeOutput ? `${activeOutput.transport}: ${activeOutput.device_name}` : "none"}
             </Text>
-            {outputs.length === 0 && <Text style={styles.hint}>Waiting for a speaker on the LAN</Text>}
+            {outputs.length === 0 && (
+              <Text style={styles.hint}>Waiting for a speaker on the LAN</Text>
+            )}
             {outputs.map((output) => {
               const on =
-                activeOutput?.transport === output.transport && activeOutput?.device_id === output.id;
+                activeOutput?.transport === output.transport &&
+                activeOutput?.device_id === output.id;
+              const desktopPickerOnly =
+                output.transport === "airplay" && airplayMode === "avroute-picker";
               const pairMark = (output.member_count ?? 1) >= 2 || output.kind === "pair";
               return (
                 <Pressable
                   key={`${output.transport}-${output.id}`}
                   testID={`output-${output.transport}-${output.id}`}
-                  style={[styles.row, on && styles.rowOn]}
+                  style={[styles.row, on && styles.rowOn, desktopPickerOnly && styles.disabled]}
                   onPress={() => void chooseOutput(output)}
+                  disabled={busyTarget !== null || desktopPickerOnly}
                 >
                   <View style={[styles.dot, on && styles.dotOn]} />
                   <Text style={styles.rowTitle}>{output.name}</Text>
                   <Text style={styles.rowMeta}>
                     {pairMark ? "pair · " : ""}
-                    {output.needs_pair && !output.paired ? "pin" : output.transport}
+                    {desktopPickerOnly
+                      ? "desktop picker"
+                      : output.needs_pair && !output.paired
+                        ? "pin"
+                        : output.transport}
                   </Text>
                 </Pressable>
               );
@@ -412,7 +624,7 @@ export default function App(): React.JSX.Element {
               />
               {gains.map((gain, i) => (
                 <Fader
-                  key={i}
+                  key={EQ_LABELS[i]}
                   label={EQ_LABELS[i]}
                   value={gain}
                   min={-12}
@@ -442,10 +654,8 @@ export default function App(): React.JSX.Element {
                     key={`in-${hz}`}
                     testID={hz === sampleRate ? "sample-rate" : `sample-rate-${hz}`}
                     style={[styles.chip, hz === sampleRate && styles.chipOn]}
-                    onPress={() => {
-                      setInRate(hz);
-                      void setSampleRate(base, { input_hz: hz }, token ?? undefined);
-                    }}
+                    disabled={configuringRate}
+                    onPress={() => void applyRate("input", hz)}
                   >
                     <Text style={styles.chipText}>{hz}</Text>
                   </Pressable>
@@ -456,12 +666,12 @@ export default function App(): React.JSX.Element {
                 {outputRates.map((hz) => (
                   <Pressable
                     key={`out-${hz}`}
-                    testID={hz === outputSampleRate ? "output-sample-rate" : `output-sample-rate-${hz}`}
+                    testID={
+                      hz === outputSampleRate ? "output-sample-rate" : `output-sample-rate-${hz}`
+                    }
                     style={[styles.chip, hz === outputSampleRate && styles.chipOn]}
-                    onPress={() => {
-                      setOutRate(hz);
-                      void setSampleRate(base, { output_hz: hz }, token ?? undefined);
-                    }}
+                    disabled={configuringRate}
+                    onPress={() => void applyRate("output", hz)}
                   >
                     <Text style={styles.chipText}>{hz}</Text>
                   </Pressable>
@@ -471,7 +681,11 @@ export default function App(): React.JSX.Element {
           </>
         )}
 
-        {error && <Text style={styles.error}>{error}</Text>}
+        {error && (
+          <Text style={styles.error} selectable accessibilityRole="alert">
+            {error}
+          </Text>
+        )}
       </ScrollView>
 
       {pairTarget && (
@@ -497,16 +711,20 @@ export default function App(): React.JSX.Element {
             <Pressable
               style={styles.button}
               testID="device-pair-cancel"
+              disabled={devicePairing}
               onPress={() => setPairTarget(null)}
             >
               <Text style={styles.buttonText}>Cancel</Text>
             </Pressable>
             <Pressable
-              style={styles.buttonLive}
+              style={[styles.buttonLive, devicePairing && styles.disabled]}
               testID="device-pair-submit"
+              disabled={devicePairing}
               onPress={() => void submitPair()}
             >
-              <Text style={styles.buttonLiveText}>Pair & go live</Text>
+              <Text style={styles.buttonLiveText}>
+                {devicePairing ? "Pairing…" : "Pair & go live"}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -532,6 +750,8 @@ const styles = StyleSheet.create({
   title: { color: colors.ink, fontSize: 16, fontWeight: "600" },
   meta: { color: colors.steelDim, fontSize: 11, fontFamily: "monospace" },
   paired: { color: colors.amber, fontSize: 12, marginBottom: 4 },
+  sessionRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  disconnectButton: { marginLeft: "auto", paddingHorizontal: 8, paddingVertical: 8 },
   card: { gap: 8, marginBottom: 12 },
   heading: {
     color: colors.steelDim,
@@ -568,6 +788,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonLiveText: { color: "#ffd4cc", fontWeight: "600" },
+  disabled: { opacity: 0.5 },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -584,29 +805,24 @@ const styles = StyleSheet.create({
   rowMeta: { color: colors.steelDim, fontSize: 10, textTransform: "uppercase" },
   dot: { width: 9, height: 9, borderRadius: 5, borderWidth: 1, borderColor: colors.steelDim },
   dotOn: { backgroundColor: colors.live, borderColor: colors.live },
-  mixer: { flexDirection: "row", justifyContent: "space-around", marginTop: 16 },
-  fader: { alignItems: "center", width: 44, gap: 4 },
-  faderValue: { color: colors.amber, fontSize: 10, fontFamily: "monospace" },
-  faderLabel: { color: colors.steelDim, fontSize: 9, textTransform: "uppercase" },
+  mixer: { gap: 6, marginTop: 16 },
+  fader: { width: "100%", gap: 2 },
+  faderHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  faderControls: { flexDirection: "row", alignItems: "center", gap: 8 },
+  faderValue: { color: colors.amber, fontSize: 12, fontFamily: "monospace" },
+  faderLabel: { color: colors.steelDim, fontSize: 11, textTransform: "uppercase" },
   faderBtn: {
-    width: 28,
-    height: 22,
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 4,
   },
-  faderBtnText: { color: colors.ink },
-  faderTrack: {
-    width: 8,
-    height: 80,
-    backgroundColor: "#0c0b0a",
-    borderRadius: 4,
-    justifyContent: "flex-end",
-    overflow: "hidden",
-  },
-  faderFill: { width: "100%", backgroundColor: "#5c4a32", borderRadius: 4 },
+  faderBtnText: { color: colors.ink, fontSize: 20 },
+  nativeSliderHost: { flex: 1, minHeight: 44 },
+  nativeButtonHost: { width: "100%", minHeight: 44 },
   rates: { marginTop: 8 },
   rateRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {

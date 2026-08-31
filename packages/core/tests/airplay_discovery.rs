@@ -1,4 +1,7 @@
-use on_air_core::sender::airplay_mdns::{collapse_pairs, device_from_txt, skip_airplay_model};
+use on_air_core::sender::airplay_mdns::{
+    collapse_pairs, device_from_txt, merge_owntone, skip_airplay_model,
+};
+use on_air_core::state::CatalogDevice;
 use std::net::{IpAddr, Ipv4Addr};
 
 #[test]
@@ -68,4 +71,35 @@ fn apple_tv_stays_a_solo_destination() {
     assert_eq!(listed[0].name, "Apple TV");
     assert_eq!(listed[0].kind, "solo");
     assert!(!listed[0].needs_pair);
+}
+
+#[test]
+fn owntone_catalog_merges_case_and_spacing_variants_without_losing_the_address() {
+    let mut mdns = vec![CatalogDevice {
+        id: "AA:BB".into(),
+        name: "Living   Room".into(),
+        needs_pair: false,
+        paired: true,
+        kind: "solo",
+        member_count: 1,
+        address: "192.168.5.14".into(),
+    }];
+    merge_owntone(
+        &mut mdns,
+        vec![CatalogDevice {
+            id: "42".into(),
+            name: "living room".into(),
+            needs_pair: true,
+            paired: false,
+            kind: "solo",
+            member_count: 1,
+            address: String::new(),
+        }],
+    );
+
+    assert_eq!(mdns.len(), 1);
+    assert_eq!(mdns[0].id, "42");
+    assert_eq!(mdns[0].address, "192.168.5.14");
+    assert!(mdns[0].needs_pair);
+    assert!(!mdns[0].paired);
 }

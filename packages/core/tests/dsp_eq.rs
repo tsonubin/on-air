@@ -3,9 +3,7 @@ use on_air_core::dsp::eq::{GraphicEq, EQ_BAND_CENTERS_HZ, EQ_GAIN_RANGE_DB};
 #[test]
 fn zero_gain_is_exact_passthrough() {
     let mut eq = GraphicEq::new(44100.0);
-    let input: Vec<f32> = (0..2000)
-        .map(|i| (i as f32 * 0.017).sin() * 0.6)
-        .collect();
+    let input: Vec<f32> = (0..2000).map(|i| (i as f32 * 0.017).sin() * 0.6).collect();
     let mut samples = input.clone();
     eq.process(&mut samples);
     for (a, b) in input.iter().zip(samples.iter()) {

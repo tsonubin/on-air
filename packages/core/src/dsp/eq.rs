@@ -79,6 +79,9 @@ impl GraphicEq {
 
     pub fn set_gains_db(&mut self, gains_db: [f32; 5]) {
         let clamped = gains_db.map(|g| g.clamp(EQ_GAIN_RANGE_DB.0, EQ_GAIN_RANGE_DB.1));
+        if clamped == self.gains_db {
+            return;
+        }
         self.gains_db = clamped;
         self.coeffs = Self::compute_coeffs(self.sample_rate_hz, &clamped);
     }
@@ -88,6 +91,9 @@ impl GraphicEq {
     }
 
     pub fn process(&mut self, samples: &mut [f32]) {
+        if self.gains_db == [0.0; 5] {
+            return;
+        }
         for sample in samples.iter_mut() {
             let mut x = *sample;
             for band in 0..5 {

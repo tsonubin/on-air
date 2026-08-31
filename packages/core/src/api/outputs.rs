@@ -41,7 +41,10 @@ pub async fn list_outputs(Paired: Paired, State(state): State<CoreState>) -> Jso
     })
 }
 
-pub async fn get_active_output(Paired: Paired, State(state): State<CoreState>) -> Json<Option<ActiveOutput>> {
+pub async fn get_active_output(
+    Paired: Paired,
+    State(state): State<CoreState>,
+) -> Json<Option<ActiveOutput>> {
     Json(state.active_output.lock().unwrap().clone())
 }
 
@@ -56,9 +59,12 @@ pub async fn activate_output(
     State(state): State<CoreState>,
     Json(req): Json<ActivateOutputRequest>,
 ) -> Response {
+    let _configuration = state.config_lock.lock().await;
     match session::activate(&state, &req.transport, &req.device_id).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(ActivateError::NotFound) => (StatusCode::NOT_FOUND, "output device not found").into_response(),
+        Err(ActivateError::NotFound) => {
+            (StatusCode::NOT_FOUND, "output device not found").into_response()
+        }
         Err(ActivateError::BadRequest(msg)) => (StatusCode::BAD_REQUEST, msg).into_response(),
         Err(ActivateError::Failed(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
@@ -74,13 +80,18 @@ pub async fn set_output_volume(
     State(state): State<CoreState>,
     Json(req): Json<SetVolumeRequest>,
 ) -> Response {
+    if req.volume > 100 {
+        return (StatusCode::BAD_REQUEST, "volume must be between 0 and 100").into_response();
+    }
     match session::set_volume(&state, req.volume).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(ActivateError::Failed(msg)) if msg == "no active output" => {
             (StatusCode::CONFLICT, "no active output").into_response()
         }
         Err(ActivateError::Failed(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-        Err(ActivateError::NotFound) => (StatusCode::NOT_FOUND, "output device not found").into_response(),
+        Err(ActivateError::NotFound) => {
+            (StatusCode::NOT_FOUND, "output device not found").into_response()
+        }
         Err(ActivateError::BadRequest(msg)) => (StatusCode::BAD_REQUEST, msg).into_response(),
     }
 }

@@ -1,5 +1,8 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Host, InputCallbackInfo, SampleFormat, Stream};
+use cpal::{
+    Device, FromSample, Host, InputCallbackInfo, Sample, SampleFormat, SizedSample, Stream,
+    StreamConfig, I24, U24,
+};
 use ringbuf::{traits::Producer, HeapProd};
 use std::io::Read;
 use std::process::{Child, Command, Stdio};
@@ -142,27 +145,28 @@ pub fn start_pulse_monitor(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("parec: {e}"))?;
-    let mut stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "parec stdout missing".to_string())?;
+    let mut stdout = child.stdout.take().ok_or_else(|| {
+        let _ = child.kill();
+        let _ = child.wait();
+        "parec stdout missing".to_string()
+    })?;
     let stop = Arc::new(AtomicBool::new(false));
     let stop_thread = stop.clone();
     let reader = std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
+        // Keep up to three bytes between reads because pipe reads are not
+        // guaranteed to end on an f32 sample boundary.
+        let mut buf = [0u8; 4099];
+        let mut pending = 0;
         while !stop_thread.load(Ordering::Relaxed) {
-            match stdout.read(&mut buf) {
+            match stdout.read(&mut buf[pending..]) {
                 Ok(0) => break,
                 Ok(n) => {
-                    let samples = n / 4;
-                    if samples == 0 {
-                        continue;
-                    }
-                    let mut f32s = Vec::with_capacity(samples);
-                    for chunk in buf[..samples * 4].chunks_exact(4) {
-                        f32s.push(f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
-                    }
-                    producer.push_slice(&f32s);
+                    let total = pending + n;
+                    let complete_bytes = total - (total % 4);
+                    let (samples, _) = buf[..complete_bytes].as_chunks::<4>();
+                    producer.push_iter(samples.iter().map(|sample| f32::from_le_bytes(*sample)));
+                    pending = total - complete_bytes;
+                    buf.copy_within(complete_bytes..total, 0);
                 }
                 Err(_) => break,
             }
@@ -180,7 +184,9 @@ pub fn start_pulse_monitor(
 
 pub fn find_preferred_loopback(host: &Host) -> Result<Option<Device>, cpal::Error> {
     let devices = host.input_devices()?;
-    Ok(devices.into_iter().find(|d| is_loopback_device_name(&d.to_string())))
+    Ok(devices
+        .into_iter()
+        .find(|d| is_loopback_device_name(&d.to_string())))
 }
 
 pub fn find_input_device(host: &Host, name: &str) -> Result<Option<Device>, cpal::Error> {
@@ -220,44 +226,45 @@ pub fn start_capture(device: &Device, producer: HeapProd<f32>) -> Result<Stream,
 /// Returns the actual capture sample rate the stream is running at.
 pub fn start_capture_at(
     device: &Device,
-    mut producer: HeapProd<f32>,
+    producer: HeapProd<f32>,
     preferred_rate_hz: Option<u32>,
 ) -> Result<(Stream, u32), cpal::Error> {
-    let supported = device.default_input_config()?;
+    let default = device.default_input_config()?;
+    let supported = preferred_rate_hz
+        .and_then(|rate| {
+            device.supported_input_configs().ok().and_then(|configs| {
+                configs
+                    .filter(|config| {
+                        rate >= config.min_sample_rate() && rate <= config.max_sample_rate()
+                    })
+                    .min_by_key(|config| {
+                        (
+                            config.sample_format() != default.sample_format(),
+                            config.channels().abs_diff(default.channels()),
+                        )
+                    })
+                    .map(|config| config.with_sample_rate(rate))
+            })
+        })
+        .unwrap_or(default);
     let sample_format = supported.sample_format();
     let channels = supported.channels() as usize;
-    let mut config = supported.config();
-    if let Some(rate) = preferred_rate_hz {
-        let supported_here = supported_input_rate_ranges(device)
-            .into_iter()
-            .any(|(min, max)| rate >= min && rate <= max);
-        if supported_here {
-            config.sample_rate = rate;
-        }
-    }
+    let config = supported.config();
     let actual_rate = config.sample_rate;
 
-    let err_fn = |err: cpal::Error| {
-        eprintln!("capture stream error: {err}");
-    };
-
     let stream = match sample_format {
-        SampleFormat::F32 => device.build_input_stream(
-            config,
-            move |data: &[f32], _: &InputCallbackInfo| {
-                if channels <= 1 {
-                    producer.push_slice(data);
-                } else {
-                    let mono: Vec<f32> = data
-                        .chunks(channels)
-                        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                        .collect();
-                    producer.push_slice(&mono);
-                }
-            },
-            err_fn,
-            None,
-        )?,
+        SampleFormat::I8 => build_input_stream::<i8>(device, config, channels, producer)?,
+        SampleFormat::I16 => build_input_stream::<i16>(device, config, channels, producer)?,
+        SampleFormat::I24 => build_input_stream::<I24>(device, config, channels, producer)?,
+        SampleFormat::I32 => build_input_stream::<i32>(device, config, channels, producer)?,
+        SampleFormat::I64 => build_input_stream::<i64>(device, config, channels, producer)?,
+        SampleFormat::U8 => build_input_stream::<u8>(device, config, channels, producer)?,
+        SampleFormat::U16 => build_input_stream::<u16>(device, config, channels, producer)?,
+        SampleFormat::U24 => build_input_stream::<U24>(device, config, channels, producer)?,
+        SampleFormat::U32 => build_input_stream::<u32>(device, config, channels, producer)?,
+        SampleFormat::U64 => build_input_stream::<u64>(device, config, channels, producer)?,
+        SampleFormat::F32 => build_input_stream::<f32>(device, config, channels, producer)?,
+        SampleFormat::F64 => build_input_stream::<f64>(device, config, channels, producer)?,
         other => {
             return Err(cpal::Error::with_message(
                 cpal::ErrorKind::UnsupportedConfig,
@@ -268,4 +275,35 @@ pub fn start_capture_at(
 
     stream.play()?;
     Ok((stream, actual_rate))
+}
+
+fn build_input_stream<T>(
+    device: &Device,
+    config: StreamConfig,
+    channels: usize,
+    mut producer: HeapProd<f32>,
+) -> Result<Stream, cpal::Error>
+where
+    T: Sample + SizedSample,
+    f32: FromSample<T>,
+{
+    device.build_input_stream(
+        config,
+        move |data: &[T], _: &InputCallbackInfo| {
+            if channels <= 1 {
+                producer.push_iter(data.iter().copied().map(f32::from_sample));
+                return;
+            }
+
+            for frame in data.chunks_exact(channels) {
+                let sample =
+                    frame.iter().copied().map(f32::from_sample).sum::<f32>() / channels as f32;
+                if producer.try_push(sample).is_err() {
+                    break;
+                }
+            }
+        },
+        |err| eprintln!("capture stream error: {err}"),
+        None,
+    )
 }

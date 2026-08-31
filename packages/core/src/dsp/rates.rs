@@ -3,7 +3,6 @@
 /// Capture always lands on the user-selected *input* rate (pipeline rate).
 /// Each transport then resamples that stream to its *output* rate, which must
 /// be one of the rates that transport actually supports.
-
 pub const STANDARD_RATES_HZ: &[u32] = &[16_000, 32_000, 44_100, 48_000, 88_200, 96_000];
 
 /// Rates we offer for capture / pipeline processing when a device does not

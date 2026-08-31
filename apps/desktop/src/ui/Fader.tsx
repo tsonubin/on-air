@@ -1,4 +1,5 @@
 import * as Slider from "@radix-ui/react-slider";
+import { useEffect, useState } from "react";
 
 type Props = {
   label: string;
@@ -11,26 +12,20 @@ type Props = {
   onChange: (value: number) => void;
 };
 
-export function Fader({
-  label,
-  value,
-  min,
-  max,
-  step = 1,
-  testId,
-  readout,
-  onChange,
-}: Props) {
+export function Fader({ label, value, min, max, step = 1, testId, readout, onChange }: Props) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+
   return (
     <div className="flex w-10 flex-col items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-steel-dim [@media(max-height:560px)]:gap-1">
-      <span className="h-4 text-amber">{readout ?? value}</span>
+      <span className="h-4 text-amber">{readout ?? draft}</span>
       <input
         type="range"
         data-testid={testId}
         min={min}
         max={max}
         step={step}
-        value={value}
+        value={draft}
         aria-hidden="true"
         tabIndex={-1}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -41,8 +36,9 @@ export function Fader({
         min={min}
         max={max}
         step={step}
-        value={[value]}
-        onValueChange={([next]) => onChange(next ?? min)}
+        value={[draft]}
+        onValueChange={([next]) => setDraft(next ?? min)}
+        onValueCommit={([next]) => onChange(next ?? min)}
         className="relative flex h-24 w-6 touch-none select-none flex-col items-center justify-center [@media(max-height:560px)]:h-14"
       >
         <Slider.Track className="relative h-full w-1.5 grow rounded-full bg-[#0c0b0a] shadow-[inset_0_0_0_1px_#2a261f]">

@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "scheme": "onair",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.onair.remote",
@@ -16,12 +16,7 @@
     },
     "android": {
       "package": "app.onair.remote",
-      "permissions": [
-        "ACCESS_NETWORK_STATE",
-        "CHANGE_WIFI_MULTICAST_STATE",
-        "INTERNET"
-      ]
-    },
-    "plugins": ["expo-network"]
+      "permissions": ["ACCESS_NETWORK_STATE", "CHANGE_WIFI_MULTICAST_STATE", "INTERNET"]
+    }
   }
 }

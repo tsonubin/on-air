@@ -20,7 +20,10 @@ async fn ws_forwards_published_events_as_json() {
 
     let (mut ws_stream, _) = connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
 
-    let event = WsEvent::LevelMeter { rms: 0.5, peak: 0.9 };
+    let event = WsEvent::LevelMeter {
+        rms: 0.5,
+        peak: 0.9,
+    };
     // keep publishing until a subscriber (the websocket handler) exists
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -47,4 +50,12 @@ async fn ws_forwards_published_events_as_json() {
     assert_eq!(parsed["rms"], 0.5);
 
     let _ = ws_stream.close(None).await;
+}
+
+#[test]
+fn service_state_event_is_tagged_json() {
+    let event = WsEvent::ServiceStateChanged { enabled: false };
+    let json = serde_json::to_value(event).unwrap();
+    assert_eq!(json["type"], "ServiceStateChanged");
+    assert_eq!(json["enabled"], false);
 }

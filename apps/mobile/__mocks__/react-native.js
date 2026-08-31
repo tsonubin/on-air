@@ -8,6 +8,10 @@ function mock(name) {
 
 module.exports = {
   ActivityIndicator: mock("ActivityIndicator"),
+  AppState: {
+    currentState: "active",
+    addEventListener: () => ({ remove() {} }),
+  },
   Pressable: mock("Pressable"),
   SafeAreaView: mock("SafeAreaView"),
   ScrollView: mock("ScrollView"),

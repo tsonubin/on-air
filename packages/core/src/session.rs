@@ -55,7 +55,8 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
             paired: d.paired,
         });
     }
-    for d in state.bluetooth.list() {
+    let bluetooth_devices = state.bluetooth_devices().await.unwrap_or_default();
+    for d in bluetooth_devices {
         outputs.push(OutputInfo {
             id: d.id,
             name: d.name,
@@ -69,11 +70,15 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     outputs
 }
 
-pub async fn activate(state: &CoreState, transport: &str, device_id: &str) -> Result<(), ActivateError> {
+pub async fn activate(
+    state: &CoreState,
+    transport: &str,
+    device_id: &str,
+) -> Result<(), ActivateError> {
     let (sender, identity) = match transport {
         "sonos" => build_sonos(state, device_id).await?,
         "airplay" => build_airplay(state, device_id)?,
-        "bluetooth" => build_bluetooth(state, device_id)?,
+        "bluetooth" => build_bluetooth(state, device_id).await?,
         _ => return Err(ActivateError::BadRequest("unknown transport")),
     };
     state
@@ -85,15 +90,16 @@ pub async fn activate(state: &CoreState, transport: &str, device_id: &str) -> Re
 pub async fn set_volume(state: &CoreState, volume: u8) -> Result<(), ActivateError> {
     let mut guard = state.active_sender.lock().await;
     match guard.as_mut() {
-        Some(sender) => sender
-            .set_volume(volume)
-            .await
-            .map_err(ActivateError::from),
+        Some(sender) => sender.set_volume(volume).await.map_err(ActivateError::from),
         None => Err(ActivateError::Failed("no active output".into())),
     }
 }
 
-pub fn supported_output_rates(state: &CoreState, transport: &str, device_id: Option<&str>) -> Vec<u32> {
+pub fn supported_output_rates(
+    state: &CoreState,
+    transport: &str,
+    device_id: Option<&str>,
+) -> Vec<u32> {
     match transport {
         "bluetooth" => {
             if state.mock {
@@ -119,11 +125,7 @@ pub fn supported_output_rates(state: &CoreState, transport: &str, device_id: Opt
 fn snap_output_rate(state: &CoreState, transport: &str, device_id: Option<&str>) {
     let supported = supported_output_rates(state, transport, device_id);
     let mut current = state.output_sample_rate_hz.lock().unwrap();
-    *current = if transport == "bluetooth" {
-        rates::default_output_rate("bluetooth", &supported)
-    } else {
-        rates::snap_rate(*current, &supported)
-    };
+    *current = rates::snap_rate(*current, &supported);
 }
 
 async fn build_sonos(
@@ -145,7 +147,10 @@ async fn build_sonos(
     };
     if state.mock {
         return Ok((
-            Box::new(NullSender::new(device.friendly_name, state.mock_log.clone())),
+            Box::new(NullSender::new(
+                device.friendly_name,
+                state.mock_log.clone(),
+            )),
             identity,
         ));
     }
@@ -169,7 +174,9 @@ fn build_airplay(
 ) -> Result<(Box<dyn AudioSender>, ActiveOutput), ActivateError> {
     snap_output_rate(state, "airplay", None);
     if crate::sender::airplay::platform_mode() == "avroute-picker" && !state.mock {
-        return Err(ActivateError::BadRequest("macOS AirPlay is local-picker only"));
+        return Err(ActivateError::BadRequest(
+            "macOS AirPlay is local-picker only",
+        ));
     }
     let device = state
         .airplay_outputs
@@ -209,13 +216,14 @@ fn build_airplay(
     ))
 }
 
-fn build_bluetooth(
+async fn build_bluetooth(
     state: &CoreState,
     device_id: &str,
 ) -> Result<(Box<dyn AudioSender>, ActiveOutput), ActivateError> {
     let device = state
-        .bluetooth
-        .list()
+        .bluetooth_devices()
+        .await
+        .map_err(ActivateError::Failed)?
         .into_iter()
         .find(|d| d.id == device_id);
     let Some(device) = device else {
@@ -226,13 +234,32 @@ fn build_bluetooth(
         device_id: device.id.clone(),
         device_name: device.name.clone(),
     };
-    snap_output_rate(state, "bluetooth", Some(&device.id));
+    let supported = if state.mock {
+        rates::BLUETOOTH_RATES_HZ.to_vec()
+    } else {
+        let name = device.id.clone();
+        tokio::task::spawn_blocking(move || supported_bluetooth_rates_for_name(&name))
+            .await
+            .map_err(|error| {
+                ActivateError::Failed(format!("Bluetooth rate discovery failed: {error}"))
+            })?
+    };
+    {
+        let mut current = state.output_sample_rate_hz.lock().unwrap();
+        *current = rates::snap_rate(*current, &supported);
+    }
     let sink: std::sync::Arc<dyn PcmSink> = if state.mock {
         state.pcm_sink.clone()
     } else {
         let pipeline_hz = *state.target_sample_rate_hz.lock().unwrap();
         let output_hz = *state.output_sample_rate_hz.lock().unwrap();
-        pcm_sink_for_device(&device.id, &device.name, pipeline_hz, output_hz)
+        let id = device.id.clone();
+        let name = device.name.clone();
+        tokio::task::spawn_blocking(move || pcm_sink_for_device(&id, &name, pipeline_hz, output_hz))
+            .await
+            .map_err(|error| {
+                ActivateError::Failed(format!("Bluetooth output task failed: {error}"))
+            })??
     };
     Ok((
         Box::new(BluetoothSender::new(

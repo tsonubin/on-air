@@ -1,2 +1,2 @@
-export * from "./http.ts";
 export * from "./discover.ts";
+export * from "./http.ts";

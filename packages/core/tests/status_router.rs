@@ -25,4 +25,5 @@ async fn status_route_returns_ok_json() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["status"], "ok");
     assert!(json["version"].is_string());
+    assert_eq!(json["service_enabled"], true);
 }

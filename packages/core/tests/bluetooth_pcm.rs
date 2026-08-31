@@ -17,7 +17,13 @@ async fn bluetooth_sender_pumps_pipeline_pcm_into_the_sink() {
     }]));
     let sink = Arc::new(RecordingPcmSink::default());
     let (audio_tx, _) = broadcast::channel(8);
-    let mut sender = BluetoothSender::new("bt-1", "BT", adapter.clone(), audio_tx.clone(), sink.clone());
+    let mut sender = BluetoothSender::new(
+        "bt-1",
+        "BT",
+        adapter.clone(),
+        audio_tx.clone(),
+        sink.clone(),
+    );
     sender.start().await.unwrap();
     assert!(adapter.list()[0].connected);
 

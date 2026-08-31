@@ -45,9 +45,14 @@ pub fn spawn_processing_task(
 
     let join_handle = std::thread::spawn(move || {
         let mut eq = GraphicEq::new(input_rate_hz as f32);
-        let mut resampler = MonoResampler::new(input_rate_hz, output_rate_hz);
-        let chunk_frames = resampler.input_frames_next();
+        let mut resampler = (input_rate_hz != output_rate_hz)
+            .then(|| MonoResampler::new(input_rate_hz, output_rate_hz));
+        let chunk_frames = resampler
+            .as_ref()
+            .map(MonoResampler::input_frames_next)
+            .unwrap_or(1024);
         let mut chunk = vec![0.0f32; chunk_frames];
+        let mut resampled = Vec::new();
 
         while !stop_flag_thread.load(Ordering::Relaxed) {
             let mut filled = 0;
@@ -57,20 +62,35 @@ pub fn spawn_processing_task(
                 }
                 filled += consumer.pop_slice(&mut chunk[filled..]);
                 if filled < chunk_frames {
-                    std::thread::sleep(Duration::from_millis(5));
+                    std::thread::sleep(Duration::from_millis(10));
                 }
+            }
+
+            let audio_receivers = audio_tx.receiver_count();
+            let meter_receivers = ws_tx.receiver_count();
+            if audio_receivers == 0 && meter_receivers == 0 {
+                continue;
             }
 
             eq.set_gains_db(*eq_gains_db.lock().unwrap());
             eq.process(&mut chunk);
 
-            let peak = chunk.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
-            let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
-            let _ = ws_tx.send(WsEvent::LevelMeter { rms, peak });
+            if meter_receivers > 0 {
+                let peak = chunk.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+                let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
+                let _ = ws_tx.send(WsEvent::LevelMeter { rms, peak });
+            }
 
-            let resampled = resampler.process(&chunk);
-            let pcm_bytes = f32_to_le_i16_bytes(&resampled);
-            let _ = audio_tx.send(pcm_bytes); // no subscribers is fine
+            if audio_receivers > 0 {
+                let pcm_bytes = match resampler.as_mut() {
+                    Some(resampler) => {
+                        resampler.process_into(&chunk, &mut resampled);
+                        f32_to_le_i16_bytes(&resampled)
+                    }
+                    None => f32_to_le_i16_bytes(&chunk),
+                };
+                let _ = audio_tx.send(pcm_bytes);
+            }
         }
     });
 
@@ -91,7 +111,11 @@ pub struct CaptureHandle {
 }
 
 impl CaptureHandle {
-    pub fn cpal(stream: cpal::Stream, processing: ProcessingTaskHandle, device_name: String) -> Self {
+    pub fn cpal(
+        stream: cpal::Stream,
+        processing: ProcessingTaskHandle,
+        device_name: String,
+    ) -> Self {
         CaptureHandle {
             _stream: Some(stream),
             pulse: None,

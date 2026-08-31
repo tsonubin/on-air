@@ -12,7 +12,11 @@ use tokio::net::TcpListener;
 #[derive(Clone, Default)]
 struct Captured(Arc<Mutex<Vec<String>>>); // soapaction values, in call order
 
-async fn capture_handler(State(state): State<Captured>, headers: HeaderMap, _body: String) -> &'static str {
+async fn capture_handler(
+    State(state): State<Captured>,
+    headers: HeaderMap,
+    _body: String,
+) -> &'static str {
     let action = headers
         .get("soapaction")
         .and_then(|v| v.to_str().ok())
@@ -26,7 +30,10 @@ async fn start_fake_sonos() -> (std::net::SocketAddr, Captured) {
     let captured = Captured::default();
     let app = Router::new()
         .route("/MediaRenderer/AVTransport/Control", post(capture_handler))
-        .route("/MediaRenderer/RenderingControl/Control", post(capture_handler))
+        .route(
+            "/MediaRenderer/RenderingControl/Control",
+            post(capture_handler),
+        )
         .with_state(captured.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

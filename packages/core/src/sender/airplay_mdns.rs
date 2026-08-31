@@ -7,6 +7,7 @@ use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 pub const AIRPLAY_MDNS_TYPE: &str = "_airplay._tcp.local.";
+const MAX_DISCOVERED_DEVICES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AirPlayDevice {
@@ -27,13 +28,14 @@ pub fn group_key(gid: &str) -> String {
 pub fn skip_airplay_model(model: &str, manufacturer: &str) -> bool {
     let model = model.to_ascii_lowercase();
     let manufacturer = manufacturer.to_ascii_lowercase();
-    manufacturer.contains("sonos")
-        || model.contains("one sl")
-        || model.starts_with("mac")
+    manufacturer.contains("sonos") || model.contains("one sl") || model.starts_with("mac")
 }
 
 pub fn airplay_password_required(pw: &str) -> bool {
-    matches!(pw.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes")
+    matches!(
+        pw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes"
+    )
 }
 
 /// Collapse a HomePod stereo pair to the group leader; hide the satellite.
@@ -42,7 +44,10 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
     let mut solos = Vec::new();
     for device in devices {
         if device.in_group && !device.gid.is_empty() {
-            by_group.entry(group_key(&device.gid)).or_default().push(device);
+            by_group
+                .entry(group_key(&device.gid))
+                .or_default()
+                .push(device);
         } else {
             solos.push(device);
         }
@@ -80,7 +85,7 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
     for device in solos {
         out.push(to_catalog(device, 1, "solo"));
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
     out
 }
 
@@ -99,16 +104,29 @@ fn to_catalog(device: AirPlayDevice, member_count: u8, kind: &'static str) -> Ca
 /// OwnTone IDs win when names match, so Play still goes through the sidecar.
 pub fn merge_owntone(mdns: &mut Vec<CatalogDevice>, owntone: Vec<CatalogDevice>) {
     for ot in owntone {
-        if let Some(existing) = mdns.iter_mut().find(|d| d.name == ot.name) {
+        let normalized_name = normalized_device_name(&ot.name);
+        if let Some(existing) = mdns.iter_mut().find(|device| {
+            device.id == ot.id || normalized_device_name(&device.name) == normalized_name
+        }) {
             existing.id = ot.id;
             existing.needs_pair = ot.needs_pair;
             existing.paired = ot.paired;
-        } else {
+        } else if mdns.len() < MAX_DISCOVERED_DEVICES {
             mdns.push(ot);
         }
     }
+    mdns.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.id.cmp(&b.id)));
 }
 
+fn normalized_device_name(name: &str) -> String {
+    name.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+// Kept as a flat test seam mirroring the receiver's TXT fields one-for-one.
+#[allow(clippy::too_many_arguments)]
 pub fn device_from_txt(
     instance: &str,
     deviceid: &str,
@@ -208,18 +226,20 @@ fn search_mdns_blocking(duration: Duration) -> Vec<AirPlayDevice> {
         return Vec::new();
     };
     let Ok(rx) = mdns.browse(AIRPLAY_MDNS_TYPE) else {
+        let _ = mdns.shutdown();
         return Vec::new();
     };
     let deadline = Instant::now() + duration;
-    let mut found = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut found = HashMap::new();
     while Instant::now() < deadline {
         let wait = deadline.saturating_duration_since(Instant::now());
         match rx.recv_timeout(wait) {
             Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
                 if let Some(device) = device_from_mdns_info(&info) {
-                    if seen.insert(device.id.clone()) {
-                        found.push(device);
+                    if found.len() < MAX_DISCOVERED_DEVICES || found.contains_key(&device.id) {
+                        // Keep the latest resolution so address changes during
+                        // a browse window do not leave a stale endpoint.
+                        found.insert(device.id.clone(), device);
                     }
                 }
             }
@@ -228,7 +248,7 @@ fn search_mdns_blocking(duration: Duration) -> Vec<AirPlayDevice> {
         }
     }
     let _ = mdns.shutdown();
-    found
+    found.into_values().collect()
 }
 
 pub async fn search_mdns(duration: Duration) -> Vec<CatalogDevice> {
