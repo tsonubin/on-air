@@ -615,7 +615,7 @@ export default function App(): React.JSX.Element {
 
             <View style={styles.mixer}>
               <Fader
-                label="level"
+                label="volume"
                 value={volume}
                 min={0}
                 max={100}

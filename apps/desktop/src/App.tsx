@@ -505,7 +505,7 @@ function App() {
 
         <footer className="grid shrink-0 grid-cols-1 items-end justify-items-center gap-4 border-t border-[#2e2a24] bg-[#151310] px-4 py-3 min-[561px]:grid-cols-[auto_minmax(0,1fr)_minmax(9.5rem,11rem)] min-[561px]:justify-items-stretch [@media(max-height:560px)]:gap-2.5 [@media(max-height:560px)]:px-3 [@media(max-height:560px)]:py-2">
           <Fader
-            label="level"
+            label="volume"
             value={volume}
             min={0}
             max={100}

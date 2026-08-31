@@ -178,7 +178,7 @@ test("pairing with the desktop PIN opens the full mixer", async () => {
   expect(text).toContain("Living Room AirPlay");
   expect(text).toContain("Locked HomePod");
   expect(text).toContain("Mock Bluetooth Speaker");
-  expect(text).toContain("level");
+  expect(text).toContain("volume");
   expect(text).toContain('"60"');
   expect(mocked.verifyPin).toHaveBeenCalledWith("http://192.168.5.14:47990", "123456");
   expect((global as { WebSocket: { lastUrl: string } }).WebSocket.lastUrl).toContain(

@@ -1,5 +1,6 @@
 use crate::sender::{AudioSender, SenderError};
 use reqwest::{Client, Url};
+use std::io::Write;
 use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 
@@ -30,6 +31,7 @@ pub struct AirPlaySender {
     http: Client,
     child: Option<Child>,
     active_backend: Option<ActiveBackend>,
+    volume: u8,
 }
 
 impl AirPlaySender {
@@ -47,6 +49,7 @@ impl AirPlaySender {
             http: crate::sender::sonos::soap::http_client(),
             child: None,
             active_backend: None,
+            volume: 50,
         }
     }
 
@@ -174,7 +177,8 @@ impl AirPlaySender {
         }
         let host = self.host.clone();
         let stream_url = self.stream_url.clone();
-        let child = tokio::task::spawn_blocking(move || spawn_pyatv(&host, &stream_url))
+        let volume = self.volume;
+        let child = tokio::task::spawn_blocking(move || spawn_pyatv(&host, &stream_url, volume))
             .await
             .map_err(|e| SenderError(format!("start AirPlay helper task: {e}")))??;
         self.child = Some(child);
@@ -279,7 +283,7 @@ fn uv_has_cached_pyatv(bin: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn spawn_pyatv(host: &str, stream_url: &str) -> Result<Child, SenderError> {
+fn spawn_pyatv(host: &str, stream_url: &str, volume: u8) -> Result<Child, SenderError> {
     let mut cmd = pyatv_command()?;
     cmd.arg("-c")
         .arg(include_str!("airplay_play.py"))
@@ -288,8 +292,8 @@ fn spawn_pyatv(host: &str, stream_url: &str) -> Result<Child, SenderError> {
         .arg("--url")
         .arg(stream_url)
         .arg("--volume")
-        .arg("22")
-        .stdin(Stdio::null())
+        .arg(volume.min(100).to_string())
+        .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
     #[cfg(unix)]
@@ -299,6 +303,28 @@ fn spawn_pyatv(host: &str, stream_url: &str) -> Result<Child, SenderError> {
     }
     cmd.spawn()
         .map_err(|e| SenderError(format!("start AirPlay helper: {e}")))
+}
+
+fn write_pyatv_volume(writer: &mut impl Write, volume: u8) -> Result<(), SenderError> {
+    writeln!(writer, "{}", volume.min(100))
+        .and_then(|_| writer.flush())
+        .map_err(|e| SenderError(format!("set AirPlay volume: {e}")))
+}
+
+fn set_pyatv_volume(child: &mut Child, volume: u8) -> Result<(), SenderError> {
+    if let Some(status) = child
+        .try_wait()
+        .map_err(|e| SenderError(format!("check AirPlay helper: {e}")))?
+    {
+        return Err(SenderError(format!(
+            "AirPlay helper exited before volume change: {status}"
+        )));
+    }
+    let stdin = child
+        .stdin
+        .as_mut()
+        .ok_or_else(|| SenderError("AirPlay helper volume control is unavailable".into()))?;
+    write_pyatv_volume(stdin, volume)
 }
 
 fn terminate_child(child: &mut Child) -> Result<(), SenderError> {
@@ -359,17 +385,26 @@ impl AudioSender for AirPlaySender {
     }
 
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError> {
+        let volume = volume.min(100);
         match self.active_backend {
             Some(ActiveBackend::OwnTone) => {
                 self.put_json(
                     "/api/player/volume",
-                    serde_json::json!({ "volume": volume.min(100) }),
+                    serde_json::json!({ "volume": volume }),
                 )
-                .await
+                .await?;
             }
-            Some(ActiveBackend::Pyatv) => Ok(()),
-            None => Err(SenderError("AirPlay output is not active".into())),
+            Some(ActiveBackend::Pyatv) => {
+                let child = self
+                    .child
+                    .as_mut()
+                    .ok_or_else(|| SenderError("AirPlay helper is not running".into()))?;
+                set_pyatv_volume(child, volume)?;
+            }
+            None => return Err(SenderError("AirPlay output is not active".into())),
         }
+        self.volume = volume;
+        Ok(())
     }
 
     fn name(&self) -> &str {
@@ -378,6 +413,16 @@ impl AudioSender for AirPlaySender {
 
     fn transport(&self) -> &'static str {
         "airplay"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn pyatv_volume_command_is_clamped_and_flushed() {
+        let mut command = Vec::new();
+        super::write_pyatv_volume(&mut command, 101).unwrap();
+        assert_eq!(command, b"100\n");
     }
 }
 
