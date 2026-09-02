@@ -21,4 +21,5 @@ module.exports = {
   View: mock("View"),
   Platform: { OS: "ios" },
   useColorScheme: () => "light",
+  useWindowDimensions: jest.fn(() => ({ width: 390, height: 844, scale: 3, fontScale: 1 })),
 };

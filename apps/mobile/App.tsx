@@ -6,7 +6,6 @@ import {
   FieldGroup,
   Host,
   Picker,
-  RNHostView,
   Row,
   Spacer,
   Text,
@@ -24,7 +23,8 @@ import { DEFAULT_PORT } from "@on-air/api-types";
 import { StatusBar } from "expo-status-bar";
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Text as ReactNativeText, useColorScheme, View } from "react-native";
+import { AppState, Platform, View } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import {
   activateInput,
   activateOutput,
@@ -49,9 +49,11 @@ import {
   verifyPin,
   wsUrl,
 } from "./src/controlClient";
+import { MixerHome, mobileColors } from "./src/mixer-home";
 import { NativeFader } from "./src/native-fader";
+import { PairingHome } from "./src/pairing-home";
 import { clearPairing, loadPairing, savePairing } from "./src/pairing-store";
-import { brandColors, theme } from "./src/theme";
+import { theme } from "./src/theme";
 
 const EQ_LABELS = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"] as const;
 
@@ -96,18 +98,6 @@ async function localIpv4(): Promise<string | undefined> {
   }
 }
 
-function ErrorNotice({ message }: { message: string }) {
-  const scheme = useColorScheme();
-  const color = brandColors[scheme === "dark" ? "dark" : "light"].error;
-  return (
-    <RNHostView matchContents>
-      <ReactNativeText accessibilityRole="alert" selectable style={{ color, fontSize: 15 }}>
-        {message}
-      </ReactNativeText>
-    </RNHostView>
-  );
-}
-
 export default function App(): React.JSX.Element {
   const [hydrated, setHydrated] = useState(false);
   const [host, setHost] = useState("127.0.0.1");
@@ -136,9 +126,11 @@ export default function App(): React.JSX.Element {
   const [busyTarget, setBusyTarget] = useState<string | null>(null);
   const [toneOpen, setToneOpen] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const [soundOpen, setSoundOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [appActive, setAppActive] = useState(AppState.currentState === "active");
-  const hostInput = useNativeState("127.0.0.1");
-  const pinInput = useNativeState("");
   const devicePinInput = useNativeState("");
   const didInitialScan = useRef(false);
   const scanInFlight = useRef(false);
@@ -161,14 +153,10 @@ export default function App(): React.JSX.Element {
     eqPending.current = null;
   }, []);
 
-  const setDesktopHost = useCallback(
-    (value: string) => {
-      scanRevision.current += 1;
-      hostInput.value = value;
-      setHost(value);
-    },
-    [hostInput],
-  );
+  const setDesktopHost = useCallback((value: string) => {
+    scanRevision.current += 1;
+    setHost(value);
+  }, []);
   const normalizedHost = normalizeDesktopHost(host);
   const base = apiBase(normalizedHost || "127.0.0.1", DEFAULT_PORT);
 
@@ -206,12 +194,14 @@ export default function App(): React.JSX.Element {
       if (hits[0] && (normalizedHost === "127.0.0.1" || !normalizedHost)) {
         setDesktopHost(hits[0].host);
       }
-      if (hits.length === 0) {
-        setError("No desktop was found automatically. Enter its LAN address below.");
-      }
-    } catch (scanError) {
+      // The first-run screen owns the empty discovery state. Keep the error slot
+      // reserved for a failed pairing attempt so manual setup never opens with a
+      // stale red scan warning.
+      if (hits.length === 0) setError(null);
+    } catch {
       if (scanRevision.current === revision) {
-        setError(friendlyError(scanError, "scan the local network"));
+        setFound([]);
+        setError(null);
       }
     } finally {
       scanInFlight.current = false;
@@ -345,10 +335,10 @@ export default function App(): React.JSX.Element {
       const nextStatus = await fetchStatus(pairingBase);
       if (nextStatus.service_enabled === false) throw new HttpError("/api/status", 503);
       const nextToken = await verifyPin(pairingBase, normalizedPin);
+      await savePairing({ host: desktopHost, token: nextToken });
       invalidateConnection();
       setStatus(nextStatus);
       setToken(nextToken);
-      void savePairing({ host: desktopHost, token: nextToken }).catch(() => {});
     } catch (pairError) {
       setError(friendlyError(pairError, "pair with the desktop"));
     } finally {
@@ -373,6 +363,7 @@ export default function App(): React.JSX.Element {
     try {
       await activateInput(base, name, token);
       await refresh();
+      setSourceOpen(false);
     } catch (inputError) {
       setError(friendlyError(inputError, "change the source"));
     } finally {
@@ -387,6 +378,7 @@ export default function App(): React.JSX.Element {
     try {
       await activateOutput(base, output.transport, output.id, token);
       await refresh();
+      setOutputOpen(false);
     } finally {
       setBusyTarget(null);
     }
@@ -394,6 +386,7 @@ export default function App(): React.JSX.Element {
 
   const chooseOutput = async (output: OutputInfo) => {
     if (output.needs_pair && !output.paired) {
+      setOutputOpen(false);
       setPairPin("");
       devicePinInput.value = "";
       setPairTarget({ transport: output.transport, id: output.id, name: output.name });
@@ -459,6 +452,10 @@ export default function App(): React.JSX.Element {
     setActiveInput("");
     setActiveOutput(null);
     setError(null);
+    setSourceOpen(false);
+    setOutputOpen(false);
+    setSoundOpen(false);
+    setMoreOpen(false);
     didInitialScan.current = false;
   };
 
@@ -533,380 +530,345 @@ export default function App(): React.JSX.Element {
 
   const serviceAvailable = status?.service_enabled !== false;
   const live = serviceAvailable && Boolean(activeOutput);
-  const statusLabel = live
-    ? "● Live"
-    : !serviceAvailable
-      ? "Service paused"
-      : status
-        ? "Ready"
-        : "Connecting";
 
   const pairingScreen = (
-    <FieldGroup testID="pairing-screen">
-      <FieldGroup.Section title="on-air remote">
-        <Column spacing={theme.spacing.sm}>
-          <Text testID="remote-title" textStyle={{ fontSize: 24, fontWeight: "700" }}>
-            on-air remote
-          </Text>
-          <Text testID="core-status" textStyle={{ fontSize: 17, fontWeight: "600" }}>
-            ONAIR
-          </Text>
-          <Text>Find the desktop mixer, enter its pairing code, and start listening.</Text>
-        </Column>
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Find desktop">
-        <Button
-          label={scanning ? "Scanning local network…" : "Scan LAN"}
-          disabled={scanning}
-          onPress={() => void scan()}
-          testID="scan-button"
-        />
-        {found.map((hit) => {
-          const selected = normalizeDesktopHost(host) === hit.host;
-          return (
-            <Button
-              key={`${hit.host}:${hit.port}`}
-              variant={selected ? "filled" : "outlined"}
-              onPress={() => setDesktopHost(hit.host)}
-              testID={`discovered-${hit.host}`}
-            >
-              <Row alignment="center" spacing={theme.spacing.sm}>
-                <Column spacing={theme.spacing.xs}>
-                  <Text textStyle={{ fontWeight: "600" }}>{hit.name ?? "on-air desktop"}</Text>
-                  <Text>{`${hit.host}:${hit.port}`}</Text>
-                </Column>
-                <Spacer />
-                <Text>{selected ? "Selected" : "Choose"}</Text>
-              </Row>
-            </Button>
-          );
-        })}
-        {!scanning && found.length === 0 && (
-          <Text>No mixer found yet. Automatic scan and manual address both work in Expo Go.</Text>
-        )}
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Connect manually">
-        <Column spacing={theme.spacing.sm}>
-          <Text textStyle={{ fontWeight: "600" }}>Desktop LAN address</Text>
-          <TextInput
-            value={hostInput}
-            onChangeText={setDesktopHost}
-            placeholder="192.168.1.20"
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-            returnKeyType="next"
-            testID="host-input"
-            style={{
-              padding: 12,
-              borderWidth: 1,
-              borderColor: theme.seedColor,
-              borderRadius: 12,
-            }}
-          />
-          <Text textStyle={{ fontWeight: "600" }}>Six-digit pairing code</Text>
-          <TextInput
-            value={pinInput}
-            onChangeText={(value) => {
-              const next = value.replace(/\D/g, "").slice(0, 6);
-              pinInput.value = next;
-              setPin(next);
-            }}
-            placeholder="000000"
-            keyboardType="number-pad"
-            inputMode="numeric"
-            maxLength={6}
-            returnKeyType="done"
-            onSubmitEditing={() => void pair()}
-            testID="pin-input"
-            style={{
-              padding: 12,
-              borderWidth: 1,
-              borderColor: theme.seedColor,
-              borderRadius: 12,
-            }}
-            textStyle={{ fontSize: 22, fontWeight: "600", letterSpacing: 4, textAlign: "center" }}
-          />
-          <Button
-            label={pairing ? "Pairing…" : "Pair with desktop"}
-            disabled={pairing || pin.length !== 6 || !normalizeDesktopHost(host)}
-            onPress={() => void pair()}
-            testID="pair-button"
-          />
-          <Text>
-            The code is shown only on the desktop app. Both devices must use the same LAN.
-          </Text>
-          {error && <ErrorNotice message={error} />}
-        </Column>
-      </FieldGroup.Section>
-    </FieldGroup>
+    <PairingHome
+      scanning={scanning}
+      pairing={pairing}
+      found={found}
+      host={host}
+      pin={pin}
+      error={error}
+      onScan={() => void scan()}
+      onSelectHost={setDesktopHost}
+      onChangeHost={setDesktopHost}
+      onChangePin={(value) => setPin(value.replace(/\\D/g, "").slice(0, 6))}
+      onPair={() => void pair()}
+    />
   );
 
   const mixerScreen = (
-    <FieldGroup testID="mixer-screen">
-      <FieldGroup.Section title="on-air remote">
-        <Column spacing={theme.spacing.sm}>
-          <Row alignment="center" spacing={theme.spacing.sm}>
-            <Text testID="remote-title" textStyle={{ fontSize: 24, fontWeight: "700" }}>
-              on-air remote
-            </Text>
-            <Spacer />
-            <Text testID="core-status" textStyle={{ fontWeight: "700" }}>
-              {statusLabel}
-            </Text>
-          </Row>
-          <Text testID="paired-token">{`paired · ${normalizedHost}:${DEFAULT_PORT}`}</Text>
-          <Text>{status ? `Core ${status.version}` : "Waiting for desktop status"}</Text>
-          <Row alignment="center" spacing={theme.spacing.sm}>
-            <Button
-              label="Refresh"
-              variant="outlined"
-              onPress={() => void refresh()}
-              testID="refresh-button"
-            />
-            <Spacer />
-            <Button
-              label="Disconnect"
-              variant="text"
-              onPress={disconnect}
-              testID="disconnect-button"
-            />
-          </Row>
-          {!serviceAvailable && (
-            <Text>Turn the service on from the desktop tray before changing audio controls.</Text>
-          )}
-          {error && <ErrorNotice message={error} />}
-        </Column>
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Now playing">
-        <Column spacing={theme.spacing.sm}>
-          <Text textStyle={{ fontWeight: "600" }}>Source</Text>
-          <Text>{activeInput ? prettyInput(activeInput) : "Choose an input below"}</Text>
-          <Text textStyle={{ fontWeight: "600" }}>Speaker</Text>
-          <Text testID="active-output">
-            {activeOutput ? activeOutput.device_name : "Choose a destination below"}
-          </Text>
-        </Column>
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Source" disabled={!serviceAvailable}>
-        <Column spacing={theme.spacing.sm}>
-          <Text>Capture device</Text>
-          <Picker
-            selectedValue={activeInput}
-            onValueChange={(name) => void pickInput(String(name))}
-            appearance="menu"
-            enabled={serviceAvailable && busyTarget === null && uniqueInputs.length > 0}
-            testID="source-picker"
-          >
-            <Picker.Item label="Choose a source" value="" />
-            {uniqueInputs.map((name) => (
-              <Picker.Item key={name} label={prettyInput(name)} value={name} />
-            ))}
-          </Picker>
-          {uniqueInputs.length === 0 && <Text>No capture devices are available.</Text>}
-        </Column>
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Destination" disabled={!serviceAvailable}>
-        {outputs.length === 0 && <Text>Waiting for speakers on the LAN…</Text>}
-        {airplayMode === "avroute-picker" && (
-          <Text>AirPlay selection is available from the desktop picker on macOS.</Text>
-        )}
-        {outputs.map((output) => {
-          const selected =
-            activeOutput?.transport === output.transport && activeOutput.device_id === output.id;
-          const desktopOnly = output.transport === "airplay" && airplayMode === "avroute-picker";
-          const working = busyTarget === `${output.transport}:${output.id}`;
-          const pair = (output.member_count ?? 1) >= 2 || output.kind === "pair";
-          const action = desktopOnly
-            ? "Desktop only"
-            : working
-              ? "Connecting…"
-              : selected
-                ? "Connected"
-                : output.needs_pair && !output.paired
-                  ? "Pair"
-                  : "Connect";
-          return (
-            <Button
-              key={`${output.transport}-${output.id}`}
-              variant={selected ? "filled" : "outlined"}
-              disabled={!serviceAvailable || busyTarget !== null || desktopOnly}
-              onPress={() => void chooseOutput(output)}
-              testID={`output-${output.transport}-${output.id}`}
-            >
-              <Row alignment="center" spacing={theme.spacing.sm}>
-                <Column spacing={theme.spacing.xs}>
-                  <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
-                  <Text>{`${pair ? "Stereo pair · " : ""}${output.transport}`}</Text>
-                </Column>
-                <Spacer />
-                <Text>{action}</Text>
-              </Row>
-            </Button>
-          );
-        })}
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Volume" disabled={!serviceAvailable || !activeOutput}>
-        <NativeFader
-          label="Volume"
-          value={volume}
-          min={0}
-          max={100}
-          testId="volume-slider"
-          disabled={!serviceAvailable || !activeOutput}
-          showStepButtons
-          onChange={(value) => void applyVolume(value)}
-        />
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Sound" disabled={!serviceAvailable}>
-        <Collapsible
-          label="Equalizer"
-          isOpen={toneOpen}
-          onOpenChange={setToneOpen}
-          labelStyle={{ fontWeight: "600" }}
-        >
-          <Column spacing={theme.spacing.md}>
-            {gains.map((gain, index) => (
-              <NativeFader
-                key={EQ_LABELS[index]}
-                label={EQ_LABELS[index]}
-                value={gain}
-                min={-12}
-                max={12}
-                step={0.5}
-                testId={`eq-band-${index}`}
-                disabled={!serviceAvailable}
-                onChange={(value) => {
-                  const next = [...gainsRef.current] as typeof gains;
-                  next[index] = value;
-                  void applyEq(next);
-                }}
-              />
-            ))}
-            <Button
-              label="Reset equalizer"
-              variant="outlined"
-              disabled={!serviceAvailable || gains.every((gain) => gain === 0)}
-              onPress={() => void applyEq([0, 0, 0, 0, 0])}
-              testID="eq-reset-button"
-            />
-          </Column>
-        </Collapsible>
-      </FieldGroup.Section>
-      <FieldGroup.Section title="Audio quality" disabled={!serviceAvailable}>
-        <Collapsible
-          label="Sample rates"
-          isOpen={advancedOpen}
-          onOpenChange={setAdvancedOpen}
-          labelStyle={{ fontWeight: "600" }}
-        >
-          <Column spacing={theme.spacing.md}>
-            <Column spacing={theme.spacing.sm}>
-              <Text textStyle={{ fontWeight: "600" }}>Input rate</Text>
-              <Picker
-                selectedValue={sampleRate}
-                onValueChange={(value) => void applyRate("input", Number(value))}
-                appearance="menu"
-                enabled={serviceAvailable && !configuringRate}
-                testID="sample-rate-picker"
-              >
-                {inputRates.map((hz) => (
-                  <Picker.Item key={`in-${hz}`} label={formatRate(hz)} value={hz} />
-                ))}
-              </Picker>
-            </Column>
-            <Column spacing={theme.spacing.sm}>
-              <Text textStyle={{ fontWeight: "600" }}>Output rate</Text>
-              <Picker
-                selectedValue={outputSampleRate}
-                onValueChange={(value) => void applyRate("output", Number(value))}
-                appearance="menu"
-                enabled={serviceAvailable && !configuringRate}
-                testID="output-sample-rate-picker"
-              >
-                {outputRates.map((hz) => (
-                  <Picker.Item key={`out-${hz}`} label={formatRate(hz)} value={hz} />
-                ))}
-              </Picker>
-            </Column>
-          </Column>
-        </Collapsible>
-      </FieldGroup.Section>
-    </FieldGroup>
+    <MixerHome
+      activeInput={activeInput ? prettyInput(activeInput) : ""}
+      activeOutput={activeOutput?.device_name ?? ""}
+      volume={volume}
+      live={live}
+      statusText={live ? "Live" : !serviceAvailable ? "Paused" : "Ready"}
+      error={error}
+      volumeDisabled={!serviceAvailable || !activeOutput}
+      soundDisabled={!serviceAvailable}
+      onChangeInput={() => setSourceOpen(true)}
+      onChangeOutput={() => setOutputOpen(true)}
+      onOpenSound={() => setSoundOpen(true)}
+      onOpenMore={() => setMoreOpen(true)}
+      onDisconnect={disconnect}
+      onVolumeChange={applyVolume}
+    />
   );
 
   return (
-    <View style={{ flex: 1 }}>
-      <StatusBar style="auto" />
-      <Host style={{ flex: 1 }} useViewportSizeMeasurement seedColor={theme.seedColor}>
-        {!hydrated ? (
-          <FieldGroup testID="pairing-restore">
-            <FieldGroup.Section title="on-air remote">
-              <Text>Restoring your desktop connection…</Text>
-            </FieldGroup.Section>
-          </FieldGroup>
-        ) : token ? (
-          mixerScreen
-        ) : (
-          pairingScreen
-        )}
-        {pairTarget && (
-          <BottomSheet
-            isPresented
-            onDismiss={() => setPairTarget(null)}
-            showDragIndicator
-            testID="pair-sheet"
-          >
-            <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
-              <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>
-                {`Pair ${pairTarget.name}`}
-              </Text>
-              <Text>
-                {pairTarget.transport === "airplay"
-                  ? "Enter the code shown by the speaker. If no code appears, leave it blank."
-                  : "Confirm pairing on the Bluetooth device, then continue."}
-              </Text>
-              {pairTarget.transport === "airplay" && (
-                <TextInput
-                  value={devicePinInput}
-                  onChangeText={(value) => {
-                    const next = value.replace(/\D/g, "").slice(0, 8);
-                    devicePinInput.value = next;
-                    setPairPin(next);
-                  }}
-                  placeholder="Speaker code"
-                  keyboardType="number-pad"
-                  inputMode="numeric"
-                  maxLength={8}
-                  testID="device-pin-input"
-                  style={{
-                    padding: 12,
-                    borderWidth: 1,
-                    borderColor: theme.seedColor,
-                    borderRadius: 12,
-                  }}
-                />
-              )}
-              <Row alignment="center" spacing={theme.spacing.sm}>
+    <SafeAreaProvider>
+      <View style={{ flex: 1, backgroundColor: mobileColors.background }}>
+        <StatusBar style="light" />
+        <Host
+          key={!hydrated ? "restoring" : token ? "paired" : "pairing"}
+          style={{ flex: 1 }}
+          colorScheme="dark"
+          useViewportSizeMeasurement
+          ignoreSafeArea="all"
+          seedColor={mobileColors.accent}
+        >
+          {!hydrated ? (
+            <FieldGroup testID="pairing-restore">
+              <FieldGroup.Section title="on-air remote">
+                <Text>Restoring your desktop connection…</Text>
+              </FieldGroup.Section>
+            </FieldGroup>
+          ) : token ? (
+            mixerScreen
+          ) : (
+            pairingScreen
+          )}
+          {token && sourceOpen && (
+            <BottomSheet
+              isPresented
+              onDismiss={() => setSourceOpen(false)}
+              showDragIndicator
+              snapPoints={Platform.OS === "ios" ? [{ height: 280 }] : undefined}
+              testID="source-sheet"
+            >
+              <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
+                <Row alignment="center" spacing={theme.spacing.sm}>
+                  <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Choose source</Text>
+                  <Spacer />
+                  <Button label="Done" variant="text" onPress={() => setSourceOpen(false)} />
+                </Row>
+                <Text>Select the Mac audio capture device to stream.</Text>
+                <Picker
+                  selectedValue={activeInput}
+                  onValueChange={(name) => void pickInput(String(name))}
+                  appearance="menu"
+                  enabled={serviceAvailable && busyTarget === null && uniqueInputs.length > 0}
+                  testID="source-picker"
+                >
+                  <Picker.Item label="Choose a source" value="" />
+                  {uniqueInputs.map((name) => (
+                    <Picker.Item key={name} label={prettyInput(name)} value={name} />
+                  ))}
+                </Picker>
+                {uniqueInputs.length === 0 && <Text>No capture devices are available.</Text>}
+              </Column>
+            </BottomSheet>
+          )}
+          {token && outputOpen && (
+            <BottomSheet
+              isPresented
+              onDismiss={() => setOutputOpen(false)}
+              showDragIndicator
+              snapPoints={
+                Platform.OS === "ios"
+                  ? outputs.length > 5
+                    ? ["full"]
+                    : [{ height: Math.max(300, 160 + outputs.length * 78) }]
+                  : undefined
+              }
+              testID="output-sheet"
+            >
+              <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
+                <Row alignment="center" spacing={theme.spacing.sm}>
+                  <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Choose speaker</Text>
+                  <Spacer />
+                  <Button label="Done" variant="text" onPress={() => setOutputOpen(false)} />
+                </Row>
+                {outputs.length === 0 && <Text>Waiting for speakers on the LAN…</Text>}
+                {airplayMode === "avroute-picker" && (
+                  <Text>AirPlay selection is available from the desktop picker on macOS.</Text>
+                )}
+                {outputs.map((output) => {
+                  const selected =
+                    activeOutput?.transport === output.transport &&
+                    activeOutput.device_id === output.id;
+                  const desktopOnly =
+                    output.transport === "airplay" && airplayMode === "avroute-picker";
+                  const working = busyTarget === `${output.transport}:${output.id}`;
+                  const pair = (output.member_count ?? 1) >= 2 || output.kind === "pair";
+                  const action = desktopOnly
+                    ? "Desktop only"
+                    : working
+                      ? "Connecting…"
+                      : selected
+                        ? "Connected"
+                        : output.needs_pair && !output.paired
+                          ? "Pair"
+                          : "Connect";
+                  return (
+                    <Button
+                      key={`${output.transport}-${output.id}`}
+                      variant={selected ? "filled" : "outlined"}
+                      disabled={!serviceAvailable || busyTarget !== null || desktopOnly}
+                      onPress={() => void chooseOutput(output)}
+                      testID={`output-${output.transport}-${output.id}`}
+                    >
+                      <Row alignment="center" spacing={theme.spacing.sm}>
+                        <Column spacing={theme.spacing.xs}>
+                          <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
+                          <Text>{`${pair ? "Stereo pair · " : ""}${output.transport}`}</Text>
+                        </Column>
+                        <Spacer />
+                        <Text>{action}</Text>
+                      </Row>
+                    </Button>
+                  );
+                })}
+              </Column>
+            </BottomSheet>
+          )}
+          {token && soundOpen && (
+            <BottomSheet
+              isPresented
+              onDismiss={() => setSoundOpen(false)}
+              showDragIndicator
+              snapPoints={
+                Platform.OS === "ios"
+                  ? toneOpen
+                    ? ["full"]
+                    : [{ height: advancedOpen ? 460 : 280 }]
+                  : undefined
+              }
+              testID="sound-sheet"
+            >
+              <Column spacing={theme.spacing.lg} style={{ padding: theme.spacing.md }}>
+                <Row alignment="center" spacing={theme.spacing.sm}>
+                  <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Sound settings</Text>
+                  <Spacer />
+                  <Button label="Done" variant="text" onPress={() => setSoundOpen(false)} />
+                </Row>
+                <Collapsible
+                  label="Equalizer"
+                  isOpen={toneOpen}
+                  onOpenChange={setToneOpen}
+                  labelStyle={{ fontWeight: "600" }}
+                >
+                  <Column spacing={theme.spacing.md}>
+                    {gains.map((gain, index) => (
+                      <NativeFader
+                        key={EQ_LABELS[index]}
+                        label={EQ_LABELS[index]}
+                        value={gain}
+                        min={-12}
+                        max={12}
+                        step={0.5}
+                        testId={`eq-band-${index}`}
+                        disabled={!serviceAvailable}
+                        onChange={(value) => {
+                          const next = [...gainsRef.current] as typeof gains;
+                          next[index] = value;
+                          void applyEq(next);
+                        }}
+                      />
+                    ))}
+                    <Button
+                      label="Reset equalizer"
+                      variant="outlined"
+                      disabled={!serviceAvailable || gains.every((gain) => gain === 0)}
+                      onPress={() => void applyEq([0, 0, 0, 0, 0])}
+                      testID="eq-reset-button"
+                    />
+                  </Column>
+                </Collapsible>
+                <Collapsible
+                  label="Sample rates"
+                  isOpen={advancedOpen}
+                  onOpenChange={setAdvancedOpen}
+                  labelStyle={{ fontWeight: "600" }}
+                >
+                  <Column spacing={theme.spacing.md}>
+                    <Column spacing={theme.spacing.sm}>
+                      <Text textStyle={{ fontWeight: "600" }}>Input rate</Text>
+                      <Picker
+                        selectedValue={sampleRate}
+                        onValueChange={(value) => void applyRate("input", Number(value))}
+                        appearance="menu"
+                        enabled={serviceAvailable && !configuringRate}
+                        testID="sample-rate-picker"
+                      >
+                        {inputRates.map((hz) => (
+                          <Picker.Item key={`in-${hz}`} label={formatRate(hz)} value={hz} />
+                        ))}
+                      </Picker>
+                    </Column>
+                    <Column spacing={theme.spacing.sm}>
+                      <Text textStyle={{ fontWeight: "600" }}>Output rate</Text>
+                      <Picker
+                        selectedValue={outputSampleRate}
+                        onValueChange={(value) => void applyRate("output", Number(value))}
+                        appearance="menu"
+                        enabled={serviceAvailable && !configuringRate}
+                        testID="output-sample-rate-picker"
+                      >
+                        {outputRates.map((hz) => (
+                          <Picker.Item key={`out-${hz}`} label={formatRate(hz)} value={hz} />
+                        ))}
+                      </Picker>
+                    </Column>
+                  </Column>
+                </Collapsible>
+              </Column>
+            </BottomSheet>
+          )}
+          {token && moreOpen && (
+            <BottomSheet
+              isPresented
+              onDismiss={() => setMoreOpen(false)}
+              showDragIndicator
+              snapPoints={Platform.OS === "ios" ? [{ height: 300 }] : undefined}
+              testID="more-sheet"
+            >
+              <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
+                <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Remote</Text>
+                <Text testID="paired-token">{`Paired · ${normalizedHost}:${DEFAULT_PORT}`}</Text>
+                <Text>{status ? `Core ${status.version}` : "Waiting for desktop status"}</Text>
                 <Button
-                  label="Cancel"
+                  label="Refresh connection"
+                  variant="outlined"
+                  onPress={() => {
+                    setMoreOpen(false);
+                    void refresh();
+                  }}
+                  testID="refresh-button"
+                />
+                <Button
+                  label="Disconnect remote"
                   variant="text"
-                  disabled={devicePairing}
-                  onPress={() => setPairTarget(null)}
-                  testID="device-pair-cancel"
+                  onPress={disconnect}
+                  testID="disconnect-menu-button"
                 />
-                <Spacer />
-                <Button
-                  label={devicePairing ? "Pairing…" : "Pair and connect"}
-                  disabled={devicePairing}
-                  onPress={() => void submitDevicePair()}
-                  testID="device-pair-submit"
-                />
-              </Row>
-            </Column>
-          </BottomSheet>
-        )}
-      </Host>
-    </View>
+              </Column>
+            </BottomSheet>
+          )}
+          {pairTarget && (
+            <BottomSheet
+              isPresented
+              onDismiss={() => setPairTarget(null)}
+              showDragIndicator
+              snapPoints={
+                Platform.OS === "ios"
+                  ? [{ height: pairTarget.transport === "airplay" ? 360 : 300 }]
+                  : undefined
+              }
+              testID="pair-sheet"
+            >
+              <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
+                <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>
+                  {`Pair ${pairTarget.name}`}
+                </Text>
+                <Text>
+                  {pairTarget.transport === "airplay"
+                    ? "Enter the code shown by the speaker. If no code appears, leave it blank."
+                    : "Confirm pairing on the Bluetooth device, then continue."}
+                </Text>
+                {pairTarget.transport === "airplay" && (
+                  <TextInput
+                    value={devicePinInput}
+                    onChangeText={(value) => {
+                      const next = value.replace(/\D/g, "").slice(0, 8);
+                      devicePinInput.value = next;
+                      setPairPin(next);
+                    }}
+                    placeholder="Speaker code"
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    maxLength={8}
+                    testID="device-pin-input"
+                    style={{
+                      padding: 12,
+                      borderWidth: 1,
+                      borderColor: theme.seedColor,
+                      borderRadius: 12,
+                    }}
+                  />
+                )}
+                <Row alignment="center" spacing={theme.spacing.sm}>
+                  <Button
+                    label="Cancel"
+                    variant="text"
+                    disabled={devicePairing}
+                    onPress={() => setPairTarget(null)}
+                    testID="device-pair-cancel"
+                  />
+                  <Spacer />
+                  <Button
+                    label={devicePairing ? "Pairing…" : "Pair and connect"}
+                    disabled={devicePairing}
+                    onPress={() => void submitDevicePair()}
+                    testID="device-pair-submit"
+                  />
+                </Row>
+              </Column>
+            </BottomSheet>
+          )}
+        </Host>
+      </View>
+    </SafeAreaProvider>
   );
 }

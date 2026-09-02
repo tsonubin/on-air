@@ -6,6 +6,9 @@ function mock(name) {
   };
 }
 
+const Icon = mock("ExpoIcon");
+Icon.select = ({ ios }) => ios;
+
 module.exports = {
   BottomSheet: mock("ExpoBottomSheet"),
   Button: function Button(props) {
@@ -21,6 +24,7 @@ module.exports = {
     SectionFooter: mock("ExpoFieldSectionFooter"),
   }),
   Host: mock("ExpoHost"),
+  Icon,
   Picker: Object.assign(mock("ExpoPicker"), {
     Item: mock("ExpoPickerItem"),
   }),

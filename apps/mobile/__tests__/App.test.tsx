@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { useWindowDimensions } from "react-native";
 import ReactTestRenderer from "react-test-renderer";
 import App from "../App";
 import * as client from "../src/controlClient";
@@ -151,6 +152,12 @@ function screen(tree: { toJSON(): unknown }): string {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  (useWindowDimensions as jest.Mock).mockReturnValue({
+    width: 390,
+    height: 844,
+    scale: 3,
+    fontScale: 1,
+  });
   (SecureStore as typeof SecureStore & { __reset: () => void }).__reset();
   (global as { WebSocket: { lastUrl: string } }).WebSocket.lastUrl = "";
   mockMixer();
@@ -163,26 +170,82 @@ afterEach(() => {
   tree = undefined;
 });
 
-test("renders the find-desktop pairing card", async () => {
+test("renders a first-run pairing flow with manual setup kept as a fallback", async () => {
   const tree = await renderApp();
   const text = screen(tree);
-  expect(text).toContain("on-air remote");
-  expect(text).toContain("ONAIR");
-  expect(text).toContain("Find desktop");
-  expect(text).toContain("Scan LAN");
-  expect(tree.root.findByProps({ testID: "host-input" })).toBeTruthy();
+  expect(text).toContain("on-air");
+  expect(text).toContain("Pair your Mac");
+  expect(text).toContain("This is a one-time setup");
+  expect(text).toContain("Your Mac");
+  expect(text).toContain("Search again");
+  expect(tree.root.findAllByProps({ testID: "host-input" })).toHaveLength(0);
   expect(tree.root.findByProps({ testID: "pin-input" })).toBeTruthy();
   expect(tree.root.findByProps({ testID: "pair-button" })).toBeTruthy();
+
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "manual-setup-button" }).props.onPress();
+  });
+  expect(tree.root.findByProps({ testID: "host-input" })).toBeTruthy();
   expect(tree.root.findByProps({ testID: "host-input" }).props.style.width).toBeUndefined();
   expect(tree.root.findByProps({ testID: "pin-input" }).props.style.width).toBeUndefined();
 });
 
+test("reveals the pairing code only after a Mac is selected", async () => {
+  const pendingScan = deferred<(typeof STUDIO)[]>();
+  mocked.discoverOnAir.mockReturnValueOnce(pendingScan.promise);
+  const tree = await renderApp();
+
+  expect(screen(tree)).toContain("Looking for your Mac");
+  expect(tree.root.findAllByProps({ testID: "pin-input" })).toHaveLength(0);
+
+  pendingScan.resolve([STUDIO]);
+  await flush();
+
+  expect(tree.root.findByProps({ testID: "pin-input" })).toBeTruthy();
+  expect(screen(tree)).toContain("We'll remember this Mac");
+});
+
+test("adapts pairing and mixer controls to an unfolded two-pane layout", async () => {
+  (useWindowDimensions as jest.Mock).mockReturnValue({
+    width: 852,
+    height: 883,
+    scale: 2.4375,
+    fontScale: 1,
+  });
+  const tree = await renderApp();
+  expect(tree.root.findByProps({ testID: "pairing-wide-layout" })).toBeTruthy();
+
+  await pair(tree);
+
+  expect(tree.root.findByProps({ testID: "mixer-wide-layout" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "volume-slider-native" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "sound-settings-button" })).toBeTruthy();
+});
+
+test("keeps the full control path reachable in phone landscape", async () => {
+  (useWindowDimensions as jest.Mock).mockReturnValue({
+    width: 844,
+    height: 390,
+    scale: 3,
+    fontScale: 1,
+  });
+  const tree = await renderApp();
+  await pair(tree);
+
+  expect(tree.root.findByProps({ testID: "mixer-landscape-layout" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "source-row" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "output-row" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "volume-slider-native" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "disconnect-button" })).toBeTruthy();
+});
+
 test("scan lists a discovered mixer and selects it", async () => {
   const tree = await renderApp();
-  expect(tree.root.findByProps({ testID: "discovered-192.168.5.14" })).toBeTruthy();
+  const discovered = tree.root.findByProps({ testID: "discovered-192.168.5.14" });
+  expect(discovered).toBeTruthy();
+  expect(discovered.props.accessibilityState).toEqual({ selected: true });
   expect(screen(tree)).toContain("studio");
-  expect(screen(tree)).toContain("192.168.5.14");
-  expect(tree.root.findByProps({ testID: "host-input" }).props.value.value).toBe("192.168.5.14");
+  expect(screen(tree)).toContain("Ready for your code");
 });
 
 test("a late automatic scan cannot overwrite a manually entered desktop", async () => {
@@ -191,26 +254,32 @@ test("a late automatic scan cannot overwrite a manually entered desktop", async 
   const tree = await renderApp();
 
   ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "manual-setup-button" }).props.onPress();
+  });
+  ReactTestRenderer.act(() => {
     tree.root.findByProps({ testID: "host-input" }).props.onChangeText("192.168.5.77");
   });
   pendingScan.resolve([STUDIO]);
   await flush();
 
-  expect(tree.root.findByProps({ testID: "host-input" }).props.value.value).toBe("192.168.5.77");
+  expect(tree.root.findByProps({ testID: "host-input" }).props.value).toBe("192.168.5.77");
 });
 
 test("pairing with the desktop PIN opens the full mixer", async () => {
   const tree = await renderApp();
   await pair(tree);
-  const text = screen(tree);
-  expect(text).toContain("paired");
-  expect(text).toContain("Mock Monitor");
-  expect(text).toContain("Mock Sonos");
-  expect(text).toContain("Living Room AirPlay");
-  expect(text).toContain("Locked HomePod");
-  expect(text).toContain("Mock Bluetooth Speaker");
-  expect(text).toContain("Volume");
-  expect(text).toContain("Equalizer");
+  expect(screen(tree)).toContain("Mock Monitor");
+  expect(screen(tree)).toContain("Choose a speaker");
+  expect(screen(tree)).toContain("Volume");
+  expect(screen(tree)).toContain("Sound settings");
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "output-row" }).props.onPress();
+  });
+  const outputText = screen(tree);
+  expect(outputText).toContain("Mock Sonos");
+  expect(outputText).toContain("Living Room AirPlay");
+  expect(outputText).toContain("Locked HomePod");
+  expect(outputText).toContain("Mock Bluetooth Speaker");
   expect(mocked.verifyPin).toHaveBeenCalledWith("http://192.168.5.14:47990", "123456");
   expect((global as { WebSocket: { lastUrl: string } }).WebSocket.lastUrl).toContain(
     "/api/ws?token=onair-test",
@@ -232,8 +301,10 @@ test("restores the paired desktop securely after an app restart", async () => {
 
   const tree = await renderApp();
 
-  expect(screen(tree)).toContain("paired · 192.168.5.14:47990");
+  expect(screen(tree)).toContain("Mock Monitor");
+  expect(screen(tree)).toContain("Choose a speaker");
   expect(mocked.verifyPin).not.toHaveBeenCalled();
+  expect(mocked.discoverOnAir).not.toHaveBeenCalled();
   expect(mocked.listInputs).toHaveBeenCalledWith("http://192.168.5.14:47990", "saved-token");
 });
 
@@ -241,6 +312,9 @@ test("source, destination, volume, EQ, and sample-rate drive the control API", a
   const tree = await renderApp();
   await pair(tree);
 
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "source-row" }).props.onPress();
+  });
   await ReactTestRenderer.act(async () => {
     await tree.root
       .findByProps({ testID: "source-picker" })
@@ -252,6 +326,9 @@ test("source, destination, volume, EQ, and sample-rate drive the control API", a
     "onair-test",
   );
 
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "output-row" }).props.onPress();
+  });
   await ReactTestRenderer.act(async () => {
     await tree.root.findByProps({ testID: "output-sonos-uuid:mock-sonos" }).props.onPress();
   });
@@ -262,11 +339,20 @@ test("source, destination, volume, EQ, and sample-rate drive the control API", a
     "onair-test",
   );
 
-  await ReactTestRenderer.act(async () => {
-    await tree.root.findByProps({ testID: "volume-slider-up" }).props.onPress();
+  jest.useFakeTimers();
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "volume-slider-native" }).props.onValueChange(51);
   });
+  await ReactTestRenderer.act(async () => {
+    jest.advanceTimersByTime(180);
+    await Promise.resolve();
+  });
+  jest.useRealTimers();
   expect(mocked.setVolume).toHaveBeenCalledWith("http://192.168.5.14:47990", 51, "onair-test");
 
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "sound-settings-button" }).props.onPress();
+  });
   ReactTestRenderer.act(() => {
     tree.root.findByProps({ label: "Equalizer" }).props.onOpenChange(true);
   });
@@ -331,6 +417,9 @@ test("rapid EQ edits preserve every band and serialize network writes", async ()
   const tree = await renderApp();
   await pair(tree);
   ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "sound-settings-button" }).props.onPress();
+  });
+  ReactTestRenderer.act(() => {
     tree.root.findByProps({ label: "Equalizer" }).props.onOpenChange(true);
   });
   const firstWrite = deferred<void>();
@@ -376,7 +465,7 @@ test("disconnect clears the saved pairing and returns to discovery", async () =>
   ReactTestRenderer.act(() => {
     tree.root.findByProps({ testID: "disconnect-button" }).props.onPress();
   });
-  expect(screen(tree)).toContain("Find desktop");
+  expect(screen(tree)).toContain("Pair your Mac");
   expect(screen(tree)).not.toContain("Mock Sonos");
   expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith("on-air.desktop-pairing.v1");
   await flush();
@@ -388,6 +477,9 @@ test("an expired response from an old connection cannot clear a new pairing", as
   const oldRefresh = deferred<string[]>();
   mocked.listInputs.mockImplementationOnce(() => oldRefresh.promise);
   ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "more-button" }).props.onPress();
+  });
+  ReactTestRenderer.act(() => {
     tree.root.findByProps({ testID: "refresh-button" }).props.onPress();
   });
 
@@ -398,14 +490,17 @@ test("an expired response from an old connection cannot clear a new pairing", as
   oldRefresh.reject(new client.HttpError("/api/inputs", 401));
   await flush();
 
-  expect(screen(tree)).toContain("paired · 192.168.5.14:47990");
-  expect(screen(tree)).toContain("Mock Sonos");
+  expect(screen(tree)).toContain("Mock Monitor");
+  expect(screen(tree)).toContain("Choose a speaker");
 });
 
 test("unpaired AirPlay opens the PIN sheet then pairs and goes live", async () => {
   const tree = await renderApp();
   await pair(tree);
 
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "output-row" }).props.onPress();
+  });
   await ReactTestRenderer.act(() => {
     tree.root.findByProps({ testID: "output-airplay-ap-locked" }).props.onPress();
   });
@@ -437,6 +532,9 @@ test("unpaired Bluetooth confirms on the device then goes live", async () => {
   const tree = await renderApp();
   await pair(tree);
 
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "output-row" }).props.onPress();
+  });
   await ReactTestRenderer.act(() => {
     tree.root.findByProps({ testID: "output-bluetooth-bt-speaker" }).props.onPress();
   });

@@ -1,7 +1,6 @@
 export const theme = {
-  // Warm broadcast red keeps the product identity while Host derives native
-  // SwiftUI and Material 3 control colors around it.
-  seedColor: "#c84735",
+  // System red keeps the live-state identity legible in native dark controls.
+  seedColor: "#ff453a",
   spacing: {
     xs: 4,
     sm: 8,

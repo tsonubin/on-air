@@ -14,6 +14,7 @@ module.exports = {
     "^expo-network$": "<rootDir>/__mocks__/expo-network.js",
     "^expo-secure-store$": "<rootDir>/__mocks__/expo-secure-store.js",
     "^@expo/ui$": "<rootDir>/__mocks__/expo-ui.js",
+    "^@expo/material-symbols/.*\\.xml$": "<rootDir>/__mocks__/material-symbol.js",
     "^expo-status-bar$": "<rootDir>/__mocks__/expo-status-bar.js",
     "^react-native-safe-area-context$": "<rootDir>/__mocks__/safe-area-context.js",
     "^expo$": "<rootDir>/__mocks__/expo.js",
