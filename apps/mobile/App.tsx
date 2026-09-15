@@ -14,6 +14,7 @@ import {
 } from "@expo/ui";
 import type {
   ActiveOutput,
+  CdStatus,
   DiscoveredHost,
   OutputInfo,
   StatusResponse,
@@ -29,11 +30,13 @@ import {
   activateInput,
   activateOutput,
   apiBase,
+  controlCd,
   discoverOnAir,
   fetchStatus,
   getActiveInput,
   getActiveOutput,
   getAirplayMode,
+  getCd,
   getEq,
   getSampleRate,
   getVolume,
@@ -117,6 +120,14 @@ export default function App(): React.JSX.Element {
   const [inputRates, setInputRates] = useState<number[]>([44_100, 48_000]);
   const [outputRates, setOutputRates] = useState<number[]>([44_100, 48_000]);
   const [airplayMode, setAirplayMode] = useState("");
+  const [cd, setCd] = useState<CdStatus>({
+    present: false,
+    playing: false,
+    track: 0,
+    track_count: 0,
+    position_ms: 0,
+    duration_ms: 0,
+  });
   const [error, setError] = useState<string | null>(null);
   const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
   const [pairPin, setPairPin] = useState("");
@@ -231,12 +242,13 @@ export default function App(): React.JSX.Element {
             getSampleRate(base, token),
             getVolume(base, token),
             getAirplayMode(base, token),
+            getCd(base, token),
           ]);
           if (connectionRevision.current !== connection) {
             refreshQueued.current = false;
             return;
           }
-          const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, ap] = results;
+          const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, ap, disc] = results;
           if (st.status === "fulfilled") setStatus(st.value);
           if (ins.status === "fulfilled") setInputs(ins.value);
           if (outs.status === "fulfilled") setOutputs(outs.value);
@@ -251,6 +263,7 @@ export default function App(): React.JSX.Element {
           }
           if (savedVolume.status === "fulfilled") setVolumeValue(savedVolume.value);
           if (ap.status === "fulfilled") setAirplayMode(ap.value);
+          if (disc.status === "fulfilled") setCd(disc.value);
           const failure = results.find((result) => result.status === "rejected");
           if (failure?.status === "rejected") throw failure.reason;
         } catch (refreshError) {
@@ -451,6 +464,14 @@ export default function App(): React.JSX.Element {
     setOutputs([]);
     setActiveInput("");
     setActiveOutput(null);
+    setCd({
+      present: false,
+      playing: false,
+      track: 0,
+      track_count: 0,
+      position_ms: 0,
+      duration_ms: 0,
+    });
     setError(null);
     setSourceOpen(false);
     setOutputOpen(false);
@@ -478,6 +499,18 @@ export default function App(): React.JSX.Element {
     } finally {
       volumeSending.current = false;
       if (volumePending.current) void drainVolume();
+    }
+  };
+
+  const applyCd = async (action: "play" | "pause" | "next" | "prev") => {
+    if (!token) return;
+    setError(null);
+    try {
+      const next = await controlCd(base, action, token);
+      setCd(next);
+      await refresh();
+    } catch (cdError) {
+      setError(friendlyError(cdError, "control the compact disc"));
     }
   };
 
@@ -563,6 +596,10 @@ export default function App(): React.JSX.Element {
       onOpenMore={() => setMoreOpen(true)}
       onDisconnect={disconnect}
       onVolumeChange={applyVolume}
+      cd={cd}
+      onCdPlayPause={() => void applyCd(cd.playing ? "pause" : "play")}
+      onCdPrev={() => void applyCd("prev")}
+      onCdNext={() => void applyCd("next")}
     />
   );
 

@@ -1,0 +1,154 @@
+use axum::body::Body;
+use axum::http::{Request, StatusCode};
+use on_air_core::state::CoreState;
+use tower::ServiceExt;
+
+async fn mock_app() -> (axum::Router, CoreState) {
+    let state = CoreState::new_mock().await;
+    (on_air_core::build_router(state.clone()), state)
+}
+
+async fn send(app: axum::Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
+    let response = app.oneshot(req).await.unwrap();
+    let status = response.status();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value = if body.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null)
+    };
+    (status, value)
+}
+
+fn post_json(uri: &str, body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn empty_deck_is_not_present() {
+    let (app, _) = mock_app().await;
+    let (status, body) = send(
+        app,
+        Request::builder()
+            .uri("/api/cd")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["present"], false);
+    assert_eq!(body["playing"], false);
+}
+
+#[tokio::test]
+async fn insert_autoplays_track_one_and_lists_cd_input() {
+    let (app, state) = mock_app().await;
+    let (status, body) = send(
+        app.clone(),
+        post_json(
+            "/api/cd",
+            r#"{"present":true,"album":"Kind of Blue","tracks":[{"title":"So What"},{"title":"Freddie Freeloader"}]}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["present"], true);
+    assert_eq!(body["playing"], true);
+    assert_eq!(body["track"], 1);
+    assert_eq!(body["track_count"], 2);
+    assert_eq!(body["title"], "So What");
+    assert_eq!(body["album"], "Kind of Blue");
+    assert_eq!(
+        state.active_input.lock().unwrap().as_deref(),
+        Some("Audio CD")
+    );
+
+    let (status, listed) = send(
+        app,
+        Request::builder()
+            .uri("/api/inputs")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let names = listed["inputs"].as_array().unwrap();
+    assert_eq!(names[0], "Audio CD");
+}
+
+#[tokio::test]
+async fn transport_controls_change_track_and_pause() {
+    let (app, _) = mock_app().await;
+    let _ = send(
+        app.clone(),
+        post_json(
+            "/api/cd",
+            r#"{"present":true,"tracks":[{"title":"A"},{"title":"B"},{"title":"C"}]}"#,
+        ),
+    )
+    .await;
+
+    let (status, body) = send(
+        app.clone(),
+        post_json("/api/cd/control", r#"{"action":"next"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["track"], 2);
+    assert_eq!(body["title"], "B");
+
+    let (status, body) = send(
+        app.clone(),
+        post_json("/api/cd/control", r#"{"action":"pause"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["playing"], false);
+
+    let (status, body) = send(
+        app.clone(),
+        post_json("/api/cd/control", r#"{"action":"play"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["playing"], true);
+
+    let (status, body) = send(app, post_json("/api/cd/control", r#"{"action":"prev"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["track"], 1);
+}
+
+#[tokio::test]
+async fn control_without_disc_conflicts() {
+    let (app, _) = mock_app().await;
+    let (status, _) = send(app, post_json("/api/cd/control", r#"{"action":"play"}"#)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn eject_clears_cd_input() {
+    let (app, state) = mock_app().await;
+    let _ = send(
+        app.clone(),
+        post_json("/api/cd", r#"{"present":true,"tracks":[{"title":"A"}]}"#),
+    )
+    .await;
+    let (status, body) = send(app, post_json("/api/cd", r#"{"present":false}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["present"], false);
+    assert!(state.active_input.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn simulate_on_live_core_is_not_found() {
+    let app = on_air_core::build_router(CoreState::new());
+    let (status, _) = send(app, post_json("/api/cd", r#"{"present":true}"#)).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

@@ -106,6 +106,7 @@ pub mod local_sink;
 pub struct CaptureHandle {
     _stream: Option<cpal::Stream>,
     pulse: Option<capture::PulseMonitorCapture>,
+    on_stop: Option<Box<dyn FnOnce() + Send>>,
     processing: ProcessingTaskHandle,
     pub device_name: String,
 }
@@ -119,6 +120,7 @@ impl CaptureHandle {
         CaptureHandle {
             _stream: Some(stream),
             pulse: None,
+            on_stop: None,
             processing,
             device_name,
         }
@@ -132,6 +134,21 @@ impl CaptureHandle {
         CaptureHandle {
             _stream: None,
             pulse: Some(pulse),
+            on_stop: None,
+            processing,
+            device_name,
+        }
+    }
+
+    pub fn with_cleanup(
+        processing: ProcessingTaskHandle,
+        device_name: String,
+        on_stop: Box<dyn FnOnce() + Send>,
+    ) -> Self {
+        CaptureHandle {
+            _stream: None,
+            pulse: None,
+            on_stop: Some(on_stop),
             processing,
             device_name,
         }
@@ -143,6 +160,9 @@ impl CaptureHandle {
         drop(self._stream);
         if let Some(pulse) = self.pulse {
             pulse.stop();
+        }
+        if let Some(on_stop) = self.on_stop {
+            on_stop();
         }
         self.processing.stop();
     }

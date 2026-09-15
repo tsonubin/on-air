@@ -16,6 +16,42 @@ test("API transport switch Sonos -> AirPlay -> Bluetooth", async () => {
   expect(activated).toEqual(["sonos", "airplay", "bluetooth"]);
 });
 
+test("desktop UI plays an inserted audio CD", async ({ page }) => {
+  const api = process.env.API_BASE ?? "http://127.0.0.1:47990";
+  const ui = process.env.UI_BASE ?? "http://127.0.0.1:1420";
+  const inserted = await fetch(`${api}/api/cd`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      present: true,
+      album: "Kind of Blue",
+      tracks: [{ title: "So What" }, { title: "Freddie Freeloader" }],
+    }),
+  });
+  if (!inserted.ok) {
+    test.skip(true, "mock core is not accepting CD insert");
+    return;
+  }
+  try {
+    await page.goto(ui, { timeout: 5_000 });
+  } catch {
+    test.skip(true, "desktop vite UI is not running on :1420");
+    return;
+  }
+  await expect(page.getByTestId("cd-transport")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("cd-track")).toContainText("01/02");
+  await expect(page.getByTestId("cd-transport")).toContainText("So What");
+  await page.getByTestId("cd-next").click();
+  await expect(page.getByTestId("cd-track")).toContainText("02/02");
+  await page.getByTestId("cd-play").click();
+  await expect(page.getByTestId("cd-play")).toHaveAttribute("aria-label", "Play");
+  await fetch(`${api}/api/cd`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ present: false }),
+  });
+});
+
 test("desktop UI golden path against mock core", async ({ page }) => {
   const ui = process.env.UI_BASE ?? "http://127.0.0.1:1420";
   try {

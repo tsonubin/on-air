@@ -9,6 +9,7 @@ use tower_http::cors::CorsLayer;
 
 pub mod api;
 pub mod auth;
+pub mod cd;
 pub mod dsp;
 pub mod mdns;
 pub mod pairing;
@@ -53,6 +54,8 @@ pub fn build_router(state: CoreState) -> Router {
     Router::new()
         .route("/api/status", get(status_handler))
         .route("/stream/audio.wav", get(api::stream::stream_audio))
+        .route("/api/cd", get(api::cd::get_cd).post(api::cd::simulate_cd))
+        .route("/api/cd/control", post(api::cd::control_cd))
         .route("/api/inputs", get(api::inputs::list_inputs))
         .route(
             "/api/inputs/active",
@@ -118,6 +121,7 @@ pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::i
     if !state.mock {
         let _sonos = state.spawn_sonos_discovery();
         let _airplay = state.spawn_airplay_discovery();
+        let _cd = crate::api::cd::spawn_watch(state.clone());
     }
     state.spawn_saved_session_restore();
     axum::serve(

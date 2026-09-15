@@ -1,5 +1,6 @@
 pub mod airplay;
 pub mod bluetooth;
+pub mod cd;
 pub mod eq;
 pub mod inputs;
 pub mod outputs;

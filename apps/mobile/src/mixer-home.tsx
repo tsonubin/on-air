@@ -1,4 +1,5 @@
 import { Host, Icon, type IconName } from "@expo/ui";
+import type { CdStatus } from "@on-air/api-types";
 import type React from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -36,6 +37,22 @@ const icons = {
   route: Icon.select({
     ios: "arrow.down",
     android: import("@expo/material-symbols/south.xml"),
+  }),
+  prev: Icon.select({
+    ios: "backward.end.fill",
+    android: import("@expo/material-symbols/skip_previous.xml"),
+  }),
+  play: Icon.select({
+    ios: "play.fill",
+    android: import("@expo/material-symbols/play_arrow.xml"),
+  }),
+  pause: Icon.select({
+    ios: "pause.fill",
+    android: import("@expo/material-symbols/pause.xml"),
+  }),
+  next: Icon.select({
+    ios: "forward.end.fill",
+    android: import("@expo/material-symbols/skip_next.xml"),
   }),
 } satisfies Record<string, IconName>;
 
@@ -248,6 +265,92 @@ function Header({
   );
 }
 
+function padTrack(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function CdDeck({
+  status,
+  onPlayPause,
+  onPrev,
+  onNext,
+}: {
+  status: CdStatus;
+  onPlayPause: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const label = status.title || status.album || "Audio CD";
+  return (
+    <View
+      testID="cd-transport"
+      style={{
+        paddingHorizontal: 18,
+        paddingVertical: 14,
+        gap: 12,
+        backgroundColor: mobileColors.surface,
+        borderRadius: 20,
+        borderCurve: "continuous",
+        borderWidth: 1,
+        borderColor: mobileColors.border,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Text
+          selectable
+          testID="cd-track"
+          style={{ color: mobileColors.accent, fontSize: 16, fontWeight: "700" }}
+        >
+          {padTrack(status.track)}/{padTrack(status.track_count)}
+        </Text>
+        <Text
+          selectable
+          numberOfLines={1}
+          style={{ flex: 1, color: mobileColors.label, fontSize: 16, fontWeight: "600" }}
+        >
+          {label}
+        </Text>
+      </View>
+      <View style={{ flexDirection: "row", justifyContent: "center", gap: 22 }}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Previous track"
+          onPress={onPrev}
+          testID="cd-prev"
+          hitSlop={8}
+          style={{ width: 46, height: 46, alignItems: "center", justifyContent: "center" }}
+        >
+          <NativeIcon name={icons.prev} size={28} accessibilityLabel="Previous track" />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={status.playing ? "Pause" : "Play"}
+          onPress={onPlayPause}
+          testID="cd-play"
+          hitSlop={8}
+          style={{ width: 46, height: 46, alignItems: "center", justifyContent: "center" }}
+        >
+          <NativeIcon
+            name={status.playing ? icons.pause : icons.play}
+            size={32}
+            accessibilityLabel={status.playing ? "Pause" : "Play"}
+          />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Next track"
+          onPress={onNext}
+          testID="cd-next"
+          hitSlop={8}
+          style={{ width: 46, height: 46, alignItems: "center", justifyContent: "center" }}
+        >
+          <NativeIcon name={icons.next} size={28} accessibilityLabel="Next track" />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function MixerHome({
   activeInput,
   activeOutput,
@@ -257,12 +360,16 @@ export function MixerHome({
   error,
   volumeDisabled,
   soundDisabled,
+  cd,
   onChangeInput,
   onChangeOutput,
   onOpenSound,
   onOpenMore,
   onDisconnect,
   onVolumeChange,
+  onCdPlayPause,
+  onCdPrev,
+  onCdNext,
 }: {
   activeInput: string;
   activeOutput: string;
@@ -272,12 +379,16 @@ export function MixerHome({
   error?: string | null;
   volumeDisabled: boolean;
   soundDisabled: boolean;
+  cd?: CdStatus | null;
   onChangeInput: () => void;
   onChangeOutput: () => void;
   onOpenSound: () => void;
   onOpenMore: () => void;
   onDisconnect: () => void;
   onVolumeChange: (value: number) => void;
+  onCdPlayPause?: () => void;
+  onCdPrev?: () => void;
+  onCdNext?: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -399,6 +510,15 @@ export function MixerHome({
                 />
               </View>
             </View>
+
+            {cd?.present ? (
+              <CdDeck
+                status={cd}
+                onPlayPause={() => onCdPlayPause?.()}
+                onPrev={() => onCdPrev?.()}
+                onNext={() => onCdNext?.()}
+              />
+            ) : null}
 
             <View
               style={{

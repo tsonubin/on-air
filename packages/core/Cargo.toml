@@ -20,6 +20,9 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 mdns-sd = "0.13"
 tower-http = { version = "0.6", features = ["cors"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 futures-util = "0.3"

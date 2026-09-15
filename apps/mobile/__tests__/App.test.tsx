@@ -19,6 +19,8 @@ jest.mock("../src/controlClient", () => {
     getSampleRate: jest.fn(),
     getVolume: jest.fn(),
     getAirplayMode: jest.fn(),
+    getCd: jest.fn(),
+    controlCd: jest.fn(),
     activateInput: jest.fn(),
     activateOutput: jest.fn(),
     setVolume: jest.fn(),
@@ -41,6 +43,8 @@ const mocked = client as unknown as {
   getSampleRate: jest.Mock;
   getVolume: jest.Mock;
   getAirplayMode: jest.Mock;
+  getCd: jest.Mock;
+  controlCd: jest.Mock;
   activateInput: jest.Mock;
   activateOutput: jest.Mock;
   setVolume: jest.Mock;
@@ -109,6 +113,22 @@ function mockMixer() {
     output: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
   });
   mocked.getAirplayMode.mockResolvedValue("owntone");
+  mocked.getCd.mockResolvedValue({
+    present: false,
+    playing: false,
+    track: 0,
+    track_count: 0,
+    position_ms: 0,
+    duration_ms: 0,
+  });
+  mocked.controlCd.mockResolvedValue({
+    present: false,
+    playing: false,
+    track: 0,
+    track_count: 0,
+    position_ms: 0,
+    duration_ms: 0,
+  });
   mocked.activateInput.mockResolvedValue(undefined);
   mocked.activateOutput.mockResolvedValue(undefined);
   mocked.setVolume.mockResolvedValue(undefined);
@@ -263,6 +283,38 @@ test("a late automatic scan cannot overwrite a manually entered desktop", async 
   await flush();
 
   expect(tree.root.findByProps({ testID: "host-input" }).props.value).toBe("192.168.5.77");
+});
+
+test("compact disc transport appears when a disc is loaded", async () => {
+  mocked.getCd.mockResolvedValue({
+    present: true,
+    playing: true,
+    track: 1,
+    track_count: 2,
+    title: "So What",
+    album: "Kind of Blue",
+    position_ms: 0,
+    duration_ms: 180000,
+  });
+  mocked.controlCd.mockResolvedValue({
+    present: true,
+    playing: true,
+    track: 2,
+    track_count: 2,
+    title: "Freddie Freeloader",
+    album: "Kind of Blue",
+    position_ms: 0,
+    duration_ms: 180000,
+  });
+  const tree = await renderApp();
+  await pair(tree);
+  expect(tree.root.findByProps({ testID: "cd-transport" })).toBeTruthy();
+  expect(tree.root.findByProps({ testID: "cd-track" })).toBeTruthy();
+  expect(screen(tree)).toContain("So What");
+  await ReactTestRenderer.act(async () => {
+    await tree.root.findByProps({ testID: "cd-next" }).props.onPress();
+  });
+  expect(mocked.controlCd).toHaveBeenCalledWith("http://192.168.5.14:47990", "next", "onair-test");
 });
 
 test("pairing with the desktop PIN opens the full mixer", async () => {

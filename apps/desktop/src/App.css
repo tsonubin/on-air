@@ -147,6 +147,35 @@
   background: linear-gradient(180deg, #3a221c, #1e1410);
 }
 @layer components {
+  .cd-key {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 7px;
+    cursor: pointer;
+    border-radius: 4px;
+    border: 1px solid #3a342a;
+    background: linear-gradient(180deg, #2c281f, #141210);
+    box-shadow:
+      inset 0 1px 0 #4a4338,
+      0 1px 1px #000;
+    color: var(--color-ink);
+    line-height: 1;
+    font-size: 11px;
+  }
+  .cd-key:hover {
+    border-color: var(--color-amber);
+    color: var(--color-amber);
+  }
+  .cd-key:active {
+    transform: translateY(1px);
+  }
+  .cd-key-main {
+    min-width: 34px;
+    border-color: #6a2a22;
+    background: linear-gradient(180deg, #3a221c, #1e1410);
+  }
+}
+@layer components {
   .fader-thumb {
     display: block;
     width: 22px;

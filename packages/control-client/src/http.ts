@@ -4,6 +4,8 @@ import {
   type AirPlayModeResponse,
   apiBase,
   type BluetoothDeviceInfo,
+  type CdAction,
+  type CdStatus,
   DEFAULT_PORT,
   type EqResponse,
   type OutputInfo,
@@ -359,7 +361,56 @@ export function wsUrl(base: string, token?: string): string {
   return `${ws}/api/ws?token=${encodeURIComponent(token)}`;
 }
 
+export async function getCd(
+  base: string,
+  token?: string,
+  fetchImpl?: FetchLike,
+): Promise<CdStatus> {
+  return request<CdStatus>(base, "/api/cd", { headers: authHeaders(token) }, fetchImpl);
+}
+
+export async function controlCd(
+  base: string,
+  action: CdAction,
+  token?: string,
+  fetchImpl?: FetchLike,
+): Promise<CdStatus> {
+  return request<CdStatus>(
+    base,
+    "/api/cd/control",
+    {
+      method: "POST",
+      headers: authHeaders(token, true),
+      body: JSON.stringify({ action }),
+    },
+    fetchImpl,
+  );
+}
+
+export async function simulateCd(
+  base: string,
+  body: {
+    present: boolean;
+    album?: string;
+    tracks?: { title?: string; duration_ms?: number }[];
+  },
+  token?: string,
+  fetchImpl?: FetchLike,
+): Promise<CdStatus> {
+  return request<CdStatus>(
+    base,
+    "/api/cd",
+    {
+      method: "POST",
+      headers: authHeaders(token, true),
+      body: JSON.stringify(body),
+    },
+    fetchImpl,
+  );
+}
+
 export function prettyInput(name: string): string {
+  if (name === "Audio CD") return "Audio CD";
   if (name.startsWith("Discard all samples")) return "Null device";
   if (name.includes("PipeWire Sound Server")) return "PipeWire";
   if (name.startsWith("Default ALSA")) return "Default";

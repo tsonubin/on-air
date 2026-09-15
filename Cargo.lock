@@ -2960,6 +2960,7 @@ dependencies = [
  "cpal",
  "futures-util",
  "getrandom 0.3.4",
+ "libc",
  "mdns-sd",
  "reqwest 0.12.28",
  "ringbuf",

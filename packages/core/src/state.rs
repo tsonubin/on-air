@@ -1,4 +1,5 @@
 use crate::api::ws::WsEvent;
+use crate::cd::CdDeck;
 use crate::pairing::PairingState;
 use crate::sender::bluetooth::{
     BluetoothAdapter, BluetoothDevice, MockBluetoothAdapter, RecordingPcmSink,
@@ -51,6 +52,7 @@ pub struct CoreState {
     pub mock: bool,
     pub mock_inputs: Arc<StdMutex<Vec<String>>>,
     pub active_input: Arc<StdMutex<Option<String>>>,
+    pub cd: CdDeck,
     pub airplay_outputs: Arc<StdMutex<Vec<CatalogDevice>>>,
     pub bluetooth: Arc<dyn BluetoothAdapter>,
     bluetooth_cache: Arc<Mutex<BluetoothDeviceCache>>,
@@ -143,6 +145,8 @@ impl CoreState {
     ) -> Self {
         let (audio_tx, _) = broadcast::channel(AUDIO_BROADCAST_CAPACITY);
         let (ws_tx, _) = broadcast::channel(64);
+        let cd = CdDeck::new();
+        cd.set_event_sink(ws_tx.clone());
         CoreState {
             config_lock: Arc::new(Mutex::new(())),
             active_sender: Arc::new(Mutex::new(None)),
@@ -157,6 +161,7 @@ impl CoreState {
             mock: false,
             mock_inputs: Arc::new(StdMutex::new(Vec::new())),
             active_input: Arc::new(StdMutex::new(None)),
+            cd,
             airplay_outputs: Arc::new(StdMutex::new(Vec::new())),
             bluetooth: Arc::new(SystemBluetoothAdapter::from_host()),
             bluetooth_cache: Arc::new(Mutex::new(None)),

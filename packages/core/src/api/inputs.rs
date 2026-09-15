@@ -1,4 +1,5 @@
 use crate::auth::Paired;
+use crate::cd::{AUDIO_CD_INPUT, CD_SAMPLE_RATE_HZ};
 use crate::pipeline::{self, capture};
 use crate::state::CoreState;
 use axum::extract::State;
@@ -14,13 +15,20 @@ pub struct InputsResponse {
     pub inputs: Vec<String>,
 }
 
+fn with_cd_input(state: &CoreState, mut inputs: Vec<String>) -> Vec<String> {
+    if state.cd.status().present && !inputs.iter().any(|name| name == AUDIO_CD_INPUT) {
+        inputs.insert(0, AUDIO_CD_INPUT.to_string());
+    }
+    inputs
+}
+
 pub async fn list_inputs(
     Paired: Paired,
     State(state): State<CoreState>,
 ) -> Result<Json<InputsResponse>, StatusCode> {
     if state.mock {
         return Ok(Json(InputsResponse {
-            inputs: state.mock_inputs.lock().unwrap().clone(),
+            inputs: with_cd_input(&state, state.mock_inputs.lock().unwrap().clone()),
         }));
     }
     // CPAL enumeration and the Linux `pactl` fallback are synchronous and may
@@ -33,7 +41,7 @@ pub async fn list_inputs(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(InputsResponse {
-        inputs: devices.into_iter().map(|d| d.name).collect(),
+        inputs: with_cd_input(&state, devices.into_iter().map(|d| d.name).collect()),
     }))
 }
 
@@ -76,12 +84,14 @@ pub(crate) async fn activate_input_named(
     requested_name: &str,
 ) -> Result<(), (StatusCode, String)> {
     if state.mock {
-        let known = state
-            .mock_inputs
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|name| name == requested_name);
+        let cd_ok = requested_name == AUDIO_CD_INPUT && state.cd.status().present;
+        let known = cd_ok
+            || state
+                .mock_inputs
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|name| name == requested_name);
         if !known {
             return Err((StatusCode::NOT_FOUND, "input device not found".into()));
         }
@@ -161,6 +171,28 @@ async fn start_named_capture(
     let audio_tx = state.audio_tx.clone();
     let ws_tx = state.ws_tx.clone();
     let label = name.clone();
+
+    if name == AUDIO_CD_INPUT {
+        if !state.cd.status().present {
+            return Err((StatusCode::NOT_FOUND, "no audio compact disc".into()));
+        }
+        state.cd.attach_producer(producer);
+        let deck = state.cd.clone();
+        *state.input_supported_hz.lock().unwrap() = crate::dsp::rates::INPUT_RATES_HZ.to_vec();
+        let processing = pipeline::spawn_processing_task(
+            consumer,
+            CD_SAMPLE_RATE_HZ,
+            target_rate,
+            eq,
+            audio_tx,
+            ws_tx,
+        );
+        return Ok(pipeline::CaptureHandle::with_cleanup(
+            processing,
+            label,
+            Box::new(move || deck.detach_producer()),
+        ));
+    }
 
     if capture::is_pulse_monitor_name(&name) {
         let src = name.clone();

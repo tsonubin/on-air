@@ -59,3 +59,19 @@ fn service_state_event_is_tagged_json() {
     assert_eq!(json["type"], "ServiceStateChanged");
     assert_eq!(json["enabled"], false);
 }
+
+#[test]
+fn cd_state_event_is_tagged_json() {
+    let event = WsEvent::CdStateChanged {
+        present: true,
+        playing: true,
+        track: 3,
+        track_count: 12,
+        title: Some("So What".into()),
+        album: Some("Kind of Blue".into()),
+    };
+    let json = serde_json::to_value(event).unwrap();
+    assert_eq!(json["type"], "CdStateChanged");
+    assert_eq!(json["track"], 3);
+    assert_eq!(json["title"], "So What");
+}

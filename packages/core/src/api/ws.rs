@@ -29,6 +29,16 @@ pub enum WsEvent {
     ServiceStateChanged {
         enabled: bool,
     },
+    CdStateChanged {
+        present: bool,
+        playing: bool,
+        track: u8,
+        track_count: u8,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        album: Option<String>,
+    },
 }
 
 pub async fn ws_handler(

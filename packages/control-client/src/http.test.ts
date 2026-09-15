@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   activateOutput,
   apiBase,
+  controlCd,
   fetchStatus,
   getVolume,
   goldenPathSonos,
@@ -37,6 +38,29 @@ test("prettyInput matches desktop labels", () => {
   assert.equal(prettyInput("Discard all samples (playback)"), "Null device");
   assert.equal(prettyInput("alsa_output.pci.analog-stereo.monitor"), "Analog monitor");
   assert.equal(prettyInput("PipeWire Sound Server"), "PipeWire");
+  assert.equal(prettyInput("Audio CD"), "Audio CD");
+});
+
+test("controlCd posts a transport action", async () => {
+  const fetchImpl: typeof fetch = async (input, init) => {
+    assert.equal(String(input), "http://127.0.0.1:47990/api/cd/control");
+    assert.equal(init?.method, "POST");
+    assert.equal(init?.body, JSON.stringify({ action: "next" }));
+    return new Response(
+      JSON.stringify({
+        present: true,
+        playing: true,
+        track: 2,
+        track_count: 12,
+        title: "Freddie Freeloader",
+        position_ms: 0,
+        duration_ms: 180000,
+      }),
+      { status: 200 },
+    );
+  };
+  const status = await controlCd("http://127.0.0.1:47990", "next", undefined, fetchImpl);
+  assert.equal(status.track, 2);
 });
 
 test("wsUrl puts the pairing token on the query string", () => {

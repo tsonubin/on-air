@@ -22,6 +22,10 @@ A Sonos speaker on the LAN, identified by USN/`uuid` and a UPnP `location` URL. 
 
 A Bluetooth audio destination (BlueZ/Pulse `bluez_output.*`). Distinct from generic ALSA/HDMI outputs. Listed and connected through the Bluetooth adapter seam.
 
+## Audio CD
+
+A compact disc of CDDA tracks in an attached optical drive. Inserting one takes over as the live **input** and starts playback from track one. Ejecting it leaves the input empty. Distinct from capture devices listed by CPAL/Pulse.
+
 ## Pipeline PCM
 
 Processed mono L16 at the input/pipeline rate, published on an in-process bus. Senders subscribe; the bus is not a public LAN stream.

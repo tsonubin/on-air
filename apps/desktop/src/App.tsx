@@ -3,11 +3,13 @@ import "./App.css";
 import {
   type ActiveOutput,
   API_BASE,
+  type CdStatus,
   DEFAULT_PORT,
   type OutputInfo,
   type StatusResponse,
   type WsEvent,
 } from "@on-air/api-types";
+import { CdTransport } from "./ui/CdTransport";
 import { Fader } from "./ui/Fader";
 import { RateSelect } from "./ui/RateSelect";
 
@@ -67,6 +69,14 @@ function App() {
   const [airplayMode, setAirplayMode] = useState("");
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cd, setCd] = useState<CdStatus>({
+    present: false,
+    playing: false,
+    track: 0,
+    track_count: 0,
+    position_ms: 0,
+    duration_ms: 0,
+  });
   const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
   const [pairPin, setPairPin] = useState("");
   const [pairing, setPairing] = useState(false);
@@ -95,28 +105,30 @@ function App() {
             return miss;
           }
         };
-        const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, pairing, ap] = await Promise.all([
-          settle(api<StatusResponse>("/api/status")),
-          settle(api<{ inputs: string[] }>("/api/inputs")),
-          settle(api<{ outputs: OutputInfo[] }>("/api/outputs")),
-          settle(api<{ name: string | null; backend: string }>("/api/inputs/active")),
-          settle(api<ActiveOutput | null>("/api/outputs/active")),
-          settle(api<{ gains_db: [number, number, number, number, number] }>("/api/eq")),
-          settle(
-            api<{
-              sample_rate_hz: number;
-              input?: { sample_rate_hz: number; supported_hz: number[] };
-              output?: {
+        const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, pairing, ap, disc] =
+          await Promise.all([
+            settle(api<StatusResponse>("/api/status")),
+            settle(api<{ inputs: string[] }>("/api/inputs")),
+            settle(api<{ outputs: OutputInfo[] }>("/api/outputs")),
+            settle(api<{ name: string | null; backend: string }>("/api/inputs/active")),
+            settle(api<ActiveOutput | null>("/api/outputs/active")),
+            settle(api<{ gains_db: [number, number, number, number, number] }>("/api/eq")),
+            settle(
+              api<{
                 sample_rate_hz: number;
-                supported_hz: number[];
-                transport?: string;
-              };
-            }>("/api/sample-rate"),
-          ),
-          settle(api<{ volume: number }>("/api/outputs/active/volume")),
-          settle(api<{ pin: string }>("/api/pairing/pin")),
-          settle(api<{ mode: string }>("/api/airplay/mode")),
-        ]);
+                input?: { sample_rate_hz: number; supported_hz: number[] };
+                output?: {
+                  sample_rate_hz: number;
+                  supported_hz: number[];
+                  transport?: string;
+                };
+              }>("/api/sample-rate"),
+            ),
+            settle(api<{ volume: number }>("/api/outputs/active/volume")),
+            settle(api<{ pin: string }>("/api/pairing/pin")),
+            settle(api<{ mode: string }>("/api/airplay/mode")),
+            settle(api<CdStatus>("/api/cd")),
+          ]);
         if (st !== miss) setStatus(st);
         if (ins !== miss) setInputs(ins.inputs);
         if (outs !== miss) setOutputs(outs.outputs);
@@ -133,6 +145,7 @@ function App() {
         if (savedVolume !== miss) setVolume(savedVolume.volume);
         if (pairing !== miss) setPin(pairing.pin);
         if (ap !== miss) setAirplayMode(ap.mode);
+        if (disc !== miss) setCd(disc);
       } while (refreshQueued.current);
     })();
     refreshInFlight.current = run;
@@ -197,6 +210,18 @@ function App() {
       setError(String(err));
       return false;
     }
+  };
+
+  const cdAction = async (action: "play" | "pause" | "next" | "prev") => {
+    await perform(async () => {
+      const next = await api<CdStatus>("/api/cd/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      setCd(next);
+      await refresh();
+    });
   };
 
   const pickInput = async (name: string) => {
@@ -399,6 +424,12 @@ function App() {
             {error}
           </p>
         )}
+        <CdTransport
+          status={cd}
+          onPlayPause={() => void cdAction(cd.playing ? "pause" : "play")}
+          onPrev={() => void cdAction("prev")}
+          onNext={() => void cdAction("next")}
+        />
 
         <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden min-[721px]:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] min-[721px]:grid-rows-[minmax(0,1fr)]">
           <section className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3">
