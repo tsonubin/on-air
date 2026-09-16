@@ -3,6 +3,7 @@
     "name": "on-air remote",
     "slug": "on-air-remote",
     "version": "0.1.0",
+    "icon": "./assets/icon.png",
     "orientation": "default",
     "scheme": "onair",
     "userInterfaceStyle": "dark",
@@ -14,9 +15,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.onair.remote",
+      "buildNumber": "2",
+      "icon": "./assets/AppIcon.icon",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "on-air remote finds the desktop mixer on your LAN.",
-        "NSBonjourServices": ["_on-air._tcp."]
+        "NSBonjourServices": ["_on-air._tcp."],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

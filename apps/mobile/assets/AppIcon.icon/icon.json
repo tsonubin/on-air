@@ -1,0 +1,45 @@
+{
+  "fill" : {
+    "linear-gradient" : [
+      "display-p3:0.04,0.04,0.05,1.00000",
+      "display-p3:0.12,0.18,0.32,1.00000"
+    ],
+    "orientation" : {
+      "start" : { "x" : 0.5, "y" : 0 },
+      "stop" : { "x" : 0.5, "y" : 1 }
+    }
+  },
+  "groups" : [
+    {
+      "blur-material" : 0.5,
+      "layers" : [
+        {
+          "blend-mode" : "normal",
+          "glass" : true,
+          "image-name" : "mic.fill@4x.png",
+          "name" : "mic.fill@4x"
+        },
+        {
+          "blend-mode" : "normal",
+          "glass" : false,
+          "image-name" : "live.dot@4x.png",
+          "name" : "live.dot@4x"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.55
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [ "watchOS" ],
+    "squares" : "shared"
+  }
+}

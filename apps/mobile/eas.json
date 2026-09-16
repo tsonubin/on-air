@@ -9,6 +9,13 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "production": {
+      "autoIncrement": true,
+      "distribution": "store"
     }
+  },
+  "submit": {
+    "production": {}
   }
 }
