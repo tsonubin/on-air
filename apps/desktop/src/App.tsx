@@ -9,6 +9,7 @@ import {
   type StatusResponse,
   type WsEvent,
 } from "@on-air/api-types";
+import { prettyInput } from "@on-air/control-client";
 import { CdTransport } from "./ui/CdTransport";
 import { Fader } from "./ui/Fader";
 import { RateSelect } from "./ui/RateSelect";
@@ -41,17 +42,6 @@ async function api<T>(path: string, init?: RequestInit, timeoutMs = 4000): Promi
   }
 }
 
-function prettyInput(name: string): string {
-  if (name.startsWith("Discard all samples")) return "Null device";
-  if (name.includes("PipeWire Sound Server")) return "PipeWire";
-  if (name.startsWith("Default ALSA")) return "Default";
-  if (name.includes("analog") && name.endsWith(".monitor")) return "Analog monitor";
-  if (name.endsWith(".monitor")) return "System monitor";
-  if (name.includes("CS4208 Analog")) return "Built-in analog";
-  if (name.includes("HDMI")) return name.replace("HDA Intel HDMI, ", "HDMI ");
-  return name;
-}
-
 function App() {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [inputs, setInputs] = useState<string[]>([]);
@@ -64,7 +54,6 @@ function App() {
   const [outputSampleRate, setOutputSampleRate] = useState(44100);
   const [inputRates, setInputRates] = useState<number[]>([44100, 48000]);
   const [outputRates, setOutputRates] = useState<number[]>([44100, 48000]);
-  const [, setOutputRateTransport] = useState<string | null>(null);
   const [pin, setPin] = useState("");
   const [airplayMode, setAirplayMode] = useState("");
   const [autostart, setAutostart] = useState<boolean | null>(null);
@@ -80,6 +69,9 @@ function App() {
   const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
   const [pairPin, setPairPin] = useState("");
   const [pairing, setPairing] = useState(false);
+  const [deviceHelp, setDeviceHelp] = useState<"bluetooth" | "airplay" | null>(null);
+  const [connectingOutput, setConnectingOutput] = useState<string | null>(null);
+  const [refreshingDevices, setRefreshingDevices] = useState(false);
   const pairPinInput = useRef<HTMLInputElement>(null);
   const refreshInFlight = useRef<Promise<void> | null>(null);
   const refreshQueued = useRef(false);
@@ -140,7 +132,6 @@ function App() {
           setOutputSampleRate(sr.output?.sample_rate_hz ?? sr.sample_rate_hz);
           if (sr.input?.supported_hz?.length) setInputRates(sr.input.supported_hz);
           if (sr.output?.supported_hz?.length) setOutputRates(sr.output.supported_hz);
-          setOutputRateTransport(sr.output?.transport ?? null);
         }
         if (savedVolume !== miss) setVolume(savedVolume.volume);
         if (pairing !== miss) setPin(pairing.pin);
@@ -162,6 +153,7 @@ function App() {
     refreshIfVisible();
     const id = setInterval(refreshIfVisible, 15000);
     document.addEventListener("visibilitychange", refreshIfVisible);
+    window.addEventListener("focus", refreshIfVisible);
     const ws = new WebSocket(`${API_BASE.replace(/^http/i, "ws")}/api/ws`);
     ws.onmessage = (event) => {
       try {
@@ -174,6 +166,7 @@ function App() {
     return () => {
       clearInterval(id);
       document.removeEventListener("visibilitychange", refreshIfVisible);
+      window.removeEventListener("focus", refreshIfVisible);
       ws.close();
     };
   }, [refresh]);
@@ -235,17 +228,49 @@ function App() {
     });
   };
 
-  const activate = async (output: OutputInfo): Promise<boolean> =>
-    perform(async () => {
-      await api("/api/outputs/active", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ transport: output.transport, device_id: output.id }),
-      });
+  const refreshDevices = async () => {
+    if (refreshingDevices) return;
+    setRefreshingDevices(true);
+    try {
       await refresh();
+    } finally {
+      setRefreshingDevices(false);
+    }
+  };
+
+  const openBluetoothSettings = () => {
+    setDeviceHelp("bluetooth");
+    void perform(async () => {
+      await api("/api/bluetooth/settings", { method: "POST" });
     });
+  };
+
+  const activate = async (output: OutputInfo): Promise<boolean> => {
+    if (connectingOutput) return false;
+    setConnectingOutput(`${output.transport}-${output.id}`);
+    try {
+      return await perform(async () => {
+        await api(
+          "/api/outputs/active",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ transport: output.transport, device_id: output.id }),
+          },
+          60_000,
+        );
+        await refresh();
+      });
+    } finally {
+      setConnectingOutput(null);
+    }
+  };
 
   const chooseOutput = async (output: OutputInfo) => {
+    if (output.transport === "airplay" && airplayMode === "avroute-picker") {
+      setDeviceHelp("airplay");
+      return;
+    }
     if (output.needs_pair && !output.paired) {
       setPairPin("");
       setPairTarget({
@@ -269,11 +294,15 @@ function App() {
           body: JSON.stringify({ device_id: pairTarget.id, pin: pairPin }),
         });
       } else if (pairTarget.transport === "bluetooth") {
-        await api("/api/bluetooth/pair", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: pairTarget.id }),
-        });
+        await api(
+          "/api/bluetooth/pair",
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id: pairTarget.id }),
+          },
+          60_000,
+        );
       }
     });
     setPairing(false);
@@ -401,20 +430,6 @@ function App() {
                 {autostart !== null && (
                   <span data-testid="autostart-hint">{autostart ? "autostart" : "manual"}</span>
                 )}
-                {airplayMode === "avroute-picker" && (
-                  <button
-                    type="button"
-                    className="cursor-pointer rounded-sm border border-[#3a342a] bg-[#141210] px-2 py-0.5 hover:border-amber hover:text-amber"
-                    data-testid="airplay-picker"
-                    onClick={() => {
-                      void import("@tauri-apps/api/core").then(({ invoke }) =>
-                        invoke("open_airplay_picker"),
-                      );
-                    }}
-                  >
-                    AirPlay
-                  </button>
-                )}
               </div>
             </details>
           </div>
@@ -431,11 +446,54 @@ function App() {
           onNext={() => void cdAction("next")}
         />
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] overflow-hidden min-[721px]:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] min-[721px]:grid-rows-[minmax(0,1fr)]">
-          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden p-3">
-            <h2 className="mb-2 shrink-0 font-mono text-[10px] tracking-[0.22em] text-steel-dim uppercase">
-              Source
-            </h2>
+        {deviceHelp && (
+          <aside className="device-help" aria-label="Speaker setup" role="status">
+            <div>
+              <strong>
+                {deviceHelp === "bluetooth" ? "Connect a Bluetooth speaker" : "AirPlay on this Mac"}
+              </strong>
+              <p>
+                {deviceHelp === "bluetooth"
+                  ? "Pair and connect your speaker in the desktop’s Bluetooth settings. Return here, refresh devices, then select the speaker. Opening settings does not start playback."
+                  : "AirPlay playback from on-air is not available on this Mac yet. The macOS picker can open, but choosing a speaker there does not start this mixer. Use Bluetooth or Sonos for playback."}
+              </p>
+            </div>
+            <div className="device-actions">
+              {deviceHelp === "bluetooth" ? (
+                <button
+                  type="button"
+                  className="device-action"
+                  onClick={() => void refreshDevices()}
+                  disabled={refreshingDevices}
+                >
+                  {refreshingDevices ? "Refreshing…" : "Refresh devices"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="device-action"
+                  data-testid="airplay-picker"
+                  onClick={() =>
+                    void perform(async () => {
+                      const { invoke } = await import("@tauri-apps/api/core");
+                      await invoke("open_airplay_picker");
+                    })
+                  }
+                >
+                  Open macOS picker
+                </button>
+              )}
+              <button type="button" className="device-action" onClick={() => setDeviceHelp(null)}>
+                Dismiss
+              </button>
+            </div>
+          </aside>
+        )}
+        <div className="routing-grid">
+          <section className="routing-section">
+            <div className="routing-heading">
+              <h2>Source</h2>
+            </div>
             <ul
               className="flex min-h-0 flex-1 list-none flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain p-0 pr-0.5 m-0"
               data-testid="input-list"
@@ -464,25 +522,41 @@ function App() {
             </ul>
           </section>
 
-          <section className="flex min-h-0 min-w-0 flex-col overflow-hidden border-t border-[#2e2a24] p-3 min-[721px]:border-t-0 min-[721px]:border-l">
-            <div className="mb-2 flex shrink-0 items-center justify-between gap-2">
-              <h2 className="m-0 font-mono text-[10px] tracking-[0.22em] text-steel-dim uppercase">
-                Destination
-              </h2>
-              {airplayMode === "avroute-picker" && (
+          <section className="routing-section routing-destination">
+            <div className="routing-heading">
+              <h2>Destination</h2>
+              <div className="device-actions">
                 <button
                   type="button"
-                  className="cursor-pointer rounded-sm border border-[#3a342a] bg-[#141210] px-2 py-1 font-mono text-[10px] hover:border-amber hover:text-amber"
-                  onClick={() => {
-                    void import("@tauri-apps/api/core")
-                      .then(({ invoke }) => invoke("open_airplay_picker"))
-                      .catch((err) => setError(String(err)));
-                  }}
+                  className="device-action"
+                  data-testid="add-bluetooth"
+                  onClick={openBluetoothSettings}
                 >
-                  AirPlay picker
+                  Bluetooth settings
                 </button>
-              )}
+                {airplayMode === "avroute-picker" && (
+                  <button
+                    type="button"
+                    className="device-action"
+                    onClick={() => setDeviceHelp("airplay")}
+                  >
+                    AirPlay info
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="device-action"
+                  data-testid="refresh-devices"
+                  disabled={refreshingDevices}
+                  onClick={() => void refreshDevices()}
+                >
+                  {refreshingDevices ? "Refreshing…" : "Refresh"}
+                </button>
+              </div>
             </div>
+            <p id="airplay-limitation" hidden>
+              AirPlay playback is not available on this Mac. Select for details.
+            </p>
             <p data-testid="active-output" hidden>
               {activeOutput ? `${activeOutput.transport}: ${activeOutput.device_name}` : "none"}
             </p>
@@ -492,7 +566,8 @@ function App() {
             >
               {outputs.length === 0 && (
                 <li className="px-1 py-2.5 text-xs text-steel-dim">
-                  Waiting for a speaker on the LAN
+                  No speakers found. Connect Bluetooth in settings, or keep network speakers on the
+                  same LAN.
                 </li>
               )}
               {outputs.map((output) => {
@@ -509,12 +584,18 @@ function App() {
                       className={`device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-[#322e26] px-2.5 py-2 text-left hover:border-[#4a4336] disabled:cursor-not-allowed disabled:opacity-50 ${on ? "device-row-on" : ""}`}
                       data-testid={`output-${output.transport}-${output.id}`}
                       onClick={() => void chooseOutput(output)}
-                      disabled={pickerOnly}
+                      disabled={connectingOutput !== null}
+                      aria-describedby={pickerOnly ? "airplay-limitation" : undefined}
                     >
                       <span
                         className={`size-[9px] rounded-full border border-steel-dim ${on ? "border-live bg-live" : ""}`}
                       />
-                      <span className="truncate whitespace-nowrap">{output.name}</span>
+                      <span className="truncate whitespace-nowrap">
+                        {output.name}
+                        {connectingOutput === `${output.transport}-${output.id}`
+                          ? " · Connecting…"
+                          : ""}
+                      </span>
                       <span className="flex items-center gap-1.5 font-mono text-[9px] tracking-[0.14em] text-steel-dim uppercase">
                         {pair && (
                           <span className="inline-flex gap-0.5" title="stereo pair">
@@ -523,7 +604,7 @@ function App() {
                           </span>
                         )}
                         {pickerOnly
-                          ? "picker"
+                          ? "unavailable · info"
                           : output.needs_pair && !output.paired
                             ? "pin"
                             : output.transport}
@@ -595,7 +676,7 @@ function App() {
             <p className="mt-0 mb-3 text-xs text-steel-dim">
               {pairTarget.transport === "airplay"
                 ? "Only if this speaker shows a code (Home app or Apple TV). HomePod mini has no screen and usually has no PIN."
-                : "Confirm pairing on the Bluetooth device, then continue."}
+                : "Confirm pairing on the speaker or in this computer’s Bluetooth settings, then continue."}
             </p>
             {pairTarget.transport === "airplay" && (
               <input

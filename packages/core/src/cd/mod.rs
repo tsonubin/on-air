@@ -85,12 +85,22 @@ pub struct GeneratedCd {
 
 impl GeneratedCd {
     pub fn from_titles(album: Option<String>, titles: &[String], duration_ms: u64) -> Self {
-        let length_sectors = ms_to_sectors(duration_ms).max(75);
+        Self::from_tracks(
+            album,
+            &titles
+                .iter()
+                .map(|title| (title.clone(), duration_ms))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    pub fn from_tracks(album: Option<String>, tracks: &[(String, u64)]) -> Self {
         let mut lba = 0u32;
-        let tracks = titles
+        let tracks = tracks
             .iter()
             .enumerate()
-            .map(|(index, title)| {
+            .map(|(index, (title, duration_ms))| {
+                let length_sectors = ms_to_sectors(*duration_ms).max(75);
                 let track = CdTrack {
                     number: (index + 1) as u8,
                     title: (!title.is_empty()).then(|| title.clone()),
@@ -127,6 +137,14 @@ impl CdMedium for GeneratedCd {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct CdTrackInfo {
+    pub number: u8,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub duration_ms: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct CdStatus {
     pub present: bool,
@@ -139,6 +157,7 @@ pub struct CdStatus {
     pub album: Option<String>,
     pub position_ms: u64,
     pub duration_ms: u64,
+    pub tracks: Vec<CdTrackInfo>,
 }
 
 impl CdStatus {
@@ -152,6 +171,7 @@ impl CdStatus {
             album: None,
             position_ms: 0,
             duration_ms: 0,
+            tracks: Vec::new(),
         }
     }
 }
@@ -244,12 +264,33 @@ impl CdDeck {
         true
     }
 
+    pub fn seek_ms(&self, position_ms: u64) {
+        if !self.inner.seek_ms(position_ms) {
+            return;
+        }
+        self.inner.emit();
+    }
+
+    pub fn goto_track(&self, number: u8) {
+        if !self.inner.goto_track(number) {
+            return;
+        }
+        self.inner.emit();
+    }
+
+    pub fn eject(&self) -> bool {
+        self.set_medium(None) == CdMediaEvent::Ejected
+    }
+
     pub fn attach_producer(&self, producer: HeapProd<f32>) {
         *self.inner.producer.lock().unwrap() = Some(producer);
     }
 
     pub fn detach_producer(&self) {
         *self.inner.producer.lock().unwrap() = None;
+        if self.inner.playing.swap(false, Ordering::AcqRel) {
+            self.inner.emit();
+        }
     }
 
     pub fn has_producer(&self) -> bool {
@@ -276,10 +317,20 @@ impl CdInner {
         let Some(toc) = self.toc() else {
             return CdStatus::empty();
         };
+        let tracks: Vec<CdTrackInfo> = toc
+            .tracks
+            .iter()
+            .map(|track| CdTrackInfo {
+                number: track.number,
+                title: track.title.clone(),
+                duration_ms: track.duration_ms(),
+            })
+            .collect();
         if toc.tracks.is_empty() {
             return CdStatus {
                 present: true,
                 album: toc.album,
+                tracks,
                 ..CdStatus::empty()
             };
         }
@@ -295,6 +346,7 @@ impl CdInner {
             album: toc.album.clone(),
             position_ms: sectors_to_ms(sector.min(track.length_sectors)),
             duration_ms: track.duration_ms(),
+            tracks,
         }
     }
 
@@ -342,6 +394,31 @@ impl CdInner {
         true
     }
 
+    fn seek_ms(&self, position_ms: u64) -> bool {
+        let Some(toc) = self.toc() else {
+            return false;
+        };
+        if toc.tracks.is_empty() {
+            return false;
+        }
+        let index = (*self.track_index.lock().unwrap()).min(toc.tracks.len() - 1);
+        let length = toc.tracks[index].length_sectors;
+        *self.sector_in_track.lock().unwrap() = ms_to_sectors(position_ms).min(length);
+        true
+    }
+
+    fn goto_track(&self, number: u8) -> bool {
+        let Some(toc) = self.toc() else {
+            return false;
+        };
+        let Some(index) = toc.tracks.iter().position(|track| track.number == number) else {
+            return false;
+        };
+        *self.track_index.lock().unwrap() = index;
+        *self.sector_in_track.lock().unwrap() = 0;
+        true
+    }
+
     fn skip_prev(&self) -> bool {
         let Some(toc) = self.toc() else {
             return false;
@@ -377,6 +454,8 @@ impl CdInner {
             track_count: status.track_count,
             title: status.title,
             album: status.album,
+            position_ms: status.position_ms,
+            duration_ms: status.duration_ms,
         });
     }
 }
@@ -426,14 +505,21 @@ fn playback_loop(weak: Weak<CdInner>) {
                 let same_track = *inner.track_index.lock().unwrap() == index
                     && *inner.sector_in_track.lock().unwrap() == sector;
                 if same_track {
-                    if let Some(producer) = inner.producer.lock().unwrap().as_mut() {
-                        use ringbuf::traits::Producer;
-                        for chunk in bytes.chunks(BYTES_PER_SECTOR) {
-                            let mono = downmix_sector(chunk);
-                            let _ = producer.push_slice(&mono);
+                    let attached = inner.producer.lock().unwrap().as_mut().is_some();
+                    if attached {
+                        if let Some(producer) = inner.producer.lock().unwrap().as_mut() {
+                            use ringbuf::traits::Producer;
+                            for chunk in bytes.chunks(BYTES_PER_SECTOR) {
+                                let mono = downmix_sector(chunk);
+                                let _ = producer.push_slice(&mono);
+                            }
+                        }
+                        *inner.sector_in_track.lock().unwrap() = sector + read_sectors;
+                        let next_sector = sector + read_sectors;
+                        if next_sector % SECTORS_PER_SECOND < read_sectors {
+                            inner.emit();
                         }
                     }
-                    *inner.sector_in_track.lock().unwrap() = sector + read_sectors;
                 }
             }
         }
@@ -446,6 +532,10 @@ fn playback_loop(weak: Weak<CdInner>) {
 
 pub fn probe_audio_cd() -> Option<Arc<dyn CdMedium>> {
     sys::probe_audio_cd()
+}
+
+pub fn eject_drive() -> Result<(), String> {
+    sys::eject()
 }
 
 #[cfg(test)]
@@ -528,5 +618,56 @@ mod tests {
     fn sectors_convert_at_75_hz() {
         assert_eq!(sectors_to_ms(75), 1_000);
         assert_eq!(ms_to_sectors(1_000), 75);
+    }
+
+    #[test]
+    fn status_includes_the_disc_track_list() {
+        let deck = deck_with(&["So What", "Freddie"], 60_000);
+        let status = deck.status();
+        assert_eq!(status.tracks.len(), 2);
+        assert_eq!(status.tracks[0].number, 1);
+        assert_eq!(status.tracks[0].title.as_deref(), Some("So What"));
+        assert_eq!(status.tracks[0].duration_ms, 60_000);
+        assert_eq!(status.tracks[1].title.as_deref(), Some("Freddie"));
+    }
+
+    #[test]
+    fn seek_and_goto_move_the_playhead() {
+        let deck = deck_with(&["A", "B", "C"], 10_000);
+        deck.goto_track(2);
+        assert_eq!(deck.status().track, 2);
+        deck.seek_ms(4_000);
+        assert_eq!(deck.status().position_ms, 4_000);
+        deck.goto_track(3);
+        assert_eq!(deck.status().track, 3);
+        assert_eq!(deck.status().position_ms, 0);
+    }
+
+    #[test]
+    fn detaching_the_producer_pauses_and_keeps_position() {
+        let deck = deck_with(&["A"], 10_000);
+        deck.seek_ms(2_000);
+        deck.play();
+        assert!(deck.status().playing);
+        deck.detach_producer();
+        let status = deck.status();
+        assert!(!status.playing);
+        assert_eq!(status.position_ms, 2_000);
+    }
+
+    #[test]
+    fn generated_tracks_can_have_their_own_durations() {
+        let deck = CdDeck::new();
+        let medium = GeneratedCd::from_tracks(
+            Some("Kind of Blue".into()),
+            &[
+                ("So What".into(), 9 * 60_000),
+                ("Freddie".into(), 8 * 60_000),
+            ],
+        );
+        deck.set_medium(Some(Arc::new(medium)));
+        assert_eq!(deck.status().duration_ms, 9 * 60_000);
+        deck.goto_track(2);
+        assert_eq!(deck.status().duration_ms, 8 * 60_000);
     }
 }

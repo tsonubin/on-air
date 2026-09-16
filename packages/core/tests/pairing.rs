@@ -236,3 +236,39 @@ async fn websocket_style_query_token_authorizes_remote_clients() {
         .unwrap();
     assert_eq!(allowed.status(), StatusCode::OK);
 }
+
+#[test]
+fn paired_phone_survives_desktop_restart_without_saving_bearer_token() {
+    let dir = std::env::temp_dir().join(format!(
+        "onair-pairing-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let path = dir.join("settings.json");
+    let state = on_air_core::state::CoreState::new_persistent(&path);
+    let token = {
+        let mut pairing = state.pairing.lock().unwrap();
+        let pin = pairing.pin().to_string();
+        pairing.verify(&pin).unwrap()
+    };
+    drop(state);
+    let restarted = on_air_core::state::CoreState::new_persistent(&path);
+    assert!(restarted.pairing.lock().unwrap().token_valid(&token));
+    let persisted = std::fs::read_to_string(dir.join("paired-remotes.json")).unwrap();
+    assert!(!persisted.contains(&token));
+    drop(restarted);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn pairing_reports_storage_failure_instead_of_promising_a_saved_pairing() {
+    let path = std::env::temp_dir().join(format!("onair-blocked-{}", std::process::id()));
+    std::fs::write(&path, b"not a directory").unwrap();
+    let mut pairing = PairingState::persistent(path.join("paired-remotes.json"));
+    let pin = pairing.pin().to_string();
+    assert_eq!(pairing.verify(&pin), Err(VerifyError::StorageUnavailable));
+    std::fs::remove_file(path).unwrap();
+}

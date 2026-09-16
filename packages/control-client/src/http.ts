@@ -355,6 +355,22 @@ export async function connectBluetooth(
   );
 }
 
+export async function openBluetoothSettings(
+  base: string,
+  token?: string,
+  fetchImpl?: FetchLike,
+): Promise<void> {
+  await request(
+    base,
+    "/api/bluetooth/settings",
+    {
+      method: "POST",
+      headers: authHeaders(token),
+    },
+    fetchImpl,
+  );
+}
+
 export function wsUrl(base: string, token?: string): string {
   const ws = base.replace(/^http/i, "ws");
   if (!token) return `${ws}/api/ws`;
@@ -374,6 +390,7 @@ export async function controlCd(
   action: CdAction,
   token?: string,
   fetchImpl?: FetchLike,
+  extra?: { position_ms?: number; track?: number },
 ): Promise<CdStatus> {
   return request<CdStatus>(
     base,
@@ -381,7 +398,7 @@ export async function controlCd(
     {
       method: "POST",
       headers: authHeaders(token, true),
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...extra }),
     },
     fetchImpl,
   );

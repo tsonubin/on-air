@@ -8,6 +8,25 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub fn eject() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::eject()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::eject()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows::eject()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err("eject is not supported".into())
+    }
+}
+
 pub fn probe_audio_cd() -> Option<Arc<dyn CdMedium>> {
     #[cfg(target_os = "macos")]
     {
@@ -325,6 +344,32 @@ mod macos {
         }
         None
     }
+
+    pub fn eject() -> Result<(), String> {
+        let list = Command::new("diskutil")
+            .args(["list"])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !list.status.success() {
+            return Err("diskutil list failed".into());
+        }
+        let ids = parse_diskutil_optical_ids(&String::from_utf8_lossy(&list.stdout));
+        if ids.is_empty() {
+            return Err("no optical drive".into());
+        }
+        let mut last = String::from("diskutil eject failed");
+        for id in ids {
+            let status = Command::new("diskutil")
+                .args(["eject", &id])
+                .status()
+                .map_err(|error| error.to_string())?;
+            if status.success() {
+                return Ok(());
+            }
+            last = format!("diskutil eject {id} failed");
+        }
+        Err(last)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -531,6 +576,32 @@ mod linux {
         }
         None
     }
+
+    pub fn eject() -> Result<(), String> {
+        const CDROMEJECT: libc::c_ulong = 0x5309;
+        for path in [
+            PathBuf::from("/dev/cdrom"),
+            PathBuf::from("/dev/sr0"),
+            PathBuf::from("/dev/sr1"),
+        ] {
+            if !path.exists() {
+                continue;
+            }
+            use std::os::unix::fs::OpenOptionsExt;
+            let Ok(file) = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&path)
+            else {
+                continue;
+            };
+            let rc = unsafe { libc::ioctl(file.as_raw_fd(), CDROMEJECT) };
+            if rc >= 0 {
+                return Ok(());
+            }
+        }
+        Err("CDROMEJECT failed".into())
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -733,6 +804,49 @@ mod windows {
             }
         }
         None
+    }
+
+    pub fn eject() -> Result<(), String> {
+        const IOCTL_STORAGE_EJECT_MEDIA: u32 = 0x002D_4808;
+        let mut buffer = vec![0u16; 256];
+        let len = unsafe { GetLogicalDriveStringsW(buffer.len() as u32, buffer.as_mut_ptr()) };
+        if len == 0 {
+            return Err("no drives".into());
+        }
+        let joined = String::from_utf16_lossy(&buffer[..len as usize]);
+        for root in joined.split('\0').filter(|s| !s.is_empty()) {
+            let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+            let kind = unsafe { GetDriveTypeW(wide.as_ptr()) };
+            if kind != DRIVE_CDROM {
+                continue;
+            }
+            let letter = root
+                .chars()
+                .next()
+                .ok_or_else(|| "drive letter".to_string())?
+                .to_ascii_uppercase()
+                .to_string();
+            let Some(handle) = open_drive(&letter) else {
+                continue;
+            };
+            let mut returned = 0u32;
+            let ok = unsafe {
+                DeviceIoControl(
+                    handle.as_raw_handle(),
+                    IOCTL_STORAGE_EJECT_MEDIA,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                    &mut returned,
+                    ptr::null_mut(),
+                )
+            };
+            if ok != 0 {
+                return Ok(());
+            }
+        }
+        Err("IOCTL_STORAGE_EJECT_MEDIA failed".into())
     }
 }
 

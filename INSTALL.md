@@ -265,8 +265,9 @@ sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
 ## Mobile remote
 
 The iOS/Android app is an **Expo** LAN remote (discovery + PIN pairing + the
-same mixer controls as the Tauri UI). It is not shipped through App Store /
-Play in v0.1.0. From this tree, with the desktop already open:
+same mixer controls as the Tauri UI). Internal iOS TestFlight uses
+`apps/mobile/scripts/publish-testflight.sh`. From this tree, with the desktop
+already open:
 
 ```bash
 pnpm --filter mobile start          # Expo Go / simulators

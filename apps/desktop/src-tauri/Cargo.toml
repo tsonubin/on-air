@@ -36,3 +36,7 @@ objc2-app-kit = { version = "0.3.2", features = [
 ] }
 objc2-av-kit = { version = "0.3.2", features = ["AVRoutePickerView"] }
 
+
+[[test]]
+name = "airplay_window_lifecycle"
+harness = false

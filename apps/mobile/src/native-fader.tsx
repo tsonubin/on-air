@@ -11,6 +11,8 @@ export function NativeFader(props: {
   testId: string;
   disabled?: boolean;
   hideHeader?: boolean;
+  unit?: string;
+  signed?: boolean;
   onChange: (value: number) => void;
 }) {
   const quantum = props.step ?? 1;
@@ -19,13 +21,11 @@ export function NativeFader(props: {
     return Math.round(bounded / quantum) * quantum;
   };
   const [draft, setDraft] = useState(props.value);
-  const draftRef = useRef(props.value);
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChange = useRef(props.onChange);
   onChange.current = props.onChange;
 
   useEffect(() => {
-    draftRef.current = props.value;
     setDraft(props.value);
   }, [props.value]);
   useEffect(
@@ -35,14 +35,9 @@ export function NativeFader(props: {
     [],
   );
 
-  const updateDraft = (nextValue: number) => {
-    const next = clamp(nextValue);
-    draftRef.current = next;
-    setDraft(next);
-    return next;
-  };
   const preview = (nextValue: number) => {
-    const next = updateDraft(nextValue);
+    const next = clamp(nextValue);
+    setDraft(next);
     if (commitTimer.current) clearTimeout(commitTimer.current);
     commitTimer.current = setTimeout(() => onChange.current(next), theme.motion.controlCommitMs);
   };
@@ -51,10 +46,10 @@ export function NativeFader(props: {
     <Column spacing={theme.spacing.sm} testID={props.testId}>
       {!props.hideHeader && (
         <Row alignment="center" spacing={theme.spacing.sm}>
-          <Text textStyle={{ color: "#f5f5f7", fontWeight: "600" }}>{props.label}</Text>
+          <Text textStyle={{ fontWeight: "600" }}>{props.label}</Text>
           <Spacer />
-          <Text textStyle={{ color: "#f5f5f7", fontWeight: "600" }}>
-            {Number.isInteger(draft) ? String(draft) : draft.toFixed(1)}
+          <Text textStyle={{ fontWeight: "600" }}>
+            {`${props.signed && draft > 0 ? "+" : ""}${Number.isInteger(draft) ? String(draft) : draft.toFixed(1)}${props.unit ? ` ${props.unit}` : ""}`}
           </Text>
         </Row>
       )}
@@ -62,6 +57,7 @@ export function NativeFader(props: {
         min={props.min}
         max={props.max}
         value={draft}
+        step={quantum}
         disabled={props.disabled}
         onValueChange={preview}
         testID={`${props.testId}-native`}

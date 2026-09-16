@@ -38,6 +38,8 @@ pub enum WsEvent {
         title: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         album: Option<String>,
+        position_ms: u64,
+        duration_ms: u64,
     },
 }
 

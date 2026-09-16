@@ -4,7 +4,8 @@ use axum::routing::put;
 use axum::Router;
 use on_air_core::sender::airplay::AirPlaySender;
 use on_air_core::sender::bluetooth::{
-    BluetoothAdapter, BluetoothDevice, BluetoothSender, MockBluetoothAdapter, RecordingPcmSink,
+    BluetoothAdapter, BluetoothDevice, BluetoothPlaybackConfig, BluetoothSender,
+    MockBluetoothAdapter, RecordingPcmSink,
 };
 use on_air_core::sender::sonos::discovery::SonosDevice;
 use on_air_core::sender::sonos::SonosSender;
@@ -63,6 +64,7 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
         name: "BT".into(),
         paired: true,
         connected: false,
+        audio_endpoint: Some("bt-1".into()),
     }]));
 
     let state = CoreState::new();
@@ -92,11 +94,15 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
     let sink = std::sync::Arc::new(RecordingPcmSink::default());
     state
         .activate_sender(Box::new(BluetoothSender::new(
-            "bt-1",
-            "BT",
+            adapter.list()[0].clone(),
             adapter.clone(),
             state.audio_tx.clone(),
-            sink,
+            Arc::new(sink),
+            BluetoothPlaybackConfig {
+                pipeline_hz: 44_100,
+                output_hz: 44_100,
+                volume: 100,
+            },
         )))
         .await
         .unwrap();

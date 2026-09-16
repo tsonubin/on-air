@@ -6,7 +6,7 @@ use crate::sender::bluetooth::{
     SystemBluetoothAdapter,
 };
 use crate::sender::sonos::discovery::{DeviceRegistry, SonosDevice};
-use crate::sender::{AudioSender, SenderError};
+use crate::sender::{AudioSender, OutputFormat, SenderError};
 use crate::settings::{SavedSettings, SettingsPersistence};
 use bytes::Bytes;
 use std::net::{IpAddr, Ipv4Addr};
@@ -60,6 +60,8 @@ pub struct CoreState {
     pub require_auth: bool,
     pub pairing: Arc<StdMutex<PairingState>>,
     pub active_output: Arc<StdMutex<Option<ActiveOutput>>>,
+    /// Last negotiated format, published without holding the live sender lock.
+    pub(crate) active_output_format: Arc<StdMutex<Option<(ActiveOutput, OutputFormat)>>>,
     pub output_volume: Arc<AtomicU8>,
     /// Controls whether remote clients may start or configure audio work. The
     /// lightweight HTTP and discovery services remain online while disabled.
@@ -136,7 +138,10 @@ impl CoreState {
                 SavedSettings::default()
             }
         };
-        Self::from_saved_settings(saved, Some(SettingsPersistence::new(path)))
+        let pairing = PairingState::persistent(path.with_file_name("paired-remotes.json"));
+        let mut state = Self::from_saved_settings(saved, Some(SettingsPersistence::new(path)));
+        state.pairing = Arc::new(StdMutex::new(pairing));
+        state
     }
 
     fn from_saved_settings(
@@ -169,6 +174,7 @@ impl CoreState {
             require_auth: false,
             pairing: Arc::new(StdMutex::new(PairingState::new())),
             active_output: Arc::new(StdMutex::new(None)),
+            active_output_format: Arc::new(StdMutex::new(None)),
             output_volume: Arc::new(AtomicU8::new(saved_settings.volume)),
             service_enabled: Arc::new(AtomicBool::new(saved_settings.service_enabled)),
             stream_generation: Arc::new(AtomicU64::new(0)),
@@ -198,6 +204,10 @@ impl CoreState {
 
     pub(crate) fn remember_input(&self, name: String) {
         self.update_saved_settings(|saved| saved.active_input = Some(name));
+    }
+
+    pub(crate) fn clear_saved_input(&self) {
+        self.update_saved_settings(|saved| saved.active_input = None);
     }
 
     pub(crate) fn remember_output(&self, output: ActiveOutput) {
@@ -342,12 +352,22 @@ impl CoreState {
             member_count: 1,
             address: String::new(),
         }];
-        state.bluetooth = Arc::new(MockBluetoothAdapter::with_devices(vec![BluetoothDevice {
-            id: "bt-speaker".into(),
-            name: "Mock Bluetooth Speaker".into(),
-            paired: true,
-            connected: false,
-        }]));
+        state.bluetooth = Arc::new(MockBluetoothAdapter::with_devices(vec![
+            BluetoothDevice {
+                id: "bt-speaker".into(),
+                name: "Mock Bluetooth Speaker".into(),
+                paired: true,
+                connected: false,
+                audio_endpoint: Some("bt-speaker".into()),
+            },
+            BluetoothDevice {
+                id: "bt-unpaired".into(),
+                name: "New Bluetooth Speaker".into(),
+                paired: false,
+                connected: false,
+                audio_endpoint: None,
+            },
+        ]));
         let sonos = SonosDevice::discovered(
             "uuid:mock-sonos",
             "http://127.0.0.1:1400/xml/device_description.xml",
@@ -440,6 +460,15 @@ impl CoreState {
         .await;
     }
 
+    fn publish_output_format(&self, sender: &dyn AudioSender, identity: &ActiveOutput) {
+        let format = sender.output_format();
+        if let Some(format) = &format {
+            *self.output_sample_rate_hz.lock().unwrap() = format.sample_rate_hz;
+        }
+        *self.active_output_format.lock().unwrap() =
+            format.map(|format| (identity.clone(), format));
+    }
+
     pub async fn activate_sender_as(
         &self,
         new_sender: Box<dyn AudioSender>,
@@ -471,6 +500,7 @@ impl CoreState {
             });
             self.invalidate_radio_streams();
         }
+        *self.active_output_format.lock().unwrap() = None;
         let mut new_sender = new_sender;
         let identity = identity.unwrap_or_else(|| ActiveOutput {
             transport: new_sender.transport().to_string(),
@@ -484,10 +514,32 @@ impl CoreState {
             *self.active_output.lock().unwrap() = None;
             let cleanup_error = new_sender.stop().await.err();
             self.invalidate_radio_streams();
+            if let Some(cleanup) = cleanup_error {
+                // A receiver may still be playing after a partial start. Keep
+                // ownership for another stop attempt; never resume a second one.
+                *self.active_output.lock().unwrap() = Some(identity);
+                *guard = Some(new_sender);
+                return Err(SenderError(format!(
+                    "{e}; cleanup after failed start also failed: {cleanup}"
+                )));
+            }
             if let Some(mut previous) = previous_sender {
                 *self.active_output.lock().unwrap() = previous_identity.clone();
-                if previous.start().await.is_ok() {
+                if let Err(restart) = previous.start().await {
+                    if let Err(cleanup) = previous.stop().await {
+                        *guard = Some(previous);
+                        return Err(SenderError(format!(
+                            "{e}; restoring previous output failed: {restart}; cleanup failed: {cleanup}"
+                        )));
+                    }
+                    *self.active_output.lock().unwrap() = None;
+                    self.restore_local_sink().await;
+                    return Err(SenderError(format!(
+                        "{e}; restoring previous output failed: {restart}"
+                    )));
+                } else {
                     if let Some(previous_identity) = previous_identity.as_ref() {
+                        self.publish_output_format(previous.as_ref(), previous_identity);
                         self.apply_local_sink_for(previous_identity).await;
                         let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
                             transport: previous_identity.transport.clone(),
@@ -496,20 +548,13 @@ impl CoreState {
                         });
                     }
                     *guard = Some(previous);
-                } else {
-                    *self.active_output.lock().unwrap() = None;
-                    self.restore_local_sink().await;
                 }
             } else {
                 self.restore_local_sink().await;
             }
-            return match cleanup_error {
-                Some(cleanup) => Err(SenderError(format!(
-                    "{e}; cleanup after failed start also failed: {cleanup}"
-                ))),
-                None => Err(e),
-            };
+            return Err(e);
         }
+        self.publish_output_format(new_sender.as_ref(), &identity);
         self.apply_local_sink_for(&identity).await;
         let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
             transport: identity.transport.clone(),
@@ -538,6 +583,7 @@ impl CoreState {
                 return Err(error);
             }
             self.invalidate_radio_streams();
+            *self.active_output_format.lock().unwrap() = None;
             self.restore_local_sink().await;
             let _ = self.ws_tx.send(WsEvent::OutputStateChanged {
                 transport,

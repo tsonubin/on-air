@@ -86,6 +86,10 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/bluetooth/connect",
             post(api::bluetooth::connect_device),
         )
+        .route(
+            "/api/bluetooth/settings",
+            post(api::bluetooth::open_settings),
+        )
         .layer(
             CorsLayer::new()
                 .allow_origin(allowed_origins)

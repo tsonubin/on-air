@@ -503,7 +503,7 @@ export function MixerHome({
                 <RouteRow
                   icon={icons.speaker}
                   title={output}
-                  subtitle={activeOutput ? "Connected" : "Not connected"}
+                  subtitle={activeOutput ? "Selected speaker" : "No speaker selected"}
                   onPress={onChangeOutput}
                   testID="output-row"
                   dense={shortWide}
