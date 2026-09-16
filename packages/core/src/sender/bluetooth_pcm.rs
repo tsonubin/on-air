@@ -389,9 +389,9 @@ fn scale_l16(pcm: &mut [u8], volume: u8) {
     if volume == 100 {
         return;
     }
-    for sample in pcm.chunks_exact_mut(2) {
-        let value = i32::from(i16::from_le_bytes([sample[0], sample[1]]));
-        sample.copy_from_slice(&((value * i32::from(volume) / 100) as i16).to_le_bytes());
+    for sample in pcm.as_chunks_mut::<2>().0 {
+        let value = i32::from(i16::from_le_bytes(*sample));
+        *sample = ((value * i32::from(volume) / 100) as i16).to_le_bytes();
     }
 }
 
