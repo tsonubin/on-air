@@ -7,10 +7,8 @@ use super::{CD_SAMPLE_RATE_HZ, STEREO_FRAMES_PER_SECTOR};
 use std::fs;
 #[cfg(target_os = "macos")]
 use std::io::{Read, Seek, SeekFrom};
-#[cfg(target_os = "macos")]
-use std::path::Path;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub fn eject() -> Result<(), String> {

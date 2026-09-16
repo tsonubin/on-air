@@ -522,15 +522,17 @@ mod macos {
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use super::*;
-    use windows::Win32::Media::Audio::{
-        eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
-        DEVICE_STATE_UNPLUGGED,
+    use super::{looks_like_windows_bluetooth_id, BluetoothDevice, BluetoothEndpoint, SenderError};
+    use ::windows::core::{BSTR, GUID};
+    use ::windows::Win32::Media::Audio::{
+        eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE,
+        DEVICE_STATE_ACTIVE, DEVICE_STATE_UNPLUGGED,
     };
-    use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED, STGM_READ,
+    use ::windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
+        STGM_READ,
     };
-    use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
+    use ::windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
 
     fn init_com() {
         unsafe {
@@ -544,20 +546,22 @@ mod windows {
     }
 
     fn device_id(device: &IMMDevice) -> Option<String> {
-        unsafe { device.GetId() }
-            .ok()
-            .and_then(|pw| pw.to_string().ok())
+        let id = unsafe { device.GetId() }.ok()?;
+        // GetId allocates a null-terminated string with the COM task allocator.
+        let result = unsafe { id.to_string() }.ok();
+        unsafe { CoTaskMemFree(Some(id.0.cast())) };
+        result
     }
 
     fn device_name(device: &IMMDevice) -> Option<String> {
         let store = unsafe { device.OpenPropertyStore(STGM_READ) }.ok()?;
         // PKEY_Device_FriendlyName
         let key = PROPERTYKEY {
-            fmtid: windows::core::GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
+            fmtid: GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0),
             pid: 14,
         };
         let value = unsafe { store.GetValue(&key) }.ok()?;
-        value.to_string().ok()
+        Some(BSTR::try_from(&value).ok()?.to_string())
     }
 
     pub fn audio_devices() -> Vec<BluetoothDevice> {
@@ -565,7 +569,10 @@ mod windows {
             return Vec::new();
         };
         let Ok(collection) = (unsafe {
-            enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE | DEVICE_STATE_UNPLUGGED)
+            enumerator.EnumAudioEndpoints(
+                eRender,
+                DEVICE_STATE(DEVICE_STATE_ACTIVE.0 | DEVICE_STATE_UNPLUGGED.0),
+            )
         }) else {
             return Vec::new();
         };
