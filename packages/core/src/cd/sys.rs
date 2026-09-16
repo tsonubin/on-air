@@ -1,11 +1,16 @@
 //! Platform optical-drive probe. Returns a CDDA medium when an audio disc is loaded.
 
-use super::{
-    CdMedium, CdToc, CdTrack, BYTES_PER_SECTOR, CD_SAMPLE_RATE_HZ, STEREO_FRAMES_PER_SECTOR,
-};
+use super::{CdMedium, CdToc, CdTrack, BYTES_PER_SECTOR};
+#[cfg(target_os = "macos")]
+use super::{CD_SAMPLE_RATE_HZ, STEREO_FRAMES_PER_SECTOR};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::path::Path;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::path::PathBuf;
 use std::sync::Arc;
 
 pub fn eject() -> Result<(), String> {
@@ -46,6 +51,7 @@ pub fn probe_audio_cd() -> Option<Arc<dyn CdMedium>> {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone)]
 struct AiffTrackFile {
     track: CdTrack,
@@ -53,11 +59,13 @@ struct AiffTrackFile {
     data_offset: u64,
 }
 
+#[cfg(target_os = "macos")]
 struct AiffCd {
     toc: CdToc,
     files: Vec<AiffTrackFile>,
 }
 
+#[cfg(target_os = "macos")]
 impl CdMedium for AiffCd {
     fn toc(&self) -> CdToc {
         self.toc.clone()
@@ -100,6 +108,7 @@ impl CdMedium for AiffCd {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AiffInfo {
     pub channels: u16,
@@ -110,6 +119,7 @@ pub(crate) struct AiffInfo {
     pub data_bytes: u64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_aiff_info(bytes: &[u8]) -> Option<AiffInfo> {
     if bytes.len() < 12 || &bytes[0..4] != b"FORM" {
         return None;
@@ -152,6 +162,7 @@ pub(crate) fn parse_aiff_info(bytes: &[u8]) -> Option<AiffInfo> {
     })
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn extended80_to_hz(bytes: &[u8]) -> Option<u32> {
     if bytes.len() < 10 {
         return None;
@@ -166,6 +177,7 @@ fn extended80_to_hz(bytes: &[u8]) -> Option<u32> {
     Some(hz.round() as u32)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn title_from_aiff_name(name: &str) -> Option<String> {
     let stem = name
         .rsplit_once('.')
@@ -182,6 +194,7 @@ fn title_from_aiff_name(name: &str) -> Option<String> {
     Some(stripped.to_string())
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn aiff_cd_from_dir(dir: &Path, album: Option<String>) -> Option<Arc<dyn CdMedium>> {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .ok()?
@@ -244,6 +257,7 @@ pub(crate) fn aiff_cd_from_dir(dir: &Path, album: Option<String>) -> Option<Arc<
     }))
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_diskutil_optical_ids(list: &str) -> Vec<String> {
     let mut ids = Vec::new();
     let mut current: Option<String> = None;
@@ -280,6 +294,7 @@ pub(crate) fn parse_diskutil_optical_ids(list: &str) -> Vec<String> {
     ids
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_diskutil_mount_point(info: &str) -> Option<String> {
     for line in info.lines() {
         let trimmed = line.trim();
@@ -294,6 +309,7 @@ pub(crate) fn parse_diskutil_mount_point(info: &str) -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_diskutil_volume_name(info: &str) -> Option<String> {
     for line in info.lines() {
         let trimmed = line.trim();
