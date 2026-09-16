@@ -16,13 +16,14 @@
       "supportsTablet": true,
       "bundleIdentifier": "app.onair.remote",
       "buildNumber": "4",
-      "icon": "./assets/icon.png",
+      "icon": "./assets/AppIcon.icon",
       "config": {
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "on-air remote finds the desktop mixer on your LAN.",
-        "NSBonjourServices": ["_on-air._tcp."]
+        "NSBonjourServices": ["_on-air._tcp."],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

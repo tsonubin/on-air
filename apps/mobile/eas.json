@@ -14,7 +14,8 @@
       "distribution": "store",
       "ios": {
         "resourceClass": "m-medium"
-      }
+      },
+      "autoIncrement": true
     }
   },
   "submit": {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -65,5 +65,51 @@ test("iOS native project autolinks Expo and declares LAN discovery access", () =
   assert.match(iosInfo, /<key>NSLocalNetworkUsageDescription<\/key>/);
   assert.match(iosInfo, /<key>NSBonjourServices<\/key>/);
   assert.match(iosInfo, /<string>_on-air\._tcp\.<\/string>/);
+  assert.match(iosInfo, /<key>ITSAppUsesNonExemptEncryption<\/key>/);
   assert.match(iosProject, /IPHONEOS_DEPLOYMENT_TARGET = 16\.4;/);
+  assert.match(iosProject, /lastKnownFileType = folder.iconcomposer/);
+  assert.match(iosProject, /AppIcon.icon in Resources/);
+  assert.match(iosProject, /ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;/);
+  const nativeBuilds = [...iosProject.matchAll(/CURRENT_PROJECT_VERSION = (\d+);/g)];
+  assert.ok(nativeBuilds.length > 0);
+  for (const build of nativeBuilds) assert.equal(build[1], appConfig.ios.buildNumber);
+  assert.equal(appConfig.ios.icon, "./assets/AppIcon.icon");
+  assert.equal(appConfig.icon, "./assets/icon.png");
+  assert.match(appConfig.ios.buildNumber, /^\d+$/);
+  assert.equal(appConfig.ios.infoPlist.ITSAppUsesNonExemptEncryption, false);
+  for (const relativePath of [
+    "apps/mobile/assets/icon.png",
+    "apps/mobile/assets/AppIcon.icon/icon.json",
+    "apps/mobile/assets/AppIcon.icon/Assets/live-dial.png",
+    "apps/mobile/ios/OnAirMobile/AppIcon.icon/icon.json",
+    "apps/mobile/ios/OnAirMobile/AppIcon.icon/Assets/live-dial.png",
+    "apps/mobile/ios/OnAirMobile/Images.xcassets/AppIcon.appiconset/AppIcon.png",
+  ]) {
+    assert.ok(existsSync(path.join(ROOT, relativePath)), relativePath);
+  }
+  const marketingCatalog = JSON.parse(
+    read("apps/mobile/ios/OnAirMobile/Images.xcassets/AppIcon.appiconset/Contents.json"),
+  );
+  assert.ok(
+    marketingCatalog.images.some(
+      (image) => image.idiom === "universal" && image.filename === "AppIcon.png",
+    ),
+  );
+});
+
+test("Icon Composer packages retain the shared Live Dial artwork", () => {
+  const icon = readFileSync(path.join(ROOT, "apps/mobile/assets/icon.png"));
+  const packages = ["apps/mobile/assets/AppIcon.icon", "apps/mobile/ios/OnAirMobile/AppIcon.icon"];
+  const specs = packages.map((folder) => JSON.parse(read(`${folder}/icon.json`)));
+  assert.deepEqual(specs[0], specs[1]);
+  for (const folder of packages) {
+    for (const group of specs[0].groups) {
+      for (const layer of group.layers) {
+        assert.deepEqual(
+          readFileSync(path.join(ROOT, folder, "Assets", layer["image-name"])),
+          icon,
+        );
+      }
+    }
+  }
 });

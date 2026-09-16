@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!apps/mobile/ios", "!apps/mobile/android", "!apps/desktop/src-tauri"]
+    "includes": [
+      "**",
+      "!apps/mobile/ios",
+      "!apps/mobile/android",
+      "!apps/desktop/src-tauri",
+      "!apps/mobile/assets/AppIcon.icon"
+    ]
   },
   "formatter": {
     "enabled": true,
