@@ -7,6 +7,7 @@ import {
   fetchStatus,
   getVolume,
   goldenPathSonos,
+  openBluetoothSettings,
   pairAirplay,
   pairBluetooth,
   prettyInput,
@@ -178,6 +179,14 @@ test("pairAirplay and pairBluetooth post the device handshake", async () => {
       url: "http://10.0.0.2:47990/api/bluetooth/pair",
       method: "POST",
       body: JSON.stringify({ id: "bt-speaker" }),
+    }),
+  );
+  await openBluetoothSettings(
+    "http://10.0.0.2:47990",
+    "tok",
+    recordFetch({
+      url: "http://10.0.0.2:47990/api/bluetooth/settings",
+      method: "POST",
     }),
   );
 });

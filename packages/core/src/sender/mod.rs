@@ -17,6 +17,12 @@ impl std::fmt::Display for SenderError {
 
 impl std::error::Error for SenderError {}
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputFormat {
+    pub sample_rate_hz: u32,
+    pub supported_hz: Vec<u32>,
+}
+
 #[async_trait::async_trait]
 pub trait AudioSender: Send + Sync {
     async fn start(&mut self) -> Result<(), SenderError>;
@@ -24,6 +30,10 @@ pub trait AudioSender: Send + Sync {
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError>;
     fn name(&self) -> &str;
     fn transport(&self) -> &'static str;
+    /// Actual format of a live OS sink, discovered when playback starts.
+    fn output_format(&self) -> Option<OutputFormat> {
+        None
+    }
 }
 
 /// Test/CI fake — logs every call instead of touching real hardware or network.

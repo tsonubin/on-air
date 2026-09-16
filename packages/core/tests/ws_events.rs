@@ -69,6 +69,8 @@ fn cd_state_event_is_tagged_json() {
         track_count: 12,
         title: Some("So What".into()),
         album: Some("Kind of Blue".into()),
+        position_ms: 12_000,
+        duration_ms: 180_000,
     };
     let json = serde_json::to_value(event).unwrap();
     assert_eq!(json["type"], "CdStateChanged");

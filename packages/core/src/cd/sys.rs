@@ -1,12 +1,34 @@
 //! Platform optical-drive probe. Returns a CDDA medium when an audio disc is loaded.
 
-use super::{
-    CdMedium, CdToc, CdTrack, BYTES_PER_SECTOR, CD_SAMPLE_RATE_HZ, STEREO_FRAMES_PER_SECTOR,
-};
+use super::{CdMedium, CdToc, CdTrack, BYTES_PER_SECTOR};
+#[cfg(target_os = "macos")]
+use super::{CD_SAMPLE_RATE_HZ, STEREO_FRAMES_PER_SECTOR};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::io::{Read, Seek, SeekFrom};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+pub fn eject() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::eject()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        linux::eject()
+    }
+    #[cfg(target_os = "windows")]
+    {
+        windows::eject()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err("eject is not supported".into())
+    }
+}
 
 pub fn probe_audio_cd() -> Option<Arc<dyn CdMedium>> {
     #[cfg(target_os = "macos")]
@@ -27,6 +49,7 @@ pub fn probe_audio_cd() -> Option<Arc<dyn CdMedium>> {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Debug, Clone)]
 struct AiffTrackFile {
     track: CdTrack,
@@ -34,11 +57,13 @@ struct AiffTrackFile {
     data_offset: u64,
 }
 
+#[cfg(target_os = "macos")]
 struct AiffCd {
     toc: CdToc,
     files: Vec<AiffTrackFile>,
 }
 
+#[cfg(target_os = "macos")]
 impl CdMedium for AiffCd {
     fn toc(&self) -> CdToc {
         self.toc.clone()
@@ -81,6 +106,7 @@ impl CdMedium for AiffCd {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AiffInfo {
     pub channels: u16,
@@ -91,6 +117,7 @@ pub(crate) struct AiffInfo {
     pub data_bytes: u64,
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_aiff_info(bytes: &[u8]) -> Option<AiffInfo> {
     if bytes.len() < 12 || &bytes[0..4] != b"FORM" {
         return None;
@@ -133,6 +160,7 @@ pub(crate) fn parse_aiff_info(bytes: &[u8]) -> Option<AiffInfo> {
     })
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn extended80_to_hz(bytes: &[u8]) -> Option<u32> {
     if bytes.len() < 10 {
         return None;
@@ -147,6 +175,7 @@ fn extended80_to_hz(bytes: &[u8]) -> Option<u32> {
     Some(hz.round() as u32)
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn title_from_aiff_name(name: &str) -> Option<String> {
     let stem = name
         .rsplit_once('.')
@@ -163,6 +192,7 @@ fn title_from_aiff_name(name: &str) -> Option<String> {
     Some(stripped.to_string())
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn aiff_cd_from_dir(dir: &Path, album: Option<String>) -> Option<Arc<dyn CdMedium>> {
     let mut files: Vec<PathBuf> = fs::read_dir(dir)
         .ok()?
@@ -225,6 +255,7 @@ pub(crate) fn aiff_cd_from_dir(dir: &Path, album: Option<String>) -> Option<Arc<
     }))
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_diskutil_optical_ids(list: &str) -> Vec<String> {
     let mut ids = Vec::new();
     let mut current: Option<String> = None;
@@ -261,6 +292,7 @@ pub(crate) fn parse_diskutil_optical_ids(list: &str) -> Vec<String> {
     ids
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_diskutil_mount_point(info: &str) -> Option<String> {
     for line in info.lines() {
         let trimmed = line.trim();
@@ -275,6 +307,7 @@ pub(crate) fn parse_diskutil_mount_point(info: &str) -> Option<String> {
     None
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn parse_diskutil_volume_name(info: &str) -> Option<String> {
     for line in info.lines() {
         let trimmed = line.trim();
@@ -324,6 +357,32 @@ mod macos {
             }
         }
         None
+    }
+
+    pub fn eject() -> Result<(), String> {
+        let list = Command::new("diskutil")
+            .args(["list"])
+            .output()
+            .map_err(|error| error.to_string())?;
+        if !list.status.success() {
+            return Err("diskutil list failed".into());
+        }
+        let ids = parse_diskutil_optical_ids(&String::from_utf8_lossy(&list.stdout));
+        if ids.is_empty() {
+            return Err("no optical drive".into());
+        }
+        let mut last = String::from("diskutil eject failed");
+        for id in ids {
+            let status = Command::new("diskutil")
+                .args(["eject", &id])
+                .status()
+                .map_err(|error| error.to_string())?;
+            if status.success() {
+                return Ok(());
+            }
+            last = format!("diskutil eject {id} failed");
+        }
+        Err(last)
     }
 }
 
@@ -531,6 +590,32 @@ mod linux {
         }
         None
     }
+
+    pub fn eject() -> Result<(), String> {
+        const CDROMEJECT: libc::c_ulong = 0x5309;
+        for path in [
+            PathBuf::from("/dev/cdrom"),
+            PathBuf::from("/dev/sr0"),
+            PathBuf::from("/dev/sr1"),
+        ] {
+            if !path.exists() {
+                continue;
+            }
+            use std::os::unix::fs::OpenOptionsExt;
+            let Ok(file) = OpenOptions::new()
+                .read(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(&path)
+            else {
+                continue;
+            };
+            let rc = unsafe { libc::ioctl(file.as_raw_fd(), CDROMEJECT) };
+            if rc >= 0 {
+                return Ok(());
+            }
+        }
+        Err("CDROMEJECT failed".into())
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -733,6 +818,49 @@ mod windows {
             }
         }
         None
+    }
+
+    pub fn eject() -> Result<(), String> {
+        const IOCTL_STORAGE_EJECT_MEDIA: u32 = 0x002D_4808;
+        let mut buffer = vec![0u16; 256];
+        let len = unsafe { GetLogicalDriveStringsW(buffer.len() as u32, buffer.as_mut_ptr()) };
+        if len == 0 {
+            return Err("no drives".into());
+        }
+        let joined = String::from_utf16_lossy(&buffer[..len as usize]);
+        for root in joined.split('\0').filter(|s| !s.is_empty()) {
+            let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+            let kind = unsafe { GetDriveTypeW(wide.as_ptr()) };
+            if kind != DRIVE_CDROM {
+                continue;
+            }
+            let letter = root
+                .chars()
+                .next()
+                .ok_or_else(|| "drive letter".to_string())?
+                .to_ascii_uppercase()
+                .to_string();
+            let Some(handle) = open_drive(&letter) else {
+                continue;
+            };
+            let mut returned = 0u32;
+            let ok = unsafe {
+                DeviceIoControl(
+                    handle.as_raw_handle(),
+                    IOCTL_STORAGE_EJECT_MEDIA,
+                    ptr::null_mut(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                    &mut returned,
+                    ptr::null_mut(),
+                )
+            };
+            if ok != 0 {
+                return Ok(());
+            }
+        }
+        Err("IOCTL_STORAGE_EJECT_MEDIA failed".into())
     }
 }
 

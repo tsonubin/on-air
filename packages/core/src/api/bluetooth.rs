@@ -70,3 +70,16 @@ pub async fn connect_device(
     state.invalidate_bluetooth_cache().await;
     Ok(StatusCode::NO_CONTENT)
 }
+
+pub async fn open_settings(
+    Paired: Paired,
+    State(state): State<CoreState>,
+) -> Result<StatusCode, StatusCode> {
+    let adapter = state.bluetooth.clone();
+    let opened = tokio::task::spawn_blocking(move || adapter.open_settings())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    opened.map_err(|_| StatusCode::BAD_GATEWAY)?;
+    state.invalidate_bluetooth_cache().await;
+    Ok(StatusCode::NO_CONTENT)
+}

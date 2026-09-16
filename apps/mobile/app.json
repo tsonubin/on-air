@@ -4,6 +4,7 @@
     "slug": "on-air-remote",
     "version": "0.1.0",
     "orientation": "default",
+    "icon": "./assets/icon.png",
     "scheme": "onair",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
@@ -14,16 +15,22 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.onair.remote",
+      "buildNumber": "4",
+      "icon": "./assets/AppIcon.icon",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "on-air remote finds the desktop mixer on your LAN.",
-        "NSBonjourServices": ["_on-air._tcp."]
+        "NSBonjourServices": ["_on-air._tcp."],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "package": "app.onair.remote",
       "permissions": ["ACCESS_NETWORK_STATE", "CHANGE_WIFI_MULTICAST_STATE", "INTERNET"]
     },
-    "plugins": ["expo-secure-store"],
+    "plugins": ["expo-secure-store", "expo-router"],
     "extra": {
       "eas": {
         "projectId": "6d6a9d12-1cf3-4458-8e5b-9dd27e357c98"

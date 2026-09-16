@@ -1,5 +1,8 @@
+use sha2::{Digest, Sha256};
 use std::collections::VecDeque;
 use std::fmt::Write;
+use std::io::{self, Write as IoWrite};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -12,11 +15,13 @@ const MAX_PAIRED_TOKENS: usize = 16;
 pub enum VerifyError {
     InvalidPin,
     RateLimited,
+    StorageUnavailable,
 }
 
 pub struct PairingState {
     pin: String,
-    tokens: VecDeque<String>,
+    tokens: VecDeque<String>, // SHA-256 digests, never bearer credentials.
+    storage_path: Option<PathBuf>,
     failed_attempts: u8,
     blocked_until: Option<Instant>,
     rotate_pin: bool,
@@ -27,16 +32,73 @@ impl PairingState {
         PairingState {
             pin: generate_pin(),
             tokens: VecDeque::new(),
+            storage_path: None,
             failed_attempts: 0,
             blocked_until: None,
             rotate_pin: true,
         }
     }
 
+    pub fn persistent(path: PathBuf) -> Self {
+        let mut state = Self::new();
+        match std::fs::read(&path) {
+            Ok(bytes) => match serde_json::from_slice::<VecDeque<String>>(&bytes) {
+                Ok(tokens)
+                    if tokens.len() <= MAX_PAIRED_TOKENS
+                        && tokens.iter().all(|token| {
+                            token.len() == 64 && token.bytes().all(|c| c.is_ascii_hexdigit())
+                        }) =>
+                {
+                    state.tokens = tokens
+                }
+                _ => {
+                    eprintln!("Could not read saved remote pairings; a new PIN pairing is required")
+                }
+            },
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => eprintln!("Could not load saved remote pairings: {error}"),
+        }
+        state.storage_path = Some(path);
+        state
+    }
+
+    fn persist(&self) -> io::Result<()> {
+        let Some(path) = &self.storage_path else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let temporary = path.with_extension("tmp");
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        // Recover an interrupted prior atomic write, without following a symlink.
+        match std::fs::remove_file(&temporary) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let mut file = options.open(&temporary)?;
+        file.write_all(&serde_json::to_vec(&self.tokens)?)?;
+        file.sync_all()?;
+        drop(file);
+        #[cfg(windows)]
+        if path.exists() {
+            std::fs::remove_file(path)?;
+        }
+        std::fs::rename(temporary, path)
+    }
+
     pub fn mock() -> Self {
         PairingState {
             pin: MOCK_PIN.to_string(),
             tokens: VecDeque::new(),
+            storage_path: None,
             failed_attempts: 0,
             blocked_until: None,
             rotate_pin: false,
@@ -64,10 +126,17 @@ impl PairingState {
         }
         self.failed_attempts = 0;
         let token = issue_token();
+        let previous = self.tokens.clone();
         if self.tokens.len() == MAX_PAIRED_TOKENS {
             self.tokens.pop_front();
         }
-        self.tokens.push_back(token.clone());
+        self.tokens
+            .push_back(format!("{:x}", Sha256::digest(token.as_bytes())));
+        if let Err(error) = self.persist() {
+            self.tokens = previous;
+            eprintln!("Could not save remote pairing: {error}");
+            return Err(VerifyError::StorageUnavailable);
+        }
         if self.rotate_pin {
             self.pin = generate_pin();
         }
@@ -75,7 +144,8 @@ impl PairingState {
     }
 
     pub fn token_valid(&self, token: &str) -> bool {
-        self.tokens.iter().any(|candidate| candidate == token)
+        let digest = format!("{:x}", Sha256::digest(token.as_bytes()));
+        self.tokens.iter().any(|candidate| candidate == &digest)
     }
 }
 

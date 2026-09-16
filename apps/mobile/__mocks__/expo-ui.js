@@ -25,6 +25,9 @@ module.exports = {
   }),
   Host: mock("ExpoHost"),
   Icon,
+  ListItem: Object.assign(mock("ExpoListItem"), {
+    Trailing: mock("ExpoListTrailing"),
+  }),
   Picker: Object.assign(mock("ExpoPicker"), {
     Item: mock("ExpoPickerItem"),
   }),
@@ -32,6 +35,7 @@ module.exports = {
   Row: mock("ExpoRow"),
   Slider: mock("ExpoSlider"),
   Spacer: mock("ExpoSpacer"),
+  ScrollView: mock("ExpoScrollView"),
   Text: mock("ExpoText"),
   TextInput: function TextInput(props) {
     return React.createElement("ExpoTextInput", {

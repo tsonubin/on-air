@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@on-air/api-types": "workspace:*",
+    "@on-air/control-client": "workspace:*",
     "@radix-ui/react-select": "^2.3.7",
     "@radix-ui/react-slider": "^1.4.7",
     "@tauri-apps/api": "^2",

@@ -38,6 +38,8 @@
 	<array>
 		<string>_on-air._tcp.</string>
 	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>on-air remote finds the desktop mixer on your LAN.</string>
 	<key>UILaunchStoryboardName</key>

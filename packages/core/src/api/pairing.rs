@@ -42,5 +42,6 @@ pub async fn verify_pin(
         Ok(token) => Ok(Json(VerifyResponse { token })),
         Err(VerifyError::InvalidPin) => Err(StatusCode::UNAUTHORIZED),
         Err(VerifyError::RateLimited) => Err(StatusCode::TOO_MANY_REQUESTS),
+        Err(VerifyError::StorageUnavailable) => Err(StatusCode::INTERNAL_SERVER_ERROR),
     }
 }

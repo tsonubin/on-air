@@ -127,9 +127,8 @@ pub async fn set_sample_rate(
 
 pub(crate) fn current_sample_rates(state: &CoreState) -> SampleRateResponse {
     let input_hz = *state.target_sample_rate_hz.lock().unwrap();
-    let output_hz = *state.output_sample_rate_hz.lock().unwrap();
     let input_supported = supported_input_rates(state);
-    let (output_supported, transport) = supported_output_side(state);
+    let (output_hz, output_supported, transport) = output_side(state);
     SampleRateResponse {
         sample_rate_hz: input_hz,
         input: SampleRateSide {
@@ -149,17 +148,27 @@ fn supported_input_rates(state: &CoreState) -> Vec<u32> {
     state.input_supported_hz.lock().unwrap().clone()
 }
 
-fn supported_output_side(state: &CoreState) -> (Vec<u32>, Option<String>) {
-    let active = state.active_output.lock().unwrap().clone();
-    match active {
+fn output_side(state: &CoreState) -> (u32, Vec<u32>, Option<String>) {
+    // Match the snapshot to its identity rather than waiting for a connection
+    // that can take longer than the remote's polling deadline.
+    let published = state.active_output_format.lock().unwrap();
+    let active = state.active_output.lock().unwrap();
+    if let Some((identity, format)) = published.as_ref() {
+        if active.as_ref() == Some(identity) {
+            return (
+                format.sample_rate_hz,
+                format.supported_hz.clone(),
+                Some(identity.transport.clone()),
+            );
+        }
+    }
+    let requested = *state.output_sample_rate_hz.lock().unwrap();
+    match active.as_ref() {
         Some(active) => (
-            crate::session::supported_output_rates(
-                state,
-                &active.transport,
-                Some(&active.device_id),
-            ),
-            Some(active.transport),
+            requested,
+            rates::transport_rates(&active.transport).to_vec(),
+            Some(active.transport.clone()),
         ),
-        None => (vec![44_100, 48_000], None),
+        None => (requested, vec![44_100, 48_000], None),
     }
 }

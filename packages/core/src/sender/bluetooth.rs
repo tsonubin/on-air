@@ -1,11 +1,14 @@
-use crate::dsp::bridge::RateBridge;
-use crate::dsp::rates::{self, BLUETOOTH_RATES_HZ};
-use crate::sender::{AudioSender, SenderError};
+#[path = "bluetooth_host.rs"]
+mod host;
+#[path = "bluetooth_pcm.rs"]
+mod pcm;
+
+pub use pcm::{
+    BluetoothEndpoint, OpenedPcmSink, PcmOutput, PcmSink, RecordingPcmSink, SystemPcmOutput,
+};
+
+use crate::sender::{AudioSender, OutputFormat, SenderError};
 use bytes::Bytes;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig, I24, U24};
-use ringbuf::traits::{Consumer, Producer, Split};
-use ringbuf::{HeapProd, HeapRb};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -18,272 +21,16 @@ pub struct BluetoothDevice {
     pub name: String,
     pub paired: bool,
     pub connected: bool,
+    /// Pulse/cpal output name used to open the PCM sink, once the OS has one.
+    pub audio_endpoint: Option<String>,
 }
 
 pub trait BluetoothAdapter: Send + Sync {
     fn list(&self) -> Vec<BluetoothDevice>;
     fn pair(&self, id: &str) -> Result<(), SenderError>;
-    fn connect(&self, id: &str) -> Result<(), SenderError>;
+    fn connect(&self, id: &str) -> Result<BluetoothEndpoint, SenderError>;
     fn disconnect(&self, id: &str) -> Result<(), SenderError>;
-    fn set_volume(&self, id: &str, volume: u8) -> Result<(), SenderError>;
-}
-
-/// Destination for processed pipeline PCM (L16 LE bytes from `audio_tx`).
-pub trait PcmSink: Send + Sync {
-    fn write(&self, pcm: &[u8]) -> Result<(), SenderError>;
-}
-
-#[derive(Default)]
-pub struct RecordingPcmSink {
-    pub chunks: Mutex<Vec<Vec<u8>>>,
-}
-
-impl RecordingPcmSink {
-    pub fn byte_count(&self) -> usize {
-        self.chunks.lock().unwrap().iter().map(|c| c.len()).sum()
-    }
-}
-
-impl PcmSink for RecordingPcmSink {
-    fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        if !pcm.is_empty() {
-            self.chunks
-                .lock()
-                .map_err(|_| SenderError("recording PCM sink lock poisoned".into()))?
-                .push(pcm.to_vec());
-        }
-        Ok(())
-    }
-}
-
-/// cpal output device used as the OS sink once a Bluetooth speaker is the system output.
-pub struct CpalPcmSink {
-    producer: Mutex<HeapProd<f32>>,
-    bridge: Mutex<RateBridge>,
-    _stream: cpal::Stream,
-}
-
-impl CpalPcmSink {
-    pub fn for_output_named(
-        name: &str,
-        pipeline_rate_hz: u32,
-        output_rate_hz: u32,
-    ) -> Result<Self, SenderError> {
-        let host = cpal::default_host();
-        let device = host
-            .output_devices()
-            .map_err(|error| SenderError(format!("could not list audio outputs: {error}")))?
-            .find(|device| device.to_string() == name)
-            .ok_or_else(|| SenderError(format!("audio output not found: {name}")))?;
-        let default = device.default_output_config().map_err(|error| {
-            SenderError(format!("could not read output configuration: {error}"))
-        })?;
-        let supported = device
-            .supported_output_configs()
-            .ok()
-            .and_then(|configs| {
-                configs
-                    .filter(|config| {
-                        output_rate_hz >= config.min_sample_rate()
-                            && output_rate_hz <= config.max_sample_rate()
-                    })
-                    .min_by_key(|config| {
-                        (
-                            config.sample_format() != default.sample_format(),
-                            config.channels().abs_diff(default.channels()),
-                        )
-                    })
-                    .map(|config| config.with_sample_rate(output_rate_hz))
-            })
-            .unwrap_or(default);
-        let sample_format = supported.sample_format();
-        let config = supported.config();
-        let device_rate = config.sample_rate;
-        let channels = usize::from(config.channels);
-        let queue_capacity = (device_rate as usize)
-            .saturating_mul(channels)
-            .saturating_mul(2)
-            .max(1024);
-        let (producer, consumer) = HeapRb::<f32>::new(queue_capacity).split();
-        let stream = match sample_format {
-            SampleFormat::I8 => build_output_stream::<i8>(&device, config, consumer)?,
-            SampleFormat::I16 => build_output_stream::<i16>(&device, config, consumer)?,
-            SampleFormat::I24 => build_output_stream::<I24>(&device, config, consumer)?,
-            SampleFormat::I32 => build_output_stream::<i32>(&device, config, consumer)?,
-            SampleFormat::I64 => build_output_stream::<i64>(&device, config, consumer)?,
-            SampleFormat::U8 => build_output_stream::<u8>(&device, config, consumer)?,
-            SampleFormat::U16 => build_output_stream::<u16>(&device, config, consumer)?,
-            SampleFormat::U24 => build_output_stream::<U24>(&device, config, consumer)?,
-            SampleFormat::U32 => build_output_stream::<u32>(&device, config, consumer)?,
-            SampleFormat::U64 => build_output_stream::<u64>(&device, config, consumer)?,
-            SampleFormat::F32 => build_output_stream::<f32>(&device, config, consumer)?,
-            SampleFormat::F64 => build_output_stream::<f64>(&device, config, consumer)?,
-            other => {
-                return Err(SenderError(format!(
-                    "unsupported output sample format: {other:?}"
-                )))
-            }
-        };
-        stream
-            .play()
-            .map_err(|error| SenderError(format!("could not start audio output: {error}")))?;
-        Ok(CpalPcmSink {
-            producer: Mutex::new(producer),
-            bridge: Mutex::new(RateBridge::new(pipeline_rate_hz, device_rate, channels)),
-            _stream: stream,
-        })
-    }
-}
-
-impl PcmSink for CpalPcmSink {
-    fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let converted = self
-            .bridge
-            .lock()
-            .map_err(|_| SenderError("sample-rate bridge lock poisoned".into()))?
-            .process_l16_mono(pcm);
-        if converted.is_empty() {
-            return Ok(());
-        }
-        // The queue is deliberately bounded. If the device falls behind, drop
-        // new samples instead of growing memory or accumulating stale latency.
-        self.producer
-            .lock()
-            .map_err(|_| SenderError("PCM queue lock poisoned".into()))?
-            .push_slice(&converted);
-        Ok(())
-    }
-}
-
-fn build_output_stream<T>(
-    device: &cpal::Device,
-    config: StreamConfig,
-    mut consumer: ringbuf::HeapCons<f32>,
-) -> Result<cpal::Stream, SenderError>
-where
-    T: Sample + SizedSample + FromSample<f32>,
-{
-    device
-        .build_output_stream(
-            config,
-            move |data: &mut [T], _| {
-                for slot in data {
-                    *slot = consumer
-                        .try_pop()
-                        .map(T::from_sample)
-                        .unwrap_or(T::EQUILIBRIUM);
-                }
-            },
-            |error| eprintln!("bluetooth audio output error: {error}"),
-            None,
-        )
-        .map_err(|error| SenderError(format!("could not open audio output: {error}")))
-}
-
-pub fn supported_output_rate_ranges(device: &cpal::Device) -> Vec<(u32, u32)> {
-    match device.supported_output_configs() {
-        Ok(cfgs) => cfgs
-            .map(|cfg| (cfg.min_sample_rate(), cfg.max_sample_rate()))
-            .collect(),
-        Err(_) => Vec::new(),
-    }
-}
-
-/// A2DP catalog intersected with what this named OS output actually advertises.
-pub fn supported_bluetooth_rates_for_name(name: &str) -> Vec<u32> {
-    if looks_like_a2dp_sink(name) {
-        return BLUETOOTH_RATES_HZ.to_vec();
-    }
-    let host = cpal::default_host();
-    let ranges = host
-        .output_devices()
-        .ok()
-        .and_then(|devices| devices.into_iter().find(|d| d.to_string() == name))
-        .map(|device| supported_output_rate_ranges(&device))
-        .unwrap_or_default();
-    rates::intersect_catalog(&ranges, BLUETOOTH_RATES_HZ)
-}
-
-/// Pulse/BlueZ sink: `pacat` named device. Otherwise cpal by name.
-pub fn pcm_sink_for_device(
-    id: &str,
-    name: &str,
-    pipeline_hz: u32,
-    output_hz: u32,
-) -> Result<Arc<dyn PcmSink>, SenderError> {
-    if looks_like_a2dp_sink(id) || looks_like_a2dp_sink(name) {
-        Ok(Arc::new(PacatPcmSink::new(id, pipeline_hz, output_hz)?))
-    } else {
-        Ok(Arc::new(CpalPcmSink::for_output_named(
-            name,
-            pipeline_hz,
-            output_hz,
-        )?))
-    }
-}
-
-/// Writes bridged L16 to a Pulse sink by name (`bluez_output.*`).
-pub struct PacatPcmSink {
-    bridge: Mutex<RateBridge>,
-    stdin: Mutex<std::process::ChildStdin>,
-    child: Mutex<std::process::Child>,
-}
-
-impl PacatPcmSink {
-    pub fn new(device: &str, pipeline_hz: u32, output_hz: u32) -> Result<Self, SenderError> {
-        let mut child = std::process::Command::new("pacat")
-            .args([
-                "--playback",
-                "--raw",
-                "--format=s16le",
-                &format!("--rate={output_hz}"),
-                "--channels=2",
-                "--latency-msec=50",
-                &format!("--device={device}"),
-            ])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|error| SenderError(format!("could not start pacat: {error}")))?;
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| SenderError("pacat stdin is unavailable".into()))?;
-        Ok(PacatPcmSink {
-            bridge: Mutex::new(RateBridge::new(pipeline_hz, output_hz, 2)),
-            stdin: Mutex::new(stdin),
-            child: Mutex::new(child),
-        })
-    }
-}
-
-impl PcmSink for PacatPcmSink {
-    fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let bytes = self
-            .bridge
-            .lock()
-            .map_err(|_| SenderError("sample-rate bridge lock poisoned".into()))?
-            .process_l16_mono_to_l16(pcm);
-        if bytes.is_empty() {
-            return Ok(());
-        }
-        use std::io::Write;
-        self.stdin
-            .lock()
-            .map_err(|_| SenderError("pacat stdin lock poisoned".into()))?
-            .write_all(&bytes)
-            .map_err(|error| SenderError(format!("pacat playback failed: {error}")))
-    }
-}
-
-impl Drop for PacatPcmSink {
-    fn drop(&mut self) {
-        if let Ok(child) = self.child.get_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-    }
+    fn open_settings(&self) -> Result<(), SenderError>;
 }
 
 #[derive(Default)]
@@ -314,7 +61,7 @@ impl BluetoothAdapter for MockBluetoothAdapter {
         Ok(())
     }
 
-    fn connect(&self, id: &str) -> Result<(), SenderError> {
+    fn connect(&self, id: &str) -> Result<BluetoothEndpoint, SenderError> {
         let mut devices = self.devices.lock().unwrap();
         let device = devices
             .iter_mut()
@@ -323,10 +70,14 @@ impl BluetoothAdapter for MockBluetoothAdapter {
         if !device.paired {
             return Err(SenderError("bluetooth device not paired".into()));
         }
+        let endpoint = device
+            .audio_endpoint
+            .get_or_insert_with(|| device.id.clone())
+            .clone();
         for d in devices.iter_mut() {
             d.connected = d.id == id;
         }
-        Ok(())
+        Ok(BluetoothEndpoint::Native(endpoint))
     }
 
     fn disconnect(&self, id: &str) -> Result<(), SenderError> {
@@ -337,13 +88,13 @@ impl BluetoothAdapter for MockBluetoothAdapter {
         Ok(())
     }
 
-    fn set_volume(&self, _id: &str, _volume: u8) -> Result<(), SenderError> {
+    fn open_settings(&self) -> Result<(), SenderError> {
         Ok(())
     }
 }
 
-/// Production adapter: A2DP sinks only (BlueZ/Pulse `bluez_output.*`, or a
-/// cpal device whose name actually says bluetooth). HDMI/analog are not Bluetooth.
+/// Production discovery and connection adapter. Native platforms identify
+/// Bluetooth transports; a friendly name never selects the playback backend.
 pub struct SystemBluetoothAdapter;
 
 impl SystemBluetoothAdapter {
@@ -356,6 +107,21 @@ pub fn looks_like_a2dp_sink(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     n.contains("bluez") || n.contains("bluetooth") || n.contains("a2dp")
 }
+
+/// `bluez_output.58_EA_1F_87_56_45.a2dp_sink` → `58:EA:1F:87:56:45`
+pub fn pulse_sink_address(name: &str) -> Option<String> {
+    let rest = name.strip_prefix("bluez_output.")?;
+    let mac = rest.split('.').next()?;
+    if mac.chars().filter(|c| *c == '_').count() != 5 {
+        return None;
+    }
+    Some(mac.replace('_', ":").to_ascii_uppercase())
+}
+
+pub use host::{
+    is_coreaudio_bluetooth_transport, looks_like_windows_bluetooth_id, parse_bluetoothctl_devices,
+    parse_bluetoothctl_info,
+};
 
 /// Parse `pactl list sinks` (full form) into A2DP devices.
 pub fn parse_pactl_list_sinks(text: &str) -> Vec<BluetoothDevice> {
@@ -372,12 +138,7 @@ pub fn parse_pactl_list_sinks(text: &str) -> Vec<BluetoothDevice> {
                     } else {
                         description.clone()
                     };
-                    devices.push(BluetoothDevice {
-                        id,
-                        name: display,
-                        paired: true,
-                        connected: false,
-                    });
+                    devices.push(pulse_device(id, display));
                 }
             }
             description.clear();
@@ -394,18 +155,24 @@ pub fn parse_pactl_list_sinks(text: &str) -> Vec<BluetoothDevice> {
             } else {
                 description
             };
-            devices.push(BluetoothDevice {
-                id,
-                name: display,
-                paired: true,
-                connected: false,
-            });
+            devices.push(pulse_device(id, display));
         }
     }
     devices
 }
 
-fn pulse_a2dp_sinks() -> Vec<BluetoothDevice> {
+fn pulse_device(sink_name: String, display: String) -> BluetoothDevice {
+    BluetoothDevice {
+        id: pulse_sink_address(&sink_name).unwrap_or_else(|| sink_name.clone()),
+        name: display,
+        paired: true,
+        connected: true,
+        audio_endpoint: Some(sink_name),
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn pulse_a2dp_sinks() -> Vec<BluetoothDevice> {
     let output = match std::process::Command::new("timeout")
         .args(["2", "pactl", "list", "sinks"])
         .output()
@@ -418,129 +185,130 @@ fn pulse_a2dp_sinks() -> Vec<BluetoothDevice> {
 
 impl BluetoothAdapter for SystemBluetoothAdapter {
     fn list(&self) -> Vec<BluetoothDevice> {
-        let pulse = pulse_a2dp_sinks();
-        if !pulse.is_empty() || cfg!(target_os = "linux") {
-            return pulse;
-        }
-        let mut devices = Vec::new();
-        if let Ok(cpal_devices) = cpal::default_host().output_devices() {
-            for d in cpal_devices {
-                let name = d.to_string();
-                if looks_like_a2dp_sink(&name) {
-                    devices.push(BluetoothDevice {
-                        id: name.clone(),
-                        name,
-                        paired: true,
-                        connected: false,
-                    });
-                }
-            }
-        }
-        devices
+        host::list()
     }
 
     fn pair(&self, id: &str) -> Result<(), SenderError> {
-        if self.list().iter().any(|d| d.id == id) {
-            Ok(())
-        } else {
-            Err(SenderError("bluetooth sink not found".into()))
-        }
+        host::pair(id)
     }
 
-    fn connect(&self, id: &str) -> Result<(), SenderError> {
-        self.pair(id)?;
-        crate::pipeline::local_sink::pin_default_sink();
-        let _ = std::process::Command::new("pactl")
-            .args(["set-sink-mute", id, "0"])
-            .status();
-        // PipeWire often makes a newly connected A2DP headset the default
-        // sink. Put the user's DSP/analog default back; we play to Mini
-        // with `pacat --device=` only.
-        crate::pipeline::local_sink::restore_default_sink();
-        Ok(())
+    fn connect(&self, id: &str) -> Result<BluetoothEndpoint, SenderError> {
+        host::connect(id)
     }
 
     fn disconnect(&self, _id: &str) -> Result<(), SenderError> {
         Ok(())
     }
 
-    fn set_volume(&self, id: &str, volume: u8) -> Result<(), SenderError> {
-        let pct = u32::from(volume.min(100));
-        let _ = std::process::Command::new("pactl")
-            .args(["set-sink-volume", id, &format!("{pct}%")])
-            .status();
-        let _ = std::process::Command::new("pactl")
-            .args(["set-sink-mute", id, "0"])
-            .status();
-        Ok(())
+    fn open_settings(&self) -> Result<(), SenderError> {
+        host::open_settings()
     }
 }
 
-pub struct BluetoothSender {
-    id: String,
-    name: String,
-    adapter: Arc<dyn BluetoothAdapter>,
-    audio_tx: broadcast::Sender<Bytes>,
-    sink: Arc<dyn PcmSink>,
+/// Requested rates and initial app volume, retained across stop/start rollback.
+#[derive(Debug, Clone, Copy)]
+pub struct BluetoothPlaybackConfig {
+    pub pipeline_hz: u32,
+    pub output_hz: u32,
+    pub volume: u8,
+}
+
+struct LivePlayback {
+    opened: OpenedPcmSink,
     stop: Arc<AtomicBool>,
     pump: Option<tokio::task::JoinHandle<()>>,
     writer: Option<std::thread::JoinHandle<()>>,
 }
 
-impl BluetoothSender {
-    pub fn new(
-        id: impl Into<String>,
-        name: impl Into<String>,
-        adapter: Arc<dyn BluetoothAdapter>,
-        audio_tx: broadcast::Sender<Bytes>,
-        sink: Arc<dyn PcmSink>,
-    ) -> Self {
-        BluetoothSender {
-            id: id.into(),
-            name: name.into(),
-            adapter,
-            audio_tx,
-            sink,
-            stop: Arc::new(AtomicBool::new(false)),
-            pump: None,
-            writer: None,
+impl Drop for LivePlayback {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(pump) = self.pump.take() {
+            pump.abort();
+        }
+        // Closing, not the last Arc drop, interrupts a writer blocked in PCM I/O.
+        if let Err(error) = self.opened.sink.close() {
+            eprintln!("could not close Bluetooth playback: {error}");
         }
     }
 }
 
-impl Drop for BluetoothSender {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.pump.take() {
-            handle.abort();
+/// Owns connection readiness and one live playback lifetime. Construction does
+/// no I/O, so Exclusive output can stop the previous sender before calling start.
+pub struct BluetoothSender {
+    device: BluetoothDevice,
+    adapter: Arc<dyn BluetoothAdapter>,
+    audio_tx: broadcast::Sender<Bytes>,
+    output: Arc<dyn PcmOutput>,
+    config: BluetoothPlaybackConfig,
+    connection_attempted: bool,
+    live: Option<LivePlayback>,
+}
+
+impl BluetoothSender {
+    pub fn new(
+        device: BluetoothDevice,
+        adapter: Arc<dyn BluetoothAdapter>,
+        audio_tx: broadcast::Sender<Bytes>,
+        output: Arc<dyn PcmOutput>,
+        config: BluetoothPlaybackConfig,
+    ) -> Self {
+        Self {
+            device,
+            adapter,
+            audio_tx,
+            output,
+            config,
+            connection_attempted: false,
+            live: None,
         }
-        // The writer wakes at least every 100 ms and exits. Normal lifecycle
-        // calls `stop`, which joins it and disconnects the adapter.
     }
 }
 
 #[async_trait::async_trait]
 impl AudioSender for BluetoothSender {
     async fn start(&mut self) -> Result<(), SenderError> {
-        if self.pump.is_some() || self.writer.is_some() {
-            return Err(SenderError("bluetooth sender is already running".into()));
+        if self.live.is_some() || self.connection_attempted {
+            return Err(SenderError(
+                "bluetooth sender must be stopped before starting".into(),
+            ));
         }
+        self.connection_attempted = true;
         let adapter = self.adapter.clone();
-        let id = self.id.clone();
-        tokio::task::spawn_blocking(move || adapter.connect(&id))
-            .await
-            .map_err(|error| SenderError(format!("bluetooth connect task failed: {error}")))??;
-        self.stop.store(false, Ordering::Relaxed);
+        let id = self.device.id.clone();
+        let output = self.output.clone();
+        let config = self.config;
+        let opened = tokio::task::spawn_blocking(move || {
+            let endpoint = adapter.connect(&id)?;
+            output.open(&endpoint, config.pipeline_hz, config.output_hz)
+        })
+        .await
+        .map_err(|e| SenderError(format!("Bluetooth preparation task failed: {e}")))??;
+        self.live = Some(LivePlayback {
+            opened,
+            stop: Arc::new(AtomicBool::new(false)),
+            pump: None,
+            writer: None,
+        });
+        // Apply retained volume before subscribing; rollback cannot emit a burst
+        // at the default volume while the caller restores settings later.
+        self.set_volume(config.volume).await?;
+        let live = self.live.as_mut().unwrap();
         let mut rx = self.audio_tx.subscribe();
         let (writer_tx, writer_rx) = sync_channel::<Bytes>(8);
-        let sink = self.sink.clone();
-        let writer_stop = self.stop.clone();
-        self.writer = Some(std::thread::spawn(move || {
-            while !writer_stop.load(Ordering::Relaxed) {
+        let sink = live.opened.sink.clone();
+        let writer_stop = live.stop.clone();
+        live.writer = Some(std::thread::spawn(move || {
+            while !writer_stop.load(Ordering::Acquire) {
                 match writer_rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(chunk) => {
+                        if writer_stop.load(Ordering::Acquire) {
+                            break;
+                        }
                         if let Err(error) = sink.write(&chunk) {
-                            eprintln!("bluetooth audio sink stopped: {error}");
+                            if !writer_stop.load(Ordering::Acquire) {
+                                eprintln!("bluetooth audio sink stopped: {error}");
+                            }
                             break;
                         }
                     }
@@ -549,9 +317,9 @@ impl AudioSender for BluetoothSender {
                 }
             }
         }));
-        let pump_stop = self.stop.clone();
-        self.pump = Some(tokio::spawn(async move {
-            while !pump_stop.load(Ordering::Relaxed) {
+        let pump_stop = live.stop.clone();
+        live.pump = Some(tokio::spawn(async move {
+            while !pump_stop.load(Ordering::Acquire) {
                 match rx.recv().await {
                     Ok(chunk) => match writer_tx.try_send(chunk) {
                         Ok(()) | Err(TrySendError::Full(_)) => {}
@@ -566,36 +334,58 @@ impl AudioSender for BluetoothSender {
     }
 
     async fn stop(&mut self) -> Result<(), SenderError> {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.pump.take() {
-            handle.abort();
-        }
-        if let Some(writer) = self.writer.take() {
-            tokio::task::spawn_blocking(move || writer.join())
+        if let Some(live) = self.live.as_mut() {
+            live.stop.store(true, Ordering::Release);
+            if let Some(pump) = live.pump.take() {
+                pump.abort();
+            }
+            let sink = live.opened.sink.clone();
+            // Cancel I/O before joining; closing must not acquire a write lock.
+            tokio::task::spawn_blocking(move || sink.close())
                 .await
-                .map_err(|error| SenderError(format!("bluetooth writer task failed: {error}")))?
-                .map_err(|_| SenderError("bluetooth writer thread panicked".into()))?;
+                .map_err(|e| SenderError(format!("Bluetooth close task failed: {e}")))??;
+            if let Some(writer) = live.writer.take() {
+                tokio::task::spawn_blocking(move || writer.join())
+                    .await
+                    .map_err(|e| SenderError(format!("Bluetooth writer task failed: {e}")))?
+                    .map_err(|_| SenderError("Bluetooth writer thread panicked".into()))?;
+            }
         }
-        let adapter = self.adapter.clone();
-        let id = self.id.clone();
-        tokio::task::spawn_blocking(move || adapter.disconnect(&id))
-            .await
-            .map_err(|error| SenderError(format!("bluetooth disconnect task failed: {error}")))?
+        self.live = None;
+        if self.connection_attempted {
+            let adapter = self.adapter.clone();
+            let id = self.device.id.clone();
+            // Audio is already stopped. A connection cleanup error must not
+            // make Exclusive output preserve a dead stream as still playing.
+            match tokio::task::spawn_blocking(move || adapter.disconnect(&id)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("Bluetooth connection cleanup failed: {error}"),
+                Err(error) => eprintln!("Bluetooth disconnect task failed: {error}"),
+            }
+            self.connection_attempted = false;
+        }
+        Ok(())
     }
 
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError> {
-        let adapter = self.adapter.clone();
-        let id = self.id.clone();
-        tokio::task::spawn_blocking(move || adapter.set_volume(&id, volume))
-            .await
-            .map_err(|error| SenderError(format!("bluetooth volume task failed: {error}")))?
+        let volume = volume.min(100);
+        if let Some(live) = self.live.as_ref() {
+            let sink = live.opened.sink.clone();
+            tokio::task::spawn_blocking(move || sink.set_volume(volume))
+                .await
+                .map_err(|e| SenderError(format!("Bluetooth volume task failed: {e}")))??;
+        }
+        self.config.volume = volume;
+        Ok(())
     }
 
     fn name(&self) -> &str {
-        &self.name
+        &self.device.name
     }
-
     fn transport(&self) -> &'static str {
         "bluetooth"
+    }
+    fn output_format(&self) -> Option<OutputFormat> {
+        self.live.as_ref().map(|live| live.opened.format.clone())
     }
 }

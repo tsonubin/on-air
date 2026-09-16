@@ -25,6 +25,7 @@ import {
   listBluetooth,
   listInputs,
   listOutputs,
+  openBluetoothSettings,
   pairAirplay,
   pairBluetooth,
   probeOnAir,
@@ -151,7 +152,7 @@ describe("expo companion against mock core", { concurrency: 1 }, () => {
 
   test("companion lists every exclusive transport and can switch them", async () => {
     const outputs = await listOutputs(BASE, token);
-    const transports = outputs.map((o) => o.transport).sort();
+    const transports = [...new Set(outputs.map((o) => o.transport))].sort();
     assert.deepEqual(transports, ["airplay", "bluetooth", "sonos"]);
     const switched = await switchTransports(BASE, token);
     assert.deepEqual(switched, ["sonos", "airplay", "bluetooth"]);
@@ -176,6 +177,7 @@ describe("expo companion against mock core", { concurrency: 1 }, () => {
     const speaker = devices.find((d) => d.id === "bt-speaker");
     assert.ok(speaker, "expected mock bluetooth speaker");
     assert.equal(speaker.paired, true);
+    await openBluetoothSettings(BASE, token);
     const mode = await getAirplayMode(BASE, token);
     assert.ok(mode.length > 0);
     await activateInput(BASE, "Mock Monitor", token);

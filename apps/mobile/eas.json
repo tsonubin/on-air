@@ -9,6 +9,20 @@
       "android": {
         "buildType": "apk"
       }
+    },
+    "production": {
+      "distribution": "store",
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6812577609"
+      }
     }
   }
 }

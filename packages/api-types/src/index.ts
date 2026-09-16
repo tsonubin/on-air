@@ -72,6 +72,12 @@ export interface AirPlayModeResponse {
   mode: "avroute-picker" | "owntone" | string;
 }
 
+export interface CdTrackInfo {
+  number: number;
+  title?: string | null;
+  duration_ms: number;
+}
+
 export interface CdStatus {
   present: boolean;
   playing: boolean;
@@ -81,9 +87,10 @@ export interface CdStatus {
   album?: string | null;
   position_ms: number;
   duration_ms: number;
+  tracks?: CdTrackInfo[];
 }
 
-export type CdAction = "play" | "pause" | "next" | "prev";
+export type CdAction = "play" | "pause" | "next" | "prev" | "seek" | "goto" | "eject";
 
 export type WsEvent =
   | { type: "OutputStateChanged"; transport: string; device_name: string; active: boolean }
@@ -99,6 +106,8 @@ export type WsEvent =
       track_count: number;
       title?: string | null;
       album?: string | null;
+      position_ms?: number;
+      duration_ms?: number;
     };
 
 export const AUDIO_CD_INPUT = "Audio CD";

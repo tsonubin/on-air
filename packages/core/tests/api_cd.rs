@@ -133,6 +133,64 @@ async fn control_without_disc_conflicts() {
 }
 
 #[tokio::test]
+async fn insert_lists_per_track_durations() {
+    let (app, _) = mock_app().await;
+    let (status, body) = send(
+        app,
+        post_json(
+            "/api/cd",
+            r#"{"present":true,"tracks":[{"title":"A","duration_ms":90000},{"title":"B","duration_ms":120000}]}"#,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["tracks"][0]["duration_ms"], 90_000);
+    assert_eq!(body["tracks"][1]["duration_ms"], 120_000);
+}
+
+#[tokio::test]
+async fn seek_and_goto_update_status() {
+    let (app, _) = mock_app().await;
+    let _ = send(
+        app.clone(),
+        post_json(
+            "/api/cd",
+            r#"{"present":true,"tracks":[{"title":"A"},{"title":"B"}]}"#,
+        ),
+    )
+    .await;
+    let (status, body) = send(
+        app.clone(),
+        post_json("/api/cd/control", r#"{"action":"goto","track":2}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["track"], 2);
+    let (status, body) = send(
+        app,
+        post_json("/api/cd/control", r#"{"action":"seek","position_ms":1500}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // CD positions have 75-sector/second precision: 1500 ms floors to sector 112.
+    assert_eq!(body["position_ms"], 1493);
+}
+
+#[tokio::test]
+async fn software_eject_clears_the_deck() {
+    let (app, state) = mock_app().await;
+    let _ = send(
+        app.clone(),
+        post_json("/api/cd", r#"{"present":true,"tracks":[{"title":"A"}]}"#),
+    )
+    .await;
+    let (status, body) = send(app, post_json("/api/cd/control", r#"{"action":"eject"}"#)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["present"], false);
+    assert!(state.active_input.lock().unwrap().is_none());
+}
+
+#[tokio::test]
 async fn eject_clears_cd_input() {
     let (app, state) = mock_app().await;
     let _ = send(

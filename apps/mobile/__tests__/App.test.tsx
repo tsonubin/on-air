@@ -28,6 +28,7 @@ jest.mock("../src/controlClient", () => {
     setSampleRate: jest.fn(),
     pairAirplay: jest.fn(),
     pairBluetooth: jest.fn(),
+    openBluetoothSettings: jest.fn(),
   };
 });
 
@@ -52,6 +53,7 @@ const mocked = client as unknown as {
   setSampleRate: jest.Mock;
   pairAirplay: jest.Mock;
   pairBluetooth: jest.Mock;
+  openBluetoothSettings: jest.Mock;
 };
 
 const STUDIO = { host: "192.168.5.14", port: 47990, name: "studio", version: "0.1.0" };
@@ -136,6 +138,7 @@ function mockMixer() {
   mocked.setSampleRate.mockResolvedValue(undefined);
   mocked.pairAirplay.mockResolvedValue(undefined);
   mocked.pairBluetooth.mockResolvedValue(undefined);
+  mocked.openBluetoothSettings.mockResolvedValue(undefined);
 }
 
 async function flush() {
@@ -172,6 +175,7 @@ function screen(tree: { toJSON(): unknown }): string {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  require("expo-router").__reset();
   (useWindowDimensions as jest.Mock).mockReturnValue({
     width: 390,
     height: 844,
@@ -349,6 +353,7 @@ test("restores the paired desktop securely after an app restart", async () => {
     JSON.stringify({ host: "192.168.5.14", token: "saved-token" }),
   );
   jest.clearAllMocks();
+  require("expo-router").__reset();
   mockMixer();
 
   const tree = await renderApp();
@@ -406,7 +411,7 @@ test("source, destination, volume, EQ, and sample-rate drive the control API", a
     tree.root.findByProps({ testID: "sound-settings-button" }).props.onPress();
   });
   ReactTestRenderer.act(() => {
-    tree.root.findByProps({ label: "Equalizer" }).props.onOpenChange(true);
+    tree.root.findByProps({ testID: "equalizer-link" }).props.onPress();
   });
   jest.useFakeTimers();
   ReactTestRenderer.act(() => {
@@ -424,7 +429,10 @@ test("source, destination, volume, EQ, and sample-rate drive the control API", a
   );
 
   ReactTestRenderer.act(() => {
-    tree.root.findByProps({ label: "Sample rates" }).props.onOpenChange(true);
+    require("expo-router").router.back();
+  });
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "audio-format-link" }).props.onPress();
   });
   await ReactTestRenderer.act(async () => {
     tree.root.findByProps({ testID: "sample-rate-picker" }).props.onValueChange(48000);
@@ -472,7 +480,7 @@ test("rapid EQ edits preserve every band and serialize network writes", async ()
     tree.root.findByProps({ testID: "sound-settings-button" }).props.onPress();
   });
   ReactTestRenderer.act(() => {
-    tree.root.findByProps({ label: "Equalizer" }).props.onOpenChange(true);
+    tree.root.findByProps({ testID: "equalizer-link" }).props.onPress();
   });
   const firstWrite = deferred<void>();
   mocked.setEq.mockImplementationOnce(() => firstWrite.promise);
@@ -536,7 +544,7 @@ test("an expired response from an old connection cannot clear a new pairing", as
   });
 
   ReactTestRenderer.act(() => {
-    tree.root.findByProps({ testID: "disconnect-button" }).props.onPress();
+    tree.root.findByProps({ testID: "disconnect-menu-button" }).props.onPress();
   });
   await pair(tree);
   oldRefresh.reject(new client.HttpError("/api/inputs", 401));
@@ -580,6 +588,21 @@ test("unpaired AirPlay opens the PIN sheet then pairs and goes live", async () =
   );
 });
 
+test("add Bluetooth speaker opens desktop Bluetooth settings", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  ReactTestRenderer.act(() => {
+    tree.root.findByProps({ testID: "output-row" }).props.onPress();
+  });
+  await ReactTestRenderer.act(async () => {
+    await tree.root.findByProps({ testID: "add-bluetooth" }).props.onPress();
+  });
+  expect(mocked.openBluetoothSettings).toHaveBeenCalledWith(
+    "http://192.168.5.14:47990",
+    "onair-test",
+  );
+});
+
 test("unpaired Bluetooth confirms on the device then goes live", async () => {
   const tree = await renderApp();
   await pair(tree);
@@ -606,4 +629,118 @@ test("unpaired Bluetooth confirms on the device then goes live", async () => {
     "bt-speaker",
     "onair-test",
   );
+});
+
+test("native sound navigation returns from equalizer to tools and mixer", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  ReactTestRenderer.act(() =>
+    tree.root.findByProps({ testID: "sound-settings-button" }).props.onPress(),
+  );
+  expect(screen(tree)).toContain("Equalizer");
+  expect(screen(tree)).toContain("Audio format");
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "equalizer-link" }).props.onPress());
+  expect(tree.root.findByProps({ testID: "eq-band-4-native" })).toBeTruthy();
+  expect(screen(tree)).toContain("Bass · 60 Hz");
+  expect(screen(tree)).toContain("0 dB");
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "native-back" }).props.onPress());
+  expect(tree.root.findByProps({ testID: "audio-format-link" })).toBeTruthy();
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "native-back" }).props.onPress());
+  expect(tree.root.findByProps({ testID: "output-row" })).toBeTruthy();
+});
+
+test("refresh keeps connection screen visible and preserves pairing during a network failure", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  const response = deferred<string[]>();
+  mocked.listInputs.mockReturnValueOnce(response.promise);
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "more-button" }).props.onPress());
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "refresh-button" }).props.onPress());
+  expect(screen(tree)).toContain("Refreshing…");
+  expect(tree.root.findByProps({ testID: "connection-screen" })).toBeTruthy();
+  response.reject(new Error("Network unavailable"));
+  await flush();
+  expect(screen(tree)).toContain("Desktop connected. Some controls could not refresh");
+  expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "native-back" }).props.onPress());
+  expect(tree.root.findByProps({ testID: "mixer-screen" })).toBeTruthy();
+  // RN content must not be nested directly in a SwiftUI Host.
+  let parent = tree.root.findByProps({ testID: "mixer-screen" }).parent;
+  while (parent) {
+    expect(parent.type).not.toBe("ExpoHost");
+    parent = parent.parent;
+  }
+});
+
+test("expired pairing wins over an earlier network failure and returns to pairing", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  mocked.fetchStatus.mockRejectedValueOnce(new Error("Timeout"));
+  mocked.listInputs.mockRejectedValueOnce(new client.HttpError("/api/inputs", 401));
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "more-button" }).props.onPress());
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "refresh-button" }).props.onPress());
+  await flush();
+  expect(screen(tree)).toContain("Pair your Mac");
+  expect(screen(tree)).toContain("Pairing expired");
+});
+
+test("a temporary desktop outage retries without forgetting the paired desktop", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  const reads = [
+    mocked.fetchStatus,
+    mocked.listInputs,
+    mocked.listOutputs,
+    mocked.getActiveInput,
+    mocked.getActiveOutput,
+    mocked.getEq,
+    mocked.getSampleRate,
+    mocked.getVolume,
+  ];
+  for (const read of reads) read.mockRejectedValueOnce(new Error("Network request failed"));
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "more-button" }).props.onPress());
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "refresh-button" }).props.onPress());
+  await flush();
+  expect(screen(tree)).toContain("Reconnecting");
+  expect(screen(tree)).toContain(STUDIO.host);
+  expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "refresh-button" }).props.onPress());
+  await flush();
+  expect(screen(tree)).toContain("Connected to desktop");
+  expect(screen(tree)).not.toContain("Reconnecting");
+});
+
+test("an older desktop missing the optional CD endpoint is still connected", async () => {
+  mocked.getCd.mockRejectedValue(new client.HttpError("/api/cd", 404));
+  const tree = await renderApp();
+  await pair(tree);
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "more-button" }).props.onPress());
+  expect(screen(tree)).toContain("Connected to desktop");
+  expect(screen(tree)).not.toContain("Could not");
+});
+
+test("a paused desktop is reachable and keeps its pairing", async () => {
+  const tree = await renderApp();
+  await pair(tree);
+  mocked.fetchStatus.mockResolvedValue({ status: "ok", version: "0.1.0", service_enabled: false });
+  for (const read of [
+    mocked.listInputs,
+    mocked.listOutputs,
+    mocked.getActiveInput,
+    mocked.getActiveOutput,
+    mocked.getEq,
+    mocked.getSampleRate,
+    mocked.getVolume,
+    mocked.getAirplayMode,
+    mocked.getCd,
+  ]) {
+    read.mockRejectedValue(new client.HttpError("/api/control", 503));
+  }
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "more-button" }).props.onPress());
+  ReactTestRenderer.act(() => tree.root.findByProps({ testID: "refresh-button" }).props.onPress());
+  await flush();
+  expect(screen(tree)).toContain("Connected to desktop");
+  expect(screen(tree)).toContain("desktop service is paused");
+  expect(screen(tree)).not.toContain("Reconnecting");
+  expect(SecureStore.deleteItemAsync).not.toHaveBeenCalled();
 });

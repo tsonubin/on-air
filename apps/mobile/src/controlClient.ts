@@ -18,6 +18,7 @@ export {
   listBluetooth,
   listInputs,
   listOutputs,
+  openBluetoothSettings,
   pairAirplay,
   pairBluetooth,
   prettyInput,
