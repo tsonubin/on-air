@@ -12,7 +12,8 @@ pnpm --filter desktop tauri icon ../mobile/assets/icon.png
 The Tauri generator emits ICNS for macOS, a multi-resolution ICO and Appx tiles
 for Windows, and PNG sizes for Linux. This desktop project does not use the
 additional generated Android/iOS directories. `tauri.conf.json` selects the bundle
-assets; the tray uses Tauri's default window icon. The web preview favicon copies
+assets. The macOS menu-bar icon is a separate black template of this live dial, in
+`src/tray_icon.rs`. The web preview favicon copies
 `32x32.png` to `apps/desktop/public/favicon.png`.
 
 Visual source notes are in `apps/mobile/assets/branding/design-notes.md`.

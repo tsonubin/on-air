@@ -29,6 +29,7 @@ on-air-core = { path = "../../../packages/core" }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSString"] }
 objc2-app-kit = { version = "0.3.2", features = [
+    "NSApplication",
     "NSWindow",
     "NSView",
     "NSResponder",

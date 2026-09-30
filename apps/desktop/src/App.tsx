@@ -172,11 +172,41 @@ function App() {
   }, [refresh]);
 
   useEffect(() => {
+    let stop: (() => void) | undefined;
+    let cancelled = false;
     void import("@tauri-apps/api/core")
       .then(({ invoke }) => invoke<boolean>("autostart_enabled"))
-      .then(setAutostart)
-      .catch(() => setAutostart(null));
+      .then((enabled) => {
+        if (!cancelled) setAutostart(enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setAutostart(null);
+      });
+    void import("@tauri-apps/api/event")
+      .then(({ listen }) =>
+        listen<boolean>("autostart-changed", (event) => setAutostart(event.payload)),
+      )
+      .then((unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }, []);
+
+  const toggleAutostart = async () => {
+    if (autostart === null) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const next = await invoke<boolean>("set_autostart", { enabled: !autostart });
+      setAutostart(next);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   useEffect(() => {
     if (pairTarget?.transport === "airplay") {
@@ -428,7 +458,15 @@ function App() {
                 <span>:{DEFAULT_PORT}</span>
                 <span data-testid="airplay-mode">{airplayMode || "—"}</span>
                 {autostart !== null && (
-                  <span data-testid="autostart-hint">{autostart ? "autostart" : "manual"}</span>
+                  <button
+                    type="button"
+                    data-testid="autostart-hint"
+                    aria-pressed={autostart}
+                    className="text-left hover:text-amber"
+                    onClick={() => void toggleAutostart()}
+                  >
+                    {autostart ? "open at login" : "manual start"}
+                  </button>
                 )}
               </div>
             </details>
