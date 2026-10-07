@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
-    "test": "node --experimental-strip-types --test src/http.test.ts src/discover.test.ts",
+    "test": "node --experimental-strip-types --test src/http.test.ts src/discover.test.ts src/events.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

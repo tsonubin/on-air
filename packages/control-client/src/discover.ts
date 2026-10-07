@@ -11,11 +11,15 @@ const SCAN_TIMEOUT_MS = 1_000;
 // Keep the probe fan-out modest for older phones and laptops. Discovery is
 // phased and stops launching work after the first responsive batch.
 const SCAN_CONCURRENCY = 16;
+/** Shown for cores whose status payload carries no `name` (all current ones). */
+export const DEFAULT_SERVICE_NAME = "on-air";
 
 /** True for a private LAN unicast IPv4 we can expand into a /24 probe list. */
 export function isLanUnicast(ip: string): boolean {
-  const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return false;
+  const fields = ip.split(".");
+  if (fields.length !== 4) return false;
+  const parts = fields.map((field) => (/^\d{1,3}$/.test(field) ? Number(field) : -1));
+  if (parts.some((p) => p < 0 || p > 255)) return false;
   const [a, b] = parts;
   if (a === 10) return true;
   if (a === 192 && b === 168) return true;
@@ -49,7 +53,12 @@ export async function probeOnAir(
     if (!response.ok) return null;
     const body = (await response.json()) as StatusResponse;
     if (body.status !== "ok") return null;
-    return { host, port, version: body.version, name: "on-air" };
+    return {
+      host,
+      port,
+      version: typeof body.version === "string" ? body.version : undefined,
+      name: typeof body.name === "string" && body.name ? body.name : DEFAULT_SERVICE_NAME,
+    };
   } catch {
     return null;
   } finally {

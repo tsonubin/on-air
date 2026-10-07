@@ -132,6 +132,7 @@ function useRemoteController() {
     playing: false,
     track: 0,
     track_count: 0,
+    tracks: [],
     position_ms: 0,
     duration_ms: 0,
   });
@@ -501,6 +502,7 @@ function useRemoteController() {
       playing: false,
       track: 0,
       track_count: 0,
+      tracks: [],
       position_ms: 0,
       duration_ms: 0,
     });
