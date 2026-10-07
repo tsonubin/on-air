@@ -14,11 +14,23 @@
       {
         "title": "on-air",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "minWidth": 640,
+        "minHeight": 480
       }
     ],
     "security": {
-      "csp": null
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
+        "font-src": "'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net",
+        "img-src": "'self' data:",
+        "connect-src": "'self' ipc: http://ipc.localhost http://127.0.0.1:47990 ws://127.0.0.1:47990 http://localhost:47990 ws://localhost:47990",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-ancestors": "'none'"
+      }
     }
   },
   "bundle": {

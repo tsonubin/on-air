@@ -6,6 +6,9 @@
 //! mark from `icons/icon.png` (the lowercase a and its lamp), area-sampled
 //! to 36 pixels on a side.
 
+// Only the macOS tray uses the template image; the test runs everywhere.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 pub const TRAY_ICON_PX: u32 = 36;
 
 /// Row-major alpha. Zero is clear; 255 is solid template black.
