@@ -275,37 +275,20 @@ fn schedule_autohide(app: tauri::AppHandle) {
 ///
 /// The alternative is to create the window with `visible: false` and show it
 /// on `PageLoadEvent::Finished` when the launch is not hidden, which needs no
-/// FFI; this hand-rolled binding is kept until that path is verified to paint
-/// on the first show.
+/// main-queue hop; this one is kept until that path is verified to paint on
+/// the first show.
 #[cfg(target_os = "macos")]
 fn defer_main_turns(app: tauri::AppHandle, turns: u8) {
-    struct Job {
-        app: tauri::AppHandle,
-        turns: u8,
-    }
-
-    extern "C" fn work(context: *mut std::ffi::c_void) {
-        let job = unsafe { Box::from_raw(context.cast::<Job>()) };
-        if job.turns == 0 {
-            hide_main_window_if_pending(&job.app);
+    // `dispatch_get_main_queue()` is a header inline, not an exported
+    // symbol, so the main queue has to come from dispatch2 (which reads
+    // `_dispatch_main_q`) rather than a hand-written extern block.
+    dispatch2::DispatchQueue::main().exec_async(move || {
+        if turns == 0 {
+            hide_main_window_if_pending(&app);
         } else {
-            defer_main_turns(job.app, job.turns - 1);
+            defer_main_turns(app, turns - 1);
         }
-    }
-
-    extern "C" {
-        fn dispatch_get_main_queue() -> *mut std::ffi::c_void;
-        fn dispatch_async_f(
-            queue: *mut std::ffi::c_void,
-            context: *mut std::ffi::c_void,
-            work: extern "C" fn(*mut std::ffi::c_void),
-        );
-    }
-
-    let job = Box::into_raw(Box::new(Job { app, turns }));
-    unsafe {
-        dispatch_async_f(dispatch_get_main_queue(), job.cast(), work);
-    }
+    });
 }
 
 /// Brings the OS login item in line with the saved preference and returns
