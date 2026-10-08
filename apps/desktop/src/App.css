@@ -1,16 +1,96 @@
 @import "tailwindcss";
 @source "./**/*.{ts,tsx}";
 
+/*
+ * Design tokens. Tailwind's default palette and type scale are reset, so the
+ * only colour and font-size utilities that exist are the ones defined here.
+ * Add a token rather than an arbitrary hex colour or pixel size in a class.
+ */
 @theme {
-  --color-steel: #c4b89a;
-  --color-steel-dim: #8a7f68;
-  --color-ink: #f3ead4;
+  --color-*: initial;
+
+  /* Surfaces */
   --color-well: #0a0908;
   --color-face: #1a1814;
   --color-face-2: #221f1a;
+  --color-face-deep: #141210;
+  --color-face-raised: #2a261f;
+  --color-face-top: #2c281f;
+  --color-face-glow: #2c2418;
+  --color-face-hover: #2a2218;
+  --color-footer: #151310;
+
+  /* Lines */
+  --color-line: #3a342a;
+  --color-line-soft: #2e2a24;
+  --color-line-strong: #4a4338;
+
+  /* Text */
+  --color-ink: #f3ead4;
+  --color-steel: #c4b89a;
+  --color-steel-dim: #9a8f78;
+
+  /* Signal colours */
   --color-live: #ff3b2a;
+  --color-live-dim: #6a2a22;
+  --color-live-deep: #3a221c;
+  --color-live-well: #1e1410;
+  --color-live-ink: #ffd4cc;
   --color-amber: #e0a24b;
-  --font-led: "DSEG14 Classic Mini", "DSEG14 Classic", "IBM Plex Mono", ui-monospace, monospace;
+  --color-amber-bright: #f0c56a;
+  --color-key: #5c4a32;
+  --color-danger-bg: #3a1410;
+  --color-danger-fg: #f0b4ac;
+
+  /* LED readouts */
+  --color-led-well: #070605;
+  --color-led-ghost: #1c1812;
+
+  /* Wordmark sign */
+  --color-sign-frame: #1a1612;
+  --color-sign-top: #2a2218;
+  --color-sign-mid: #0e0c0a;
+  --color-sign-bottom: #161210;
+  --color-sign-ok: #5a1814;
+  --color-sign-live-top: #4a1814;
+  --color-sign-live-mid: #1a0605;
+  --color-sign-live-bottom: #2a0c0a;
+  --color-sign-live-line: #8a3a30;
+
+  /* Fader thumb and knob metal */
+  --color-thumb-hi: #e9ebef;
+  --color-thumb: #b8bcc4;
+  --color-thumb-lo: #6f747d;
+  --color-thumb-ring: rgba(24, 26, 30, 0.45);
+  --color-knob-hi: #7a7366;
+  --color-knob: #5a5346;
+  --color-knob-lo: #161410;
+
+  /* Shadows, glows and overlays */
+  --color-black: #000;
+  --color-shadow: rgba(0, 0, 0, 0.5);
+  --color-shadow-soft: rgba(0, 0, 0, 0.45);
+  --color-shadow-deep: rgba(0, 0, 0, 0.55);
+  --color-scrim: rgba(8, 7, 6, 0.72);
+  --color-sheen: rgba(255, 255, 255, 0.1);
+  --color-scanline: rgba(255, 255, 255, 0.035);
+  --color-glow-amber: rgba(224, 162, 75, 0.55);
+  --color-glow-amber-strong: rgba(224, 162, 75, 0.8);
+  --color-glow-amber-soft: rgba(224, 162, 75, 0.35);
+  --color-glow-live: rgba(255, 70, 50, 0.7);
+
+  /* Four-step type scale */
+  --text-*: initial;
+  --text-xs: 10px;
+  --text-xs--line-height: 1.3;
+  --text-sm: 11px;
+  --text-sm--line-height: 1.35;
+  --text-base: 13px;
+  --text-base--line-height: 1.45;
+  --text-lg: 18px;
+  --text-lg--line-height: 1.2;
+
+  --font-led: "DSEG14 Classic Mini", "IBM Plex Mono", ui-monospace, monospace;
   --font-sign: "Anton", "Arial Narrow", Impact, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
@@ -28,9 +108,13 @@
   body {
     margin: 0;
     color: var(--color-ink);
-    background: radial-gradient(80% 50% at 50% 0%, #2c2418 0%, var(--color-well) 62%);
+    background: radial-gradient(
+      80% 50% at 50% 0%,
+      var(--color-face-glow) 0%,
+      var(--color-well) 62%
+    );
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: var(--text-base);
   }
   button,
   select,
@@ -50,23 +134,39 @@
   }
 }
 
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Wordmark sign: one base, a live override, and one face per lamp mode. */
 @utility wordmark {
   isolation: isolate;
   overflow: hidden;
-  border: 2px solid #1a1612;
-  background: linear-gradient(180deg, #2a2218 0%, #0e0c0a 38%, #161210 100%);
+  border: 2px solid var(--color-sign-frame);
+  background: linear-gradient(
+    180deg,
+    var(--color-sign-top) 0%,
+    var(--color-sign-mid) 38%,
+    var(--color-sign-bottom) 100%
+  );
   box-shadow:
-    inset 0 1px 0 #4a4034,
-    inset 0 -2px 4px #000,
-    0 1px 2px #000;
+    inset 0 1px 0 var(--color-line-strong),
+    inset 0 -2px 4px var(--color-black),
+    0 1px 2px var(--color-black);
   font-family: var(--font-sign);
   letter-spacing: 0.22em;
   line-height: 0.92;
 }
 @utility wordmark-gel {
   background:
-    radial-gradient(120% 90% at 50% 120%, rgba(255, 255, 255, 0.1), transparent 55%),
-    repeating-linear-gradient(180deg, transparent 0 1px, rgba(255, 255, 255, 0.035) 1px 2px),
+    radial-gradient(120% 90% at 50% 120%, var(--color-sheen), transparent 55%),
+    repeating-linear-gradient(180deg, transparent 0 1px, var(--color-scanline) 1px 2px),
     url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.55 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   background-size:
     auto,
@@ -74,41 +174,76 @@
     80px 80px;
   mix-blend-mode: overlay;
 }
-@utility wordmark-ok {
+@utility wordmark-live {
+  background: linear-gradient(
+    180deg,
+    var(--color-sign-live-top) 0%,
+    var(--color-sign-live-mid) 42%,
+    var(--color-sign-live-bottom) 100%
+  );
   box-shadow:
-    inset 0 1px 0 #4a4034,
-    inset 0 -2px 4px #000,
-    0 1px 2px #000;
+    inset 0 1px 0 var(--color-sign-live-line),
+    inset 0 -2px 6px var(--color-black),
+    0 1px 2px var(--color-black);
 }
 @utility wordmark-ok-face {
-  color: #5a1814;
+  color: var(--color-sign-ok);
   text-shadow: none;
 }
-@utility wordmark-warn {
-  box-shadow:
-    inset 0 1px 0 #4a4034,
-    inset 0 -2px 4px #000,
-    0 1px 2px #000;
+@utility wordmark-wait-face {
+  color: var(--color-steel-dim);
+  text-shadow: none;
 }
 @utility wordmark-warn-face {
-  color: #f0c56a;
-  text-shadow: 0 0 4px rgba(224, 162, 75, 0.55);
+  color: var(--color-amber-bright);
+  text-shadow: 0 0 4px var(--color-glow-amber);
   animation: lamp-breathe 1.6s ease-in-out infinite;
 }
-@utility wordmark-live {
-  background: linear-gradient(180deg, #4a1814 0%, #1a0605 42%, #2a0c0a 100%);
-  box-shadow:
-    inset 0 1px 0 #8a3a30,
-    inset 0 -2px 6px #000,
-    0 1px 2px #000;
-}
 @utility wordmark-live-face {
-  color: #ff3a28;
-  text-shadow: 0 0 5px rgba(255, 70, 50, 0.7);
+  color: var(--color-live);
+  text-shadow: 0 0 5px var(--color-glow-live);
   animation: lamp-breathe 2.4s ease-in-out infinite;
 }
 
+@utility chassis {
+  background: linear-gradient(
+    180deg,
+    var(--color-face-raised) 0%,
+    var(--color-face) 18%,
+    var(--color-face-deep) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 var(--color-line-strong),
+    0 18px 40px var(--color-shadow-soft);
+}
+@utility panel-raised {
+  background: linear-gradient(180deg, var(--color-face-raised), var(--color-sign-bottom));
+  box-shadow:
+    inset 0 1px 0 var(--color-line-strong),
+    0 10px 22px var(--color-shadow);
+}
+@utility device-row {
+  background: linear-gradient(180deg, var(--color-face-2), var(--color-face));
+  box-shadow: inset 0 1px 0 var(--color-line-strong);
+}
+@utility device-row-on {
+  border-color: var(--color-live-dim);
+  background: linear-gradient(180deg, var(--color-live-deep), var(--color-live-well));
+}
+@utility led-readout {
+  background: var(--color-led-well);
+  box-shadow: inset 0 1px 3px var(--color-black);
+  font-family: var(--font-led);
+  line-height: 1;
+}
+@utility led-glow {
+  text-shadow:
+    0 0 4px var(--color-glow-amber-strong),
+    0 0 10px var(--color-glow-amber-soft);
+}
+
 @layer components {
+  /* Routing grid: Source and Destination, side by side when there is room. */
   .routing-grid {
     display: grid;
     flex: 1;
@@ -125,7 +260,7 @@
     padding: 12px;
   }
   .routing-destination {
-    border-top: 1px solid #2e2a24;
+    border-top: 1px solid var(--color-line-soft);
   }
   .routing-heading {
     display: flex;
@@ -142,50 +277,10 @@
     align-items: center;
     min-height: 26px;
     margin: 0;
-    font: 10px var(--font-mono);
+    font: var(--text-xs) var(--font-mono);
     letter-spacing: 0.22em;
     text-transform: uppercase;
     color: var(--color-steel-dim);
-  }
-  .device-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-  .device-action {
-    cursor: pointer;
-    border: 1px solid #3a342a;
-    border-radius: 4px;
-    background: #141210;
-    padding: 5px 8px;
-    font: 10px var(--font-mono);
-  }
-  .device-action:hover,
-  .device-action:focus-visible {
-    border-color: var(--color-amber);
-    color: var(--color-amber);
-  }
-  .device-action:disabled {
-    opacity: 0.5;
-    cursor: wait;
-  }
-  .device-help {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 12px 16px;
-    border-bottom: 1px solid #3a342a;
-    font-size: 12px;
-  }
-  .device-help > div:first-child {
-    flex: 1 1 280px;
-  }
-  .device-help p {
-    margin: 4px 0 0;
-    color: var(--color-steel);
   }
   @media (min-width: 721px) {
     .routing-grid {
@@ -199,15 +294,131 @@
     }
     .routing-destination {
       border-top: 0;
-      border-left: 1px solid #2e2a24;
+      border-left: 1px solid var(--color-line-soft);
     }
   }
+
+  .device-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .device-help {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-line);
+    font-size: var(--text-sm);
+  }
+  .device-help > div:first-child {
+    flex: 1 1 280px;
+  }
+  .device-help p {
+    margin: 4px 0 0;
+    color: var(--color-steel);
+  }
+  .skeleton-row {
+    height: 34px;
+    border-radius: 6px;
+    background: var(--color-face-2);
+    animation: skeleton-pulse 1.4s ease-in-out infinite;
+  }
+
+  /* The one button. Variants layer on top of .btn. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-face-deep);
+    padding: 5px 8px;
+    font: var(--text-xs) var(--font-mono);
+    color: var(--color-ink);
+    line-height: 1.3;
+  }
+  .btn:hover,
+  .btn:focus-visible {
+    border-color: var(--color-amber);
+    color: var(--color-amber);
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--color-amber);
+    outline-offset: 1px;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn[aria-busy="true"] {
+    cursor: wait;
+  }
+  .btn-key {
+    min-width: 28px;
+    height: 28px;
+    padding: 0 7px;
+    background: linear-gradient(180deg, var(--color-face-top), var(--color-face-deep));
+    box-shadow:
+      inset 0 1px 0 var(--color-line-strong),
+      0 1px 1px var(--color-black);
+    font-size: var(--text-sm);
+    line-height: 1;
+  }
+  .btn-key:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+  .btn-key-main {
+    min-width: 34px;
+    border-color: var(--color-live-dim);
+    background: linear-gradient(180deg, var(--color-live-deep), var(--color-live-well));
+  }
+  .btn-primary,
+  .btn-secondary {
+    flex: 1;
+    padding: 10px;
+    font: var(--text-base) var(--font-sans);
+  }
+  .btn-primary {
+    border-color: var(--color-live-dim);
+    background: var(--color-live-deep);
+    color: var(--color-live-ink);
+  }
+  .btn-ghost {
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+  }
+  .btn-step {
+    height: 24px;
+    width: 28px;
+    padding: 0;
+    border-radius: 2px;
+    background: var(--color-face);
+    font: var(--text-base) var(--font-sans);
+    color: var(--color-steel);
+  }
+
+  /* Status hatch knob on the header. */
   .hatch-knob {
     list-style: none;
-    background: radial-gradient(circle at 40% 30%, #5a5346, #2a261f 62%, #161410);
+    background: radial-gradient(
+      circle at 40% 30%,
+      var(--color-knob),
+      var(--color-face-raised) 62%,
+      var(--color-knob-lo)
+    );
     box-shadow:
-      inset 0 1px 0 #7a7366,
-      0 1px 2px #000;
+      inset 0 1px 0 var(--color-knob-hi),
+      0 1px 2px var(--color-black);
   }
   .hatch-knob::-webkit-details-marker {
     display: none;
@@ -218,57 +429,13 @@
     width: 9px;
     height: 1.5px;
     margin: 7.5px auto 0;
-    background: #0a0908;
+    background: var(--color-well);
     border-radius: 1px;
     transform: rotate(-28deg);
-    box-shadow: 0 1px 0 #4a4338;
+    box-shadow: 0 1px 0 var(--color-line-strong);
   }
-}
 
-@utility chassis {
-  background: linear-gradient(180deg, #2a261f 0%, var(--color-face) 18%, #141210 100%);
-  box-shadow:
-    inset 0 1px 0 #4a4338,
-    0 18px 40px rgba(0, 0, 0, 0.45);
-}
-@utility device-row {
-  background: linear-gradient(180deg, #26221c, #1a1814);
-  box-shadow: inset 0 1px 0 #3c372e;
-}
-@utility device-row-on {
-  border-color: #6a2a22;
-  background: linear-gradient(180deg, #3a221c, #1e1410);
-}
-@layer components {
-  .cd-key {
-    min-width: 28px;
-    height: 28px;
-    padding: 0 7px;
-    cursor: pointer;
-    border-radius: 4px;
-    border: 1px solid #3a342a;
-    background: linear-gradient(180deg, #2c281f, #141210);
-    box-shadow:
-      inset 0 1px 0 #4a4338,
-      0 1px 1px #000;
-    color: var(--color-ink);
-    line-height: 1;
-    font-size: 11px;
-  }
-  .cd-key:hover {
-    border-color: var(--color-amber);
-    color: var(--color-amber);
-  }
-  .cd-key:active {
-    transform: translateY(1px);
-  }
-  .cd-key-main {
-    min-width: 34px;
-    border-color: #6a2a22;
-    background: linear-gradient(180deg, #3a221c, #1e1410);
-  }
-}
-@layer components {
+  /* Fader thumb: brushed cap drawn with gradients. */
   .fader-thumb {
     display: block;
     width: 22px;
@@ -280,18 +447,31 @@
     cursor: grab;
     border: 0;
     outline: none;
-    background-color: #b8bcc4;
-    background-image: url("./assets/fader-thumb-silver.png");
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 100% 100%;
+    background:
+      radial-gradient(circle at 35% 28%, var(--color-thumb-hi) 0%, transparent 42%),
+      radial-gradient(
+        circle at 50% 50%,
+        transparent 30%,
+        var(--color-thumb-ring) 31%,
+        transparent 36%
+      ),
+      linear-gradient(
+        180deg,
+        var(--color-thumb-hi) 0%,
+        var(--color-thumb) 48%,
+        var(--color-thumb-lo) 100%
+      );
     box-shadow:
-      0 1px 1px rgba(0, 0, 0, 0.5),
-      0 0 0 1px rgba(24, 26, 30, 0.45);
+      0 1px 1px var(--color-shadow),
+      0 0 0 1px var(--color-thumb-ring);
   }
   .fader-thumb:focus-visible {
     box-shadow:
-      0 0 0 2px #e0a24b,
-      0 1px 1px rgba(0, 0, 0, 0.5);
+      0 0 0 2px var(--color-amber),
+      0 1px 1px var(--color-shadow);
+  }
+  .fader-thumb[data-disabled] {
+    cursor: not-allowed;
+    filter: saturate(0.4) brightness(0.7);
   }
 }

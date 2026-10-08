@@ -1,8 +1,11 @@
 import * as Slider from "@radix-ui/react-slider";
 import { useEffect, useRef, useState } from "react";
+import { Button } from "./Button";
 
 type Props = {
   label: string;
+  /** Accessible name for the thumb; defaults to `label`. */
+  ariaLabel?: string;
   value: number;
   min: number;
   max: number;
@@ -10,11 +13,13 @@ type Props = {
   testId: string;
   readout?: string;
   showStepButtons?: boolean;
+  disabled?: boolean;
   onChange: (value: number) => void;
 };
 
 export function Fader({
   label,
+  ariaLabel = label,
   value,
   min,
   max,
@@ -22,11 +27,15 @@ export function Fader({
   testId,
   readout,
   showStepButtons = false,
+  disabled = false,
   onChange,
 }: Props) {
   const [draft, setDraft] = useState(value);
   const draftRef = useRef(value);
+  // While the thumb is held, polls and echoes must not yank it back.
+  const dragging = useRef(false);
   useEffect(() => {
+    if (dragging.current) return;
     draftRef.current = value;
     setDraft(value);
   }, [value]);
@@ -42,8 +51,10 @@ export function Fader({
   };
 
   return (
-    <div className="flex w-10 flex-col items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-steel-dim [@media(max-height:560px)]:gap-1">
-      <span className="h-4 text-amber">{readout ?? draft}</span>
+    <div className="flex w-10 flex-col items-center gap-1.5 font-mono text-xs uppercase tracking-[0.12em] text-steel-dim [@media(max-height:560px)]:gap-1">
+      <span className="h-4 text-amber" aria-hidden="true">
+        {readout ?? draft}
+      </span>
       <input
         type="range"
         data-testid={testId}
@@ -51,6 +62,7 @@ export function Fader({
         max={max}
         step={step}
         value={draft}
+        disabled={disabled}
         aria-hidden="true"
         tabIndex={-1}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -62,38 +74,45 @@ export function Fader({
         max={max}
         step={step}
         value={[draft]}
-        onValueChange={([next]) => preview(next ?? min)}
-        onValueCommit={([next]) => onChange(next ?? min)}
-        className="relative flex h-24 w-6 touch-none select-none flex-col items-center justify-center [@media(max-height:560px)]:h-14"
+        disabled={disabled}
+        onValueChange={([next]) => {
+          dragging.current = true;
+          preview(next ?? min);
+        }}
+        onValueCommit={([next]) => {
+          dragging.current = false;
+          onChange(next ?? min);
+        }}
+        className="relative flex h-24 w-6 touch-none select-none flex-col items-center justify-center data-disabled:opacity-60 [@media(max-height:560px)]:h-14"
       >
-        <Slider.Track className="relative h-full w-1.5 grow rounded-full bg-[#0c0b0a] shadow-[inset_0_0_0_1px_#2a261f]">
-          <Slider.Range className="absolute w-full rounded-full bg-[#5c4a32]" />
+        <Slider.Track className="relative h-full w-1.5 grow rounded-full bg-well shadow-[inset_0_0_0_1px_var(--color-face-raised)]">
+          <Slider.Range className="absolute w-full rounded-full bg-key" />
         </Slider.Track>
-        <Slider.Thumb className="fader-thumb" />
+        <Slider.Thumb className="fader-thumb" aria-label={ariaLabel} />
       </Slider.Root>
       {showStepButtons && (
         <div className="flex gap-1">
-          <button
-            type="button"
-            aria-label={`Decrease ${label}`}
+          <Button
+            variant="step"
+            aria-label={`Decrease ${ariaLabel}`}
             data-testid={`${testId}-down`}
+            disabled={disabled}
             onClick={() => stepBy(-step)}
-            className="flex h-6 w-7 items-center justify-center rounded-sm border border-[#3a342a] bg-[#1a1814] text-sm text-steel hover:border-amber hover:text-amber focus-visible:outline-2 focus-visible:outline-amber"
           >
             ↓
-          </button>
-          <button
-            type="button"
-            aria-label={`Increase ${label}`}
+          </Button>
+          <Button
+            variant="step"
+            aria-label={`Increase ${ariaLabel}`}
             data-testid={`${testId}-up`}
+            disabled={disabled}
             onClick={() => stepBy(step)}
-            className="flex h-6 w-7 items-center justify-center rounded-sm border border-[#3a342a] bg-[#1a1814] text-sm text-steel hover:border-amber hover:text-amber focus-visible:outline-2 focus-visible:outline-amber"
           >
             ↑
-          </button>
+          </Button>
         </div>
       )}
-      <span>{label}</span>
+      <span aria-hidden="true">{label}</span>
     </div>
   );
 }
