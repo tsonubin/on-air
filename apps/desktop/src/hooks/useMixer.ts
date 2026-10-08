@@ -118,11 +118,9 @@ export function useMixer({
     setGainsState(polledGains);
   }, [polledGains, writing]);
 
-  // Tolerates a legacy flat `{sample_rate_hz}` body (the Playwright fixture
-  // still sends one) by falling back to the top-level rate.
   const rate = snapshot.sampleRate;
-  const polledInputHz = rate ? (rate.input?.sample_rate_hz ?? rate.sample_rate_hz) : null;
-  const polledOutputHz = rate ? (rate.output?.sample_rate_hz ?? rate.sample_rate_hz) : null;
+  const polledInputHz = rate ? rate.input.sample_rate_hz : null;
+  const polledOutputHz = rate ? rate.output.sample_rate_hz : null;
   useEffect(() => {
     if (polledInputHz === null || writing("input_hz")) return;
     committedInputHz.current = polledInputHz;

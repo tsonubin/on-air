@@ -1,68 +1,47 @@
 import { expect, test } from "@playwright/test";
-import { runGoldenPath, runTransportSwitch } from "./goldenPath";
+import { getActiveOutput, getEq, simulateCd } from "../../packages/control-client/src/index.ts";
+import { goldenPathSonos, switchTransports } from "../shared/scenarios.ts";
 
-const API = process.env.API_BASE ?? "http://127.0.0.1:47990";
+// The mock core started by playwright.config.ts. Loopback callers need no
+// pairing token.
+const API = "http://127.0.0.1:47990";
 
-test("API golden path: pick input, activate Sonos, volume, EQ", async () => {
-  await runGoldenPath(API);
-  const eq = await fetch(`${API}/api/eq`).then((r) => r.json());
-  expect(eq.gains_db[0]).toBe(3);
-  const { active } = await fetch(`${API}/api/outputs/active`).then((r) => r.json());
-  expect(active.transport).toBe("sonos");
+test("API golden path: pick input, activate Sonos, volume, EQ", { tag: "@api" }, async () => {
+  await goldenPathSonos(API, undefined);
+  expect((await getEq(API))[0]).toBe(3);
+  expect((await getActiveOutput(API))?.transport).toBe("sonos");
 });
 
-test("API transport switch Sonos -> AirPlay -> Bluetooth", async () => {
-  const activated = await runTransportSwitch(API);
+test("API transport switch Sonos -> AirPlay -> Bluetooth", { tag: "@api" }, async () => {
+  const activated = await switchTransports(API);
   expect(activated).toEqual(["sonos", "airplay", "bluetooth"]);
+  expect((await getActiveOutput(API))?.transport).toBe("bluetooth");
 });
 
 test("desktop UI plays an inserted audio CD", async ({ page }) => {
-  const api = process.env.API_BASE ?? "http://127.0.0.1:47990";
-  const ui = process.env.UI_BASE ?? "http://127.0.0.1:1420";
-  const inserted = await fetch(`${api}/api/mock/cd`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      present: true,
-      album: "Kind of Blue",
-      tracks: [{ title: "So What" }, { title: "Freddie Freeloader" }],
-    }),
+  await simulateCd(API, {
+    present: true,
+    album: "Kind of Blue",
+    tracks: [{ title: "So What" }, { title: "Freddie Freeloader" }],
   });
-  if (!inserted.ok) {
-    test.skip(true, "mock core is not accepting CD insert");
-    return;
-  }
   try {
-    await page.goto(ui, { timeout: 5_000 });
-  } catch {
-    test.skip(true, "desktop vite UI is not running on :1420");
-    return;
+    await page.goto("/");
+    await expect(page.getByTestId("cd-transport")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("cd-track")).toContainText("01/02");
+    await expect(page.getByTestId("cd-transport")).toContainText("So What");
+    await page.getByTestId("cd-next").click();
+    await expect(page.getByTestId("cd-track")).toContainText("02/02");
+    await page.getByTestId("cd-play").click();
+    await expect(page.getByTestId("cd-play")).toHaveAttribute("aria-label", "Play");
+  } finally {
+    await simulateCd(API, { present: false });
   }
-  await expect(page.getByTestId("cd-transport")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId("cd-track")).toContainText("01/02");
-  await expect(page.getByTestId("cd-transport")).toContainText("So What");
-  await page.getByTestId("cd-next").click();
-  await expect(page.getByTestId("cd-track")).toContainText("02/02");
-  await page.getByTestId("cd-play").click();
-  await expect(page.getByTestId("cd-play")).toHaveAttribute("aria-label", "Play");
-  await fetch(`${api}/api/mock/cd`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ present: false }),
-  });
 });
 
 test("desktop UI golden path against mock core", async ({ page }) => {
-  const ui = process.env.UI_BASE ?? "http://127.0.0.1:1420";
-  try {
-    await page.goto(ui, { timeout: 5_000 });
-  } catch {
-    test.skip(true, "desktop vite UI is not running on :1420");
-    return;
-  }
+  await page.goto("/");
   await expect(page.getByTestId("core-status")).toContainText("ok", { timeout: 15_000 });
-  const input = page.getByTestId("input-Mock Monitor");
-  await input.click();
+  await page.getByTestId("input-Mock Monitor").click();
   await page.getByTestId("output-sonos-uuid:mock-sonos").click();
   await expect(page.getByTestId("active-output")).toContainText("sonos");
   await page.getByTestId("volume-slider").fill("20");

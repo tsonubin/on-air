@@ -13,28 +13,10 @@
         "aarch64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
-      filteredSrc =
-        system:
-        let
-          pkgs = nixpkgs.legacyPackages.${system};
-        in
-        pkgs.lib.cleanSourceWith {
-          src = self;
-          filter =
-            path: type:
-            let
-              base = baseNameOf path;
-            in
-            !builtins.elem base [
-              "target"
-              "node_modules"
-              ".git"
-              ".turbo"
-              "dist"
-              "test-results"
-              "result"
-            ];
-        };
+      filteredSrc = import ./packaging/nix/source.nix {
+        inherit (nixpkgs) lib;
+        src = self;
+      };
     in
     {
       packages = forAllSystems (
@@ -42,7 +24,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           on-air-core = pkgs.callPackage ./packaging/nix/on-air-core.nix {
-            src = filteredSrc system;
+            src = filteredSrc;
           };
         in
         {

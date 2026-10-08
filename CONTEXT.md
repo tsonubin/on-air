@@ -33,3 +33,7 @@ Processed mono L16 at the input/pipeline rate, published on an in-process bus. S
 ## Sonos radio
 
 HTTP WAV body at `/stream/<nonce>/audio.wav`, where the 32-hex nonce is minted per activation. A Sonos and AirPlay delivery adapter on the pipeline PCM bus. Served only while that output is live, so speakers can GET it without a pairing token and an old URL stops working on the next switch.
+
+## Error envelope
+
+Every non-2xx API response is JSON `{"error", "code"}`: clients map the stable snake_case `code` (`ApiErrorCode` in `packages/api-types`) to their own copy and never match on the `error` text.

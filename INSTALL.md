@@ -3,8 +3,11 @@
 on-air captures audio on your computer and sends it to **one** wireless output
 at a time — AirPlay, Bluetooth, or Sonos. The desktop app runs in the tray,
 can start on login, and is controllable from a companion mobile app on the
-same LAN. There is no cloud remote: discovery is mDNS (`_on-air._tcp.local.`),
-control is HTTP/WebSocket on port **47990**, and LAN clients pair with a PIN.
+same LAN. There is no cloud remote: the phone finds the desktop by probing
+port **47990** across its own /24 subnet (or you type the desktop's IP),
+control is HTTP/WebSocket on that port, and LAN clients pair with a PIN. The
+core also advertises `_on-air._tcp` over mDNS, but the phone does not browse
+for it yet.
 
 A tagged GitHub Release (`v*`) ships **installers** for both **x86_64** and
 **arm64** — `.dmg` on macOS, `.msi` / NSIS `.exe` / portable `.zip` on
@@ -14,7 +17,7 @@ automatic source zip/tarball; that is not the install path.
 | Artifact | What it is |
 | --- | --- |
 | **on-air-desktop** | Tauri 2 tray app (recommended). Embeds `on-air-core`. |
-| **on-air-core** | Headless `serve` binary. Same control plane, no GUI. |
+| **on-air-core** | Headless binary. Same control plane, no GUI. |
 
 Package-manager recipes live in this repository (`Casks/`, `Formula/`,
 `flake.nix`, `packaging/`). They pin version **0.1.0**. Binary recipes expect
@@ -197,10 +200,11 @@ brew install on-air-core
 
 Nix, APT (`on-air-core` .deb), AUR (`on-air-core`), and RPM
 (`on-air-core.spec`) all install a binary named `on-air-core` that listens on
-`127.0.0.1:47990` by default. Override with `PORT=47990`. Mock senders with
-`ON_AIR_MOCK=1`.
+all interfaces, `0.0.0.0:47990`, so phones and Sonos speakers on the LAN can
+reach it. Set `BIND=127.0.0.1` to keep it loopback-only and `PORT` to use
+another port. Mock senders with `ON_AIR_MOCK=1`.
 
-Release binaries (when published) are named:
+Release binaries (when published) keep their original `-serve-` names:
 
 - `on-air-core-serve-macos-aarch64` / `on-air-core-serve-macos-x86_64`
 - `on-air-core-serve-linux-x86_64` / `on-air-core-serve-linux-aarch64`
@@ -234,7 +238,7 @@ and on Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libappindicator3-dev`,
 pnpm install
 
 # headless core
-cargo run -p on-air-core --example serve --release
+cargo run --locked --release -p on-air-core --bin on-air-core
 
 # desktop GUI
 pnpm --dir apps/desktop tauri build
@@ -266,8 +270,8 @@ sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
 
 The iOS/Android app is an **Expo** LAN remote (discovery + PIN pairing + the
 same mixer controls as the Tauri UI). Internal iOS TestFlight uses
-`apps/mobile/scripts/publish-testflight.sh`. From this tree, with the desktop
-already open:
+`apps/mobile/scripts/publish-testflight.sh`. From this tree (the running app
+needs a desktop on the LAN to pair with; the tests do not):
 
 ```bash
 pnpm --filter mobile start          # Expo Go / simulators
@@ -277,8 +281,9 @@ pnpm --filter mobile test
 pnpm --filter @on-air/control-client test
 ```
 
-The phone must be on the same LAN. Scan finds a running core on port `47990`;
-you can still type the desktop IP. Pair with the PIN on the desktop.
+The phone must be on the same LAN. The app probes port `47990` on every
+address in the phone's /24 subnet; on other network layouts, type the desktop
+IP. Pair with the PIN on the desktop.
 
 The native projects use Expo module autolinking and `@expo/ui` native controls.
 Android release builds are intentionally unsigned until a private production
@@ -291,22 +296,23 @@ public debug key.
    desktop app.
 2. On macOS, AirPlay destination is chosen with the system route picker in
    the app; Sonos/Bluetooth and volume/EQ remain remote-controllable.
-3. From a phone on the same LAN, open the mobile remote. It should find the
-   desktop via mDNS; otherwise enter the desktop’s LAN IP.
+3. From a phone on the same LAN, open the mobile remote. It scans the phone's
+   /24 subnet for the desktop; otherwise enter the desktop’s LAN IP.
 4. Pair with the PIN shown on the desktop. Subsequent calls use a Bearer
-   token. Loopback clients on the desktop host skip pairing unless
-   `require_auth` is on.
+   token. The desktop window itself, on the same host, needs no pairing.
 5. Pick **one** output. Switching AirPlay / Bluetooth / Sonos tears down the
    current sender first.
 
-Default bind for the GUI is all interfaces, port `47990`. The headless
-example binds `127.0.0.1` unless you change `PORT`.
+The GUI binds all interfaces on port `47990`. The headless binary does the
+same by default; `BIND` and `PORT` change the address and port.
 
 ## Expected release assets
 
-CI (`.github/workflows/release.yml`) uploads Tauri bundles plus the core
-`serve` example. Names match Tauri 2 defaults for `productName`
-`on-air-desktop` version `0.1.0`:
+CI (`.github/workflows/release.yml`) builds a draft release with the Tauri
+bundles, the headless `on-air-core` binary (published under the
+`on-air-core-serve-<os>-<arch>` names below) and `SHA256SUMS`, and publishes it
+only when every platform succeeded. Names match Tauri 2 defaults for
+`productName` `on-air-desktop` version `0.1.0`:
 
 ```
 # macOS

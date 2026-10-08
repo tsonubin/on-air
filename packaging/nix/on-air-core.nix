@@ -19,8 +19,8 @@ rustPlatform.buildRustPackage rec {
   cargoBuildFlags = [
     "--package"
     "on-air-core"
-    "--example"
-    "serve"
+    "--bin"
+    "on-air-core"
   ];
   cargoTestFlags = [
     "--package"
@@ -40,18 +40,7 @@ rustPlatform.buildRustPackage rec {
       openssl
     ];
 
-  # Lib crate has no [[bin]]; cargo install would fail. Copy the example.
-  installPhase = ''
-    runHook preInstall
-    found=$(find target -type f -path '*/release/examples/serve' | head -n1)
-    if [ -z "$found" ]; then
-      echo "on-air-core serve example was not built" >&2
-      find target -name serve -o -name serve.exe >&2 || true
-      exit 1
-    fi
-    install -Dm755 "$found" $out/bin/on-air-core
-    runHook postInstall
-  '';
+  # The default cargoInstallHook copies the built on-air-core binary to $out/bin.
 
   meta = {
     description = "LAN audio streaming core (HTTP/WS control + AirPlay/Bluetooth/Sonos senders)";

@@ -56,12 +56,6 @@
           }
         }
       }
-    },
-    {
-      "includes": ["e2e/mobile/pairing-sonos.e2e.js"],
-      "javascript": {
-        "globals": ["device", "element", "by", "describe", "it", "expect"]
-      }
     }
   ]
 }

@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # release.yml runs this whole workflow before it builds a tag.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -37,6 +39,8 @@ jobs:
         run: pnpm typecheck:web
       - name: Test control client and mobile UI
         run: pnpm test:mobile
+      - name: Test desktop frontend
+        run: pnpm --filter desktop test
       - name: Build desktop frontend
         run: pnpm --filter desktop build
       - name: Bundle Expo app for iOS and Android
@@ -45,7 +49,7 @@ jobs:
           pnpm --filter mobile exec expo export --platform android --output-dir "${{ runner.temp }}/on-air-expo-export-android" --max-workers 2
 
   test-core:
-    name: fmt / clippy / core tests / phone integration
+    name: fmt / clippy / core tests
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -55,6 +59,21 @@ jobs:
           components: clippy, rustfmt
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
+      - uses: swatinem/rust-cache@v2
+      - name: Install ALSA (cpal)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev pkg-config
+      - name: Lint core
+        run: cargo clippy --locked -p on-air-core --all-targets -- -D warnings
+      - name: Test core
+        run: cargo test --locked -p on-air-core
+
+  e2e-mobile:
+    name: phone client e2e against the mock core
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -64,21 +83,46 @@ jobs:
       - name: Install ALSA (cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev pkg-config
       - run: pnpm install --frozen-lockfile
-      - name: Install desktop API test runner
-        run: npm ci --prefix e2e/desktop
-      - name: Lint core
-        run: cargo clippy --locked -p on-air-core --all-targets -- -D warnings
-      - name: Test core
-        run: cargo test --locked -p on-air-core
+      - name: Build the mock core
+        run: cargo build --locked -p on-air-core --bin on-air-core
       - name: Test phone client against the mock core
         run: pnpm test:mobile:e2e
-      - name: Test desktop client paths against the mock core
-        run: npm --prefix e2e/desktop run test:api
+
+  e2e-desktop:
+    name: desktop e2e (Playwright api + ui) against the mock core
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: swatinem/rust-cache@v2
+      - name: Install ALSA (cpal)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev pkg-config
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm --filter @on-air/e2e exec playwright install --with-deps chromium
+      - name: Build the mock core
+        run: cargo build --locked -p on-air-core --bin on-air-core
+      - name: Test desktop API and UI against the mock core
+        run: pnpm test:desktop:e2e
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: e2e/desktop/test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   check-desktop:
-    name: cargo check (desktop)
+    name: clippy / tests (workspace, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -93,19 +137,23 @@ jobs:
           node-version: 22
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
         with:
-          workspaces: |
-            .
-            apps/desktop/src-tauri
+          components: clippy
+      # One Cargo workspace at the repo root covers core and the desktop shell.
+      - uses: swatinem/rust-cache@v2
       - name: Install Linux Tauri deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev libasound2-dev libssl-dev pkg-config
       - run: pnpm install --frozen-lockfile
-      - name: Check desktop crate
-        run: cargo check --locked -p on-air-desktop
+      # tauri::generate_context! embeds apps/desktop/dist, so build it first.
+      - name: Build desktop frontend
+        run: pnpm --filter desktop build
+      - name: Lint workspace
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test workspace
+        run: cargo test --locked --workspace
 
   build-mobile-android:
     name: build Android debug app

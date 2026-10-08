@@ -1,3 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "e2e"
+
+# One version per tool across the workspace. Reference with "catalog:".
+catalog:
+  "@types/node": ^26.6.4
+  typescript: ~6.0.3

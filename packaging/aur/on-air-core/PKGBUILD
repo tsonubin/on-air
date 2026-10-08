@@ -20,7 +20,7 @@ prepare() {
 build() {
   cd "${pkgname}-${pkgver}"
   export RUSTUP_TOOLCHAIN=stable
-  cargo build --frozen --release --package on-air-core --example serve
+  cargo build --frozen --release --package on-air-core --bin on-air-core
 }
 
 check() {
@@ -30,5 +30,5 @@ check() {
 
 package() {
   cd "${pkgname}-${pkgver}"
-  install -Dm755 target/release/examples/serve "$pkgdir/usr/bin/on-air-core"
+  install -Dm755 target/release/on-air-core "$pkgdir/usr/bin/on-air-core"
 }

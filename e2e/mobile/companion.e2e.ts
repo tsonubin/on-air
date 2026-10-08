@@ -1,17 +1,13 @@
 /**
- * Headless Expo companion E2E against mock core.
+ * Headless Expo companion E2E against the mock core.
  *
- * Covers the phone contract: discover the LAN control plane, PIN-pair, then
+ * Covers the phone contract: reach the LAN control plane, PIN-pair, then
  * drive every mixer control the desktop UI exposes (source, destination,
  * exclusive transports, volume, EQ, sample rates, AirPlay/Bluetooth pairing).
- *
- * Simulators are not required. Detox UI lives in pairing-sonos.e2e.js.
+ * No simulator is needed.
  */
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
-import path from "node:path";
 import { after, before, describe, test } from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   activateInput,
   connectBluetooth,
@@ -21,7 +17,6 @@ import {
   getAirplayMode,
   getEq,
   getSampleRate,
-  goldenPathSonos,
   listBluetooth,
   listInputs,
   listOutputs,
@@ -30,96 +25,26 @@ import {
   pairBluetooth,
   probeOnAir,
   setSampleRate,
-  switchTransports,
   verifyPin,
   wsUrl,
 } from "../../packages/control-client/src/index.ts";
+import { type MockCore, startMockCore } from "../shared/mockCore.ts";
+import { goldenPathSonos, switchTransports } from "../shared/scenarios.ts";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = Number(process.env.E2E_PORT ?? 47992);
 const BASE = `http://127.0.0.1:${PORT}`;
 const PIN = "123456";
 
-let child: ChildProcess | undefined;
+let core: MockCore | undefined;
 let token = "";
-
-function startMockCore(): Promise<ChildProcess> {
-  return new Promise((resolve, reject) => {
-    // Let Cargo validate the cached executable against the current source.
-    // Executing target/debug/examples/serve directly can silently test a stale
-    // binary restored by a CI cache.
-    const spawned = spawn("cargo", ["run", "--locked", "-p", "on-air-core", "--example", "serve"], {
-      cwd: ROOT,
-      env: { ...process.env, ON_AIR_MOCK: "1", PORT: String(PORT), BIND: "127.0.0.1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const chunks: Buffer[] = [];
-    let started = false;
-    const timer = setTimeout(() => {
-      spawned.kill();
-      reject(new Error(`mock core did not start:\n${Buffer.concat(chunks).toString()}`));
-    }, 120_000);
-    const onData = (buf: Buffer) => {
-      chunks.push(buf);
-      if (!started && buf.toString().includes("listening")) {
-        started = true;
-        clearTimeout(timer);
-        resolve(spawned);
-      }
-    };
-    spawned.stdout?.on("data", onData);
-    spawned.stderr?.on("data", onData);
-    spawned.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    spawned.on("exit", (code) => {
-      if (!started) {
-        clearTimeout(timer);
-        reject(
-          new Error(`serve exited ${code ?? "by signal"}: ${Buffer.concat(chunks).toString()}`),
-        );
-      }
-    });
-  });
-}
-
-async function waitForStatus(retries = 40): Promise<void> {
-  for (let i = 0; i < retries; i += 1) {
-    try {
-      await fetchStatus(BASE);
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 250));
-    }
-  }
-  throw new Error(`mock core never answered ${BASE}/api/status`);
-}
 
 describe("expo companion against mock core", { concurrency: 1 }, () => {
   before(async () => {
-    child = await startMockCore();
-    await waitForStatus();
+    core = await startMockCore({ port: PORT });
   });
 
   after(async () => {
-    const running = child;
-    if (!running || running.exitCode !== null) return;
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve();
-      };
-      const timer = setTimeout(() => {
-        running.kill("SIGKILL");
-        finish();
-      }, 5_000);
-      running.once("exit", finish);
-      running.kill("SIGTERM");
-    });
+    await core?.stop();
   });
 
   test("phone discovers the LAN control plane", async () => {
@@ -139,7 +64,7 @@ describe("expo companion against mock core", { concurrency: 1 }, () => {
   });
 
   test("companion golden path: source, Sonos, volume, EQ", async () => {
-    await goldenPathSonos(BASE, PIN);
+    await goldenPathSonos(BASE, token);
     const eq = await getEq(BASE, token);
     assert.deepEqual(eq, [3, 0, 0, 0, -3]);
     const active = await getActiveOutput(BASE, token);

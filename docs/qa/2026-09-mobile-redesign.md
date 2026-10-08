@@ -1,32 +1,26 @@
 # Mobile redesign QA
 
+Design QA record for the September 2026 mobile redesign. The screenshots and
+comparison images were working files on the reviewer's machine and are not
+kept in the repository; the lists below describe what was captured.
+
 ## Visual target and capture state
 
-- Source: `/Users/shay/.codex/generated_images/01a05ccd-6803-77c2-a285-28289c4e629e/exec-fafa3459-0e0b-4e02-91dc-bbdc1908230d.png`
-- Source dimensions: 853 × 1844 px, normalized to 390 × 844 px for comparison.
-- iOS implementation: `/tmp/on-air-mobile-redesign/ios-main-final-v3-1170x2532.png`
-- iOS viewport: 390 × 844 pt at 3× density (1170 × 2532 px), dark appearance.
-- Android standalone build: `1e5c1e84-d62a-4615-8df4-c664dde3b713` (`preview`, APK, Expo SDK 57).
-- Android implementation: `/tmp/on-air-native-latest-phone-portrait.png`
+- Source: a generated concept image, 853 × 1844 px, normalized to 390 × 844 px for comparison.
+- iOS implementation: 390 × 844 pt at 3× density (1170 × 2532 px), dark appearance.
+- Android standalone build: `preview` profile APK, Expo SDK 57.
 - Android normal-phone viewport: 443 × 970 dp at 390 dpi (1080 × 2364 px), Pixel 10 Pro Fold outer display.
-- First-run pairing after discovery: `/tmp/on-air-native-latest-pairing-selected.png`
-- Fold open, responsive two-pane layout: `/tmp/on-air-native-latest-fold-open.png`
-- Fold half-open, landscape/tabletop layout: `/tmp/on-air-native-latest-fold-half-open.png`
-- Outer display, normal-phone portrait layout: `/tmp/on-air-native-latest-phone-portrait.png`
-- Outer display, normal-phone landscape layout: `/tmp/on-air-native-latest-phone-landscape.png`
-- Fold half-open, dark sound sheet: `/tmp/on-air-native-latest-sound-sheet.png`
-- Fold layout before/after comparison: `/tmp/on-air-fold-before-after.png`
+- Android captures: first-run pairing after discovery; fold open (responsive two-pane layout); fold half-open (landscape/tabletop layout); outer display in portrait and landscape; fold half-open dark sound sheet; fold layout before/after.
 - State: paired with the mock core; Mock Monitor routes to Mock Sonos; audio is live; volume was changed from 50 to 80 and independently read back as 80 from the desktop API.
 - The floating blue gear visible in Expo Go captures is development-runtime chrome. It is not rendered by the app and is excluded from app-owned visual findings.
 
 ## Comparison inputs
 
-- Full source and iOS implementation: `/tmp/on-air-mobile-redesign/comparison-main-v3-full.png`
-- Header and route focus: `/tmp/on-air-mobile-redesign/comparison-main-v3-header-route.png`
-- Live, volume, settings, and exit focus: `/tmp/on-air-mobile-redesign/comparison-main-v3-controls.png`
-- iOS compact sound sheet: `/var/folders/mg/xfgz90gs6799jh7xvxs356g80000gn/T/screenshot_optimized_3d7b7ed8-c68b-4c6c-bca2-ae79f001edf9.jpg`
-- iOS expanded equalizer: `/var/folders/mg/xfgz90gs6799jh7xvxs356g80000gn/T/screenshot_optimized_5f813168-94f9-4488-a731-2c41e6eec7b9.jpg`
-- Android dark sound sheet: `/tmp/on-air-mobile-redesign/android-dark-sound-sheet.png`
+- Full source against the iOS implementation.
+- Header and route focus.
+- Live, volume, settings, and exit focus.
+- iOS compact sound sheet and expanded equalizer.
+- Android dark sound sheet.
 
 Both focused comparisons were required because the full 390 × 844 comparison makes the native slider thumb, route indicators, and bottom action copy harder to judge precisely.
 

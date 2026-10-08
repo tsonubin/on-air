@@ -22,10 +22,10 @@ and Sonos.
 %autosetup -n on-air-%{version}
 
 %build
-cargo build --release --locked --package on-air-core --example serve
+cargo build --release --locked --package on-air-core --bin on-air-core
 
 %install
-install -D -m 0755 target/release/examples/serve %{buildroot}%{_bindir}/on-air-core
+install -D -m 0755 target/release/on-air-core %{buildroot}%{_bindir}/on-air-core
 
 %check
 cargo test --release --locked --package on-air-core

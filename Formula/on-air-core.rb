@@ -15,8 +15,7 @@ class OnAirCore < Formula
   end
 
   def install
-    system "cargo", "install", *std_cargo_args(path: "packages/core"), "--example", "serve"
-    mv bin/"serve", bin/"on-air-core"
+    system "cargo", "install", *std_cargo_args(path: "packages/core"), "--bin", "on-air-core"
   end
 
   service do

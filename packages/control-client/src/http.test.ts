@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { prettyInput } from "./deprecated.ts";
 import {
   activateInput,
   activateOutput,
@@ -33,7 +32,6 @@ import {
   verifyPin,
   wsUrl,
 } from "./http.ts";
-import { goldenPathSonos, switchTransports } from "./scenarios.ts";
 
 const BASE = "http://10.0.0.2:47990";
 
@@ -198,13 +196,6 @@ test("204 and empty 200 bodies resolve to undefined", async () => {
   const emptyOk = respond(new Response("", { status: 200 }));
   assert.equal(await activateInput(BASE, "Mock Monitor", "tok", emptyOk), undefined);
   assert.equal(emptyOk.calls[0].init?.body, JSON.stringify({ name: "Mock Monitor" }));
-});
-
-test("prettyInput matches desktop labels", () => {
-  assert.equal(prettyInput("Discard all samples (playback)"), "Null device");
-  assert.equal(prettyInput("alsa_output.pci.analog-stereo.monitor"), "Analog monitor");
-  assert.equal(prettyInput("PipeWire Sound Server"), "PipeWire");
-  assert.equal(prettyInput("Audio CD"), "Audio CD");
 });
 
 test("getPairingPin reads the loopback-only PIN", async () => {
@@ -466,56 +457,4 @@ test("simulateCd posts to the mock-only /api/mock/cd route", async () => {
   assert.equal(calls[0].url, `${BASE}/api/mock/cd`);
   assert.equal(calls[0].init?.method, "POST");
   assert.equal(calls[0].init?.body, JSON.stringify(body));
-});
-
-test("deprecated goldenPathSonos still pairs, picks an input, goes live, sets volume and EQ", async () => {
-  const calls: string[] = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    calls.push(`${init?.method ?? "GET"} ${url}`);
-    if (url.endsWith("/api/status")) return json({ status: "ok", version: "0.1.0" });
-    if (url.endsWith("/api/pairing/verify")) return json({ token: "onair-test" });
-    if (url.endsWith("/api/inputs")) return json({ inputs: ["Mock Monitor"] });
-    if (url.endsWith("/api/outputs")) {
-      return json({
-        outputs: [{ id: "uuid:mock-sonos", name: "Mock Sonos", transport: "sonos" }],
-      });
-    }
-    return new Response(null, { status: 204 });
-  };
-  await goldenPathSonos("http://127.0.0.1:47990", "123456", fetchImpl);
-  assert.deepEqual(calls, [
-    "GET http://127.0.0.1:47990/api/status",
-    "POST http://127.0.0.1:47990/api/pairing/verify",
-    "GET http://127.0.0.1:47990/api/inputs",
-    "POST http://127.0.0.1:47990/api/inputs/active",
-    "GET http://127.0.0.1:47990/api/outputs",
-    "POST http://127.0.0.1:47990/api/outputs/active",
-    "POST http://127.0.0.1:47990/api/outputs/active/volume",
-    "PUT http://127.0.0.1:47990/api/eq",
-  ]);
-});
-
-test("deprecated switchTransports activates Sonos then AirPlay then Bluetooth", async () => {
-  const activated: string[] = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const url = String(input);
-    if (url.endsWith("/api/outputs") && !init?.method) {
-      return json({
-        outputs: [
-          { id: "s", name: "S", transport: "sonos" },
-          { id: "a", name: "A", transport: "airplay" },
-          { id: "b", name: "B", transport: "bluetooth" },
-        ],
-      });
-    }
-    if (url.endsWith("/api/outputs/active")) {
-      activated.push(JSON.parse(String(init?.body)).transport);
-      return new Response(null, { status: 204 });
-    }
-    throw new Error(`unexpected ${url}`);
-  };
-  const order = await switchTransports(BASE, "tok", fetchImpl);
-  assert.deepEqual(order, ["sonos", "airplay", "bluetooth"]);
-  assert.deepEqual(activated, ["sonos", "airplay", "bluetooth"]);
 });

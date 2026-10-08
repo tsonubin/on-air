@@ -1,4 +1,66 @@
+import type {
+  ActiveInputResponse,
+  ActiveOutputResponse,
+  AirPlayModeResponse,
+  CdStatus,
+  EqResponse,
+  InputsResponse,
+  OutputsResponse,
+  OutputVolumeResponse,
+  PinResponse,
+  SampleRateResponse,
+  StatusResponse,
+} from "@on-air/api-types";
 import { expect, test } from "@playwright/test";
+
+// Every /api route is stubbed, so these tests need no core. Each fixture is
+// checked against the shared API types so it cannot drift from the core.
+const responses: Record<string, unknown> = {
+  "/api/status": { status: "ok", version: "0.1.0", service_enabled: true } satisfies StatusResponse,
+  "/api/inputs": { inputs: ["Studio microphone", "System audio"] } satisfies InputsResponse,
+  "/api/inputs/active": { name: null, backend: "cpal-default" } satisfies ActiveInputResponse,
+  "/api/outputs": {
+    outputs: [
+      {
+        id: "air",
+        name: "Living room speaker",
+        transport: "airplay",
+        kind: "solo",
+        member_count: 1,
+        needs_pair: false,
+        paired: true,
+      },
+      {
+        id: "bt",
+        name: "Studio headphones",
+        transport: "bluetooth",
+        kind: "solo",
+        member_count: 1,
+        needs_pair: false,
+        paired: true,
+      },
+    ],
+  } satisfies OutputsResponse,
+  "/api/outputs/active": { active: null } satisfies ActiveOutputResponse,
+  "/api/outputs/active/volume": { volume: 50 } satisfies OutputVolumeResponse,
+  "/api/eq": { gains_db: [0, 0, 0, 0, 0] } satisfies EqResponse,
+  "/api/sample-rate": {
+    sample_rate_hz: 44100,
+    input: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
+    output: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
+  } satisfies SampleRateResponse,
+  "/api/pairing/pin": { pin: "123456" } satisfies PinResponse,
+  "/api/airplay/mode": { mode: "avroute-picker" } satisfies AirPlayModeResponse,
+  "/api/cd": {
+    present: false,
+    playing: false,
+    track: 0,
+    track_count: 0,
+    position_ms: 0,
+    duration_ms: 0,
+    tracks: [],
+  } satisfies CdStatus,
+};
 
 let requests: string[];
 test.beforeEach(async ({ page }) => {
@@ -9,38 +71,13 @@ test.beforeEach(async ({ page }) => {
     const path = new URL(request.url()).pathname;
     requests.push(`${request.method()} ${path}`);
     if (request.method() !== "GET") return route.fulfill({ status: 204 });
-    const responses: Record<string, unknown> = {
-      "/api/status": { status: "ok", version: "0.1.0", service_enabled: true },
-      "/api/inputs": { inputs: ["Studio microphone", "System audio"] },
-      "/api/inputs/active": { name: null, backend: "mock" },
-      "/api/outputs": {
-        outputs: [
-          { id: "air", name: "Living room speaker", transport: "airplay", paired: true },
-          { id: "bt", name: "Studio headphones", transport: "bluetooth", paired: true },
-        ],
-      },
-      "/api/outputs/active": { active: null },
-      "/api/outputs/active/volume": { volume: 50 },
-      "/api/eq": { gains_db: [0, 0, 0, 0, 0] },
-      "/api/sample-rate": { sample_rate_hz: 44100 },
-      "/api/pairing/pin": { pin: "123456" },
-      "/api/airplay/mode": { mode: "avroute-picker" },
-      "/api/cd": {
-        present: false,
-        playing: false,
-        track: 0,
-        track_count: 0,
-        position_ms: 0,
-        duration_ms: 0,
-      },
-    };
     await route.fulfill({ json: responses[path] ?? {} });
   });
   await page.goto("/");
   await expect(page.getByTestId("output-bluetooth-bt")).toBeVisible();
 });
 for (const width of [800, 1024, 1440]) {
-  test(`device lists align at ${width}px even when actions wrap`, async ({ page }) => {
+  test(`device lists align at ${width}px even when actions wrap`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 800 });
     const input = await page.getByTestId("input-list").boundingBox();
     const output = await page.getByTestId("output-list").boundingBox();
@@ -59,7 +96,9 @@ for (const width of [800, 1024, 1440]) {
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
-    if (width === 1024) await page.screenshot({ path: "/tmp/on-air-device-layout.png" });
+    if (width === 1024) {
+      await page.screenshot({ path: testInfo.outputPath("device-layout.png") });
+    }
   });
 }
 test("Bluetooth handoff explains the next step without activating a speaker", async ({ page }) => {

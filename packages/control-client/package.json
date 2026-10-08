@@ -13,6 +13,7 @@
     "@on-air/api-types": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "^5.6.0"
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
   }
 }
