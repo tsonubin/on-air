@@ -21,6 +21,8 @@ export function friendlyError(error: unknown, action = "complete that action"): 
         return "That device is no longer available. Refresh and try again.";
       case "transport_unreachable":
         return "The speaker did not answer. Check that it is powered on and try again.";
+      case "not_ready":
+        return "That speaker isn't ready. Check it's on and connected, then try again.";
       default:
         break;
     }

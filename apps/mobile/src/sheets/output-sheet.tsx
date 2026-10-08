@@ -1,6 +1,6 @@
 import { BottomSheet, Button, Column, Row, Spacer, Text } from "@expo/ui";
-import type { OutputInfo } from "@on-air/api-types";
-import { useRemoteSession } from "@/remote-session";
+import type { OutputInfo, OutputPhase } from "@on-air/api-types";
+import { outputPhase, useRemoteSession } from "@/remote-session";
 import { theme } from "@/theme";
 import { sheetProps } from "./sheet-props";
 
@@ -9,15 +9,21 @@ export function outputAction({
   desktopOnly,
   working,
   selected,
+  phase,
   output,
 }: {
   desktopOnly: boolean;
   working: boolean;
+  /** This row is the desktop's active output. */
   selected: boolean;
+  /** Phase of the active output; only meaningful when `selected`. */
+  phase: OutputPhase | null;
   output: OutputInfo;
 }): string {
   if (desktopOnly) return "Desktop only";
   if (working) return "Connecting…";
+  if (selected && phase === "starting") return "Connecting…";
+  if (selected && phase === "failed") return "Failed · Retry";
   if (selected) return "Connected";
   if (output.needs_pair && !output.paired) return "Pair";
   return "Connect";
@@ -69,13 +75,14 @@ export function OutputSheet({
         {outputs.map((output) => {
           const selected =
             activeOutput?.transport === output.transport && activeOutput.device_id === output.id;
+          const phase = selected && activeOutput ? outputPhase(activeOutput) : null;
           const desktopOnly = output.transport === "airplay" && airplayMode === "avroute-picker";
           const working = busyTarget === `${output.transport}:${output.id}`;
           const stereoPair = output.member_count >= 2 || output.kind === "pair";
           return (
             <Button
               key={`${output.transport}-${output.id}`}
-              variant={selected ? "filled" : "outlined"}
+              variant={selected && phase === "live" ? "filled" : "outlined"}
               disabled={!view.controlsEnabled || busyTarget !== null || desktopOnly}
               onPress={() => void choose(output)}
               testID={`output-${output.transport}-${output.id}`}
@@ -86,7 +93,7 @@ export function OutputSheet({
                   <Text>{`${stereoPair ? "Stereo pair · " : ""}${output.transport}`}</Text>
                 </Column>
                 <Spacer />
-                <Text>{outputAction({ desktopOnly, working, selected, output })}</Text>
+                <Text>{outputAction({ desktopOnly, working, selected, phase, output })}</Text>
               </Row>
             </Button>
           );

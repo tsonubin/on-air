@@ -37,8 +37,10 @@ interface Pending<T> {
 
 /**
  * Latest-write queue: one request in flight per key, and only the newest
- * value waits behind it. Older pending values are dropped; a failure rolls
- * back the attempted value and drops whatever was queued after it.
+ * value waits behind it. Older pending values are dropped. When a write
+ * fails and a newer value is queued, the newer value is sent (it supersedes
+ * the failed one); only when nothing newer is pending does `onFail` run, so
+ * the UI can roll back to the last committed value.
  */
 function useLatestWrite() {
   const inFlight = useRef(new Set<WriteKey>());
@@ -55,8 +57,10 @@ function useLatestWrite() {
       },
       (err: unknown) => {
         inFlight.current.delete(key);
+        const next = pending.current.get(key) as Pending<T> | undefined;
         pending.current.delete(key);
-        job.onFail(job.value, err);
+        if (next) start(key, next);
+        else job.onFail(job.value, err);
       },
     );
   }, []);
@@ -141,8 +145,9 @@ export function useMixer({
           await client.setVolume(v);
           committedVolume.current = v;
         },
-        onFail: (attempted, err) => {
-          setVolumeState((current) => (current === attempted ? committedVolume.current : current));
+        onFail: (_attempted, err) => {
+          // Nothing newer is queued, so the UI shows the failed value: restore.
+          setVolumeState(committedVolume.current);
           reportError(err);
         },
       });
@@ -162,16 +167,10 @@ export function useMixer({
           await client.setEq(g);
           committedGains.current = g;
         },
-        onFail: (attempted, err) => {
-          // Restore only the bands this write tried to move.
-          const committed = committedGains.current;
-          setGainsState((current) => {
-            const restored = current.map((g, i) =>
-              attempted[i] !== committed[i] ? committed[i] : g,
-            ) as EqGains;
-            latestGains.current = restored;
-            return restored;
-          });
+        onFail: (_attempted, err) => {
+          // Nothing newer is queued: every band goes back to what the core holds.
+          latestGains.current = committedGains.current;
+          setGainsState(committedGains.current);
           reportError(err);
         },
       });
@@ -193,8 +192,8 @@ export function useMixer({
           // Changing one side can change the other's supported list.
           await refresh("config").catch(() => undefined);
         },
-        onFail: (attempted, err) => {
-          setState((current) => (current === attempted ? committed.current : current));
+        onFail: (_attempted, err) => {
+          setState(committed.current);
           reportError(err);
         },
       });

@@ -1,6 +1,6 @@
-import type { ActiveOutput, AirPlayMode, OutputInfo } from "@on-air/api-types";
+import type { ActiveOutputView, AirPlayMode, OutputInfo } from "@on-air/api-types";
 import { useMemo } from "react";
-import { isPickerOnly, outputKey } from "../hooks/useOutputSelection";
+import { isPickerOnly, outputKey, outputPhase } from "../hooks/useOutputSelection";
 import { Button } from "../ui/Button";
 import { inputLabels } from "../ui/inputLabels";
 
@@ -35,7 +35,7 @@ export interface DeviceListProps {
   inputs: string[] | null;
   activeInput: string | null;
   outputs: OutputInfo[] | null;
-  activeOutput: ActiveOutput | null;
+  activeOutput: ActiveOutputView | null;
   airplayMode: AirPlayMode | null;
   connectingOutput: string | null;
   refreshing: boolean;
@@ -63,6 +63,7 @@ export function DeviceList({
   onRefresh,
 }: DeviceListProps) {
   const inputRows = useMemo(() => (inputs ? inputLabels(inputs) : null), [inputs]);
+  const phase = activeOutput ? outputPhase(activeOutput) : null;
 
   return (
     <div className="routing-grid">
@@ -125,7 +126,9 @@ export function DeviceList({
           AirPlay playback is not available on this Mac. Select for details.
         </p>
         <p data-testid="active-output" hidden>
-          {activeOutput ? `${activeOutput.transport}: ${activeOutput.device_name}` : "none"}
+          {activeOutput
+            ? `${activeOutput.transport}: ${activeOutput.device_name}${phase === "live" ? "" : ` (${phase})`}`
+            : "none"}
         </p>
         <ul className={LIST_CLASS} data-testid="output-list" aria-busy={outputs === null}>
           {outputs === null && <Skeleton />}
@@ -137,11 +140,15 @@ export function DeviceList({
           )}
           {outputs?.map((output) => {
             const key = outputKey(output);
-            const on =
+            const current =
               activeOutput?.transport === output.transport && activeOutput?.device_id === output.id;
+            // Only a live output is "on"; a starting one shows as connecting
+            // and a failed one stays selectable so it can be chosen again.
+            const on = current && phase === "live";
+            const failed = current && phase === "failed";
+            const connecting = connectingOutput === key || (current && phase === "starting");
             const pair = output.member_count >= 2 || output.kind === "pair";
             const pickerOnly = isPickerOnly(output, airplayMode);
-            const connecting = connectingOutput === key;
             return (
               <li key={key}>
                 <button
@@ -158,6 +165,7 @@ export function DeviceList({
                   <span className="truncate whitespace-nowrap">
                     {output.name}
                     {connecting ? " · Connecting…" : ""}
+                    {failed && !connecting && <span className="text-amber"> · Failed</span>}
                   </span>
                   <span className={TAG_CLASS}>
                     {pair && (

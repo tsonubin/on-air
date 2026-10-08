@@ -1,6 +1,8 @@
 import * as client from "@on-air/control-client";
 import { act, renderHook } from "@testing-library/react-native";
 import {
+  DEFAULT_STALL_MS,
+  INPUT_STOPPED_NOTICE,
   OFFLINE_ERROR,
   PARTIAL_REFRESH_ERROR,
   useDesktopConnection,
@@ -92,11 +94,13 @@ type Props = Partial<Parameters<typeof useDesktopConnection>[0]>;
 
 function connect(overrides: Props = {}) {
   const onUnauthorized = jest.fn();
+  const onNotice = jest.fn();
   const initial: Parameters<typeof useDesktopConnection>[0] = {
     base: BASE,
     token: "tok",
     active: true,
     onUnauthorized,
+    onNotice,
     WebSocket: FakeWebSocket,
     pollMs: 1_000,
     coalesceMs: 100,
@@ -109,7 +113,7 @@ function connect(overrides: Props = {}) {
       initialProps: initial,
     },
   );
-  return { ...hook, onUnauthorized, initial };
+  return { ...hook, onUnauthorized, onNotice, initial };
 }
 
 beforeEach(() => {
@@ -161,6 +165,7 @@ test("applies socket payloads directly and refetches only the named slice", asyn
     transport: "sonos",
     device_id: "uuid:sonos",
     device_name: "Mock Sonos",
+    state: "live",
   });
   act(() =>
     FakeWebSocket.last?.emit({
@@ -230,7 +235,106 @@ test("a disc change refetches the CD slice for its track list", async () => {
   await tick(150);
   expect(reads.getCd).toHaveBeenCalledTimes(before.getCd + 1);
   expect(result.current.cd.tracks).toHaveLength(2);
-  expect(callCounts().listInputs).toBe(before.listInputs);
+  // Insertion adds the "Audio CD" input (and autoplay may switch to it).
+  expect(callCounts().listInputs).toBe(before.listInputs + 1);
+  expect(callCounts().getActiveInput).toBe(before.getActiveInput + 1);
+
+  // A track change on the same disc touches neither.
+  act(() =>
+    FakeWebSocket.last?.emit({
+      type: "CdStateChanged",
+      present: true,
+      playing: true,
+      track: 2,
+      track_count: 2,
+      position_ms: 0,
+      duration_ms: 2,
+    }),
+  );
+  await tick(150);
+  expect(callCounts().listInputs).toBe(before.listInputs + 1);
+});
+
+test("InputStateChanged updates the active input and refreshes the input slices", async () => {
+  const { result, onNotice } = connect();
+  await settle();
+  act(() => FakeWebSocket.last?.open());
+  const before = callCounts();
+  reads.listInputs.mockResolvedValue(["Mock Monitor", "Audio CD"]);
+  reads.getActiveInput.mockResolvedValue({ name: "Audio CD", backend: "cpal-default" });
+  act(() =>
+    FakeWebSocket.last?.emit({ type: "InputStateChanged", name: "Audio CD", active: true }),
+  );
+  expect(result.current.activeInput).toBe("Audio CD");
+  await tick(150);
+  expect(reads.listInputs).toHaveBeenCalledTimes(before.listInputs + 1);
+  expect(reads.getActiveInput).toHaveBeenCalledTimes(before.getActiveInput + 1);
+  expect(result.current.inputs).toEqual(["Mock Monitor", "Audio CD"]);
+  expect(onNotice).not.toHaveBeenCalled();
+});
+
+test("an input that stops with an error clears it and raises a notice", async () => {
+  const { result, onNotice } = connect();
+  await settle();
+  act(() => FakeWebSocket.last?.open());
+  expect(result.current.activeInput).toBe("Mock Monitor");
+  // A stop for another input leaves the current one alone.
+  act(() =>
+    FakeWebSocket.last?.emit({ type: "InputStateChanged", name: "Line In", active: false }),
+  );
+  expect(result.current.activeInput).toBe("Mock Monitor");
+  reads.getActiveInput.mockResolvedValue({ name: null, backend: "cpal-default" });
+  act(() =>
+    FakeWebSocket.last?.emit({
+      type: "InputStateChanged",
+      name: "Mock Monitor",
+      active: false,
+      error: "processing thread panicked",
+    }),
+  );
+  expect(result.current.activeInput).toBe("");
+  expect(onNotice).toHaveBeenCalledWith(INPUT_STOPPED_NOTICE);
+});
+
+test("a refresh that started before an event does not overwrite what the event set", async () => {
+  const { result } = connect();
+  await settle();
+  act(() => FakeWebSocket.last?.open());
+  let resolveActive!: (value: null) => void;
+  reads.getActiveOutput.mockImplementationOnce(
+    () => new Promise((resolve) => (resolveActive = resolve)),
+  );
+  act(() => result.current.scheduleRefresh("manual", ["activeOutput", "volume"]));
+  act(() =>
+    FakeWebSocket.last?.emit({
+      type: "OutputStateChanged",
+      transport: "sonos",
+      device_name: "Mock Sonos",
+      active: true,
+    }),
+  );
+  expect(result.current.activeOutput?.device_id).toBe("uuid:sonos");
+  resolveActive(null);
+  await settle();
+  expect(result.current.activeOutput?.device_id).toBe("uuid:sonos");
+  expect(result.current.phase).toBe("connected");
+});
+
+test("Heartbeat frames are ignored but keep an idle socket alive", async () => {
+  expect(DEFAULT_STALL_MS).toBe(30_000);
+  const { result } = connect({ stallMs: DEFAULT_STALL_MS, pollMs: 600_000 });
+  await settle();
+  act(() => FakeWebSocket.last?.open());
+  const before = callCounts();
+  const snapshot = result.current.inputs;
+  for (let i = 0; i < 6; i += 1) {
+    await tick(10_000);
+    act(() => FakeWebSocket.last?.emit({ type: "Heartbeat" }));
+  }
+  expect(FakeWebSocket.instances).toHaveLength(1);
+  expect(result.current.wsState).toBe("open");
+  expect(callCounts()).toEqual(before);
+  expect(result.current.inputs).toBe(snapshot);
 });
 
 test("coalesces a burst of refresh requests into one batch of the union", async () => {

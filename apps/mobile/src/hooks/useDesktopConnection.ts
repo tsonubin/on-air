@@ -1,6 +1,6 @@
 import type {
   ActiveInputResponse,
-  ActiveOutput,
+  ActiveOutputView,
   AirPlayMode,
   CdStatus,
   EqGains,
@@ -84,7 +84,8 @@ export type Snapshot = {
   inputs: string[];
   outputs: OutputInfo[];
   activeInput: string;
-  activeOutput: ActiveOutput | null;
+  /** `state` is absent on older desktops; treat that as live. */
+  activeOutput: ActiveOutputView | null;
   volume: number;
   gains: EqGains;
   sampleRate: number;
@@ -125,6 +126,8 @@ export const PARTIAL_REFRESH_ERROR =
   "Desktop connected. Some controls could not refresh. Try again.";
 export const OFFLINE_ERROR =
   "Reconnecting to your desktop… Your pairing is saved. Check that both devices are on the same Wi-Fi.";
+export const INPUT_STOPPED_NOTICE =
+  "The source stopped unexpectedly on the desktop. Choose it again to restart.";
 
 export type DesktopConnectionOptions = {
   base: string | null;
@@ -133,6 +136,8 @@ export type DesktopConnectionOptions = {
   active: boolean;
   /** The desktop rejected the token; the message is ready to show. */
   onUnauthorized?: (message: string) => void;
+  /** Something stopped on the desktop on its own; the message is ready to show. */
+  onNotice?: (message: string) => void;
   /** Injected for tests. */
   WebSocket?: WebSocketConstructor;
   pollMs?: number;
@@ -157,15 +162,18 @@ export type DesktopConnection = Snapshot & {
 
 export const DEFAULT_POLL_MS = 30_000;
 export const DEFAULT_COALESCE_MS = 150;
-/** React Native cannot observe WebSocket pings; an idle desktop only sends events. */
-export const DEFAULT_STALL_MS = 60_000;
+/**
+ * React Native cannot observe WebSocket pings, so the desktop sends a
+ * `Heartbeat` text frame every 10 s; three missed ones mean a dead socket.
+ */
+export const DEFAULT_STALL_MS = 30_000;
 
 type SliceValue = {
   status: StatusResponse;
   inputs: string[];
   outputs: OutputInfo[];
   activeInput: ActiveInputResponse;
-  activeOutput: ActiveOutput | null;
+  activeOutput: ActiveOutputView | null;
   volume: number;
   eq: EqGains;
   sampleRate: SampleRateResponse;
@@ -237,6 +245,23 @@ export function mergeResults(previous: Snapshot, results: SliceResults): Snapsho
   return next;
 }
 
+/** The slice each snapshot field is read from. */
+const SLICE_OF: { [K in keyof Snapshot]: Slice } = {
+  status: "status",
+  inputs: "inputs",
+  outputs: "outputs",
+  activeInput: "activeInput",
+  activeOutput: "activeOutput",
+  volume: "volume",
+  gains: "eq",
+  sampleRate: "sampleRate",
+  outputSampleRate: "sampleRate",
+  inputRates: "sampleRate",
+  outputRates: "sampleRate",
+  airplayMode: "airplayMode",
+  cd: "cd",
+};
+
 export type RefreshOutcome =
   | { kind: "unauthorized"; error: unknown }
   | { kind: "settled"; phase: "connected" | "reconnecting" | "paused"; error: string | null }
@@ -293,6 +318,7 @@ export function useDesktopConnection({
   token,
   active,
   onUnauthorized,
+  onNotice,
   WebSocket,
   pollMs = DEFAULT_POLL_MS,
   coalesceMs = DEFAULT_COALESCE_MS,
@@ -309,6 +335,18 @@ export function useDesktopConnection({
   credentials.current = base && token ? { base, token } : null;
   const onUnauthorizedRef = useRef(onUnauthorized);
   onUnauthorizedRef.current = onUnauthorized;
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
+
+  // Every event or local patch bumps `edits` and stamps the slices it set. A
+  // refresh drops any slice stamped after it started, so a read that left
+  // before an event cannot land after it and restore stale state.
+  const edits = useRef(0);
+  const touchedAt = useRef(new Map<Slice, number>());
+  const touch = useCallback((...slices: Slice[]) => {
+    edits.current += 1;
+    for (const slice of slices) touchedAt.current.set(slice, edits.current);
+  }, []);
 
   const generation = useRef(0);
   const inFlight = useRef<Promise<void> | null>(null);
@@ -326,9 +364,14 @@ export function useDesktopConnection({
   const run = useCallback(async (slices: Slice[], startedIn: number) => {
     const creds = credentials.current;
     if (!creds) return;
+    const editsAtStart = edits.current;
     const results = await readSlices(creds.base, creds.token, slices);
     if (!mounted.current || startedIn !== generation.current) return;
     const outcome = judgeResults(results, slices);
+    const fresh: SliceResults = { ...results };
+    for (const slice of slices) {
+      if ((touchedAt.current.get(slice) ?? 0) > editsAtStart) delete fresh[slice];
+    }
     if (outcome.kind === "unauthorized") {
       setPhase("unauthorized");
       const message = friendlyError(outcome.error, "refresh the mixer");
@@ -336,8 +379,11 @@ export function useDesktopConnection({
       onUnauthorizedRef.current?.(message);
       return;
     }
-    setSnapshot((previous) => mergeResults(previous, results));
+    setSnapshot((previous) => mergeResults(previous, fresh));
     if (outcome.kind === "inconclusive") return;
+    // A ServiceStateChanged landed meanwhile and already set the phase (and,
+    // when enabling, scheduled its own refresh).
+    if (slices.includes("status") && !fresh.status) return;
     setPhase(outcome.phase);
     setError(outcome.error);
   }, []);
@@ -392,9 +438,13 @@ export function useDesktopConnection({
     [scheduleRefresh],
   );
 
-  const patch = useCallback((update: Partial<Snapshot>) => {
-    setSnapshot((previous) => ({ ...previous, ...update }));
-  }, []);
+  const patch = useCallback(
+    (update: Partial<Snapshot>) => {
+      touch(...(Object.keys(update) as (keyof Snapshot)[]).map((key) => SLICE_OF[key]));
+      setSnapshot((previous) => ({ ...previous, ...update }));
+    },
+    [touch],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -407,6 +457,7 @@ export function useDesktopConnection({
   // A new pairing (or none) starts from a clean slate and orphans in-flight reads.
   useEffect(() => {
     generation.current += 1;
+    touchedAt.current.clear();
     clearCoalesce();
     pendingSlices.current.clear();
     inFlight.current = null;
@@ -421,9 +472,11 @@ export function useDesktopConnection({
   const onEvent = useCallback(
     (event: WsEvent) => {
       switch (event.type) {
+        case "Heartbeat":
         case "LevelMeter":
           return;
         case "ServiceStateChanged":
+          touch("status");
           setSnapshot((previous) => ({
             ...previous,
             status: previous.status ? { ...previous.status, service_enabled: event.enabled } : null,
@@ -439,13 +492,32 @@ export function useDesktopConnection({
         case "CdStateChanged": {
           const { type: _type, ...fields } = event;
           const previous = snapshotRef.current.cd;
+          touch("cd");
           setSnapshot((current) => ({ ...current, cd: { ...current.cd, ...fields } }));
-          if (fields.present !== previous.present || fields.track_count !== previous.track_count) {
+          if (fields.present !== previous.present) {
+            // The "Audio CD" input comes and goes with the disc, and autoplay
+            // may switch to it.
+            scheduleRefresh("event", ["cd", "inputs", "activeInput"]);
+          } else if (fields.track_count !== previous.track_count) {
             scheduleRefresh("event", ["cd"]);
           }
           return;
         }
+        case "InputStateChanged": {
+          touch("activeInput");
+          const { name, active: on, error: failure } = event;
+          setSnapshot((current) => {
+            if (on) return { ...current, activeInput: name ?? "" };
+            return name === null || current.activeInput === name
+              ? { ...current, activeInput: "" }
+              : current;
+          });
+          if (failure) onNoticeRef.current?.(INPUT_STOPPED_NOTICE);
+          scheduleRefresh("event", ["inputs", "activeInput", "sampleRate"]);
+          return;
+        }
         case "OutputStateChanged": {
+          touch("activeOutput");
           if (!event.active) {
             setSnapshot((current) => ({ ...current, activeOutput: null }));
             return;
@@ -459,6 +531,8 @@ export function useDesktopConnection({
               transport: event.transport,
               device_name: event.device_name,
               device_id: match?.id ?? current.activeOutput?.device_id ?? "",
+              // The desktop only announces an active output once it is live.
+              state: "live",
             },
           }));
           scheduleRefresh("event", match ? ["volume"] : ["activeOutput", "volume"]);
@@ -472,7 +546,7 @@ export function useDesktopConnection({
           return;
       }
     },
-    [scheduleRefresh],
+    [scheduleRefresh, touch],
   );
 
   useEffect(() => {

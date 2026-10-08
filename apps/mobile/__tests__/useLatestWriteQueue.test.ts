@@ -51,7 +51,8 @@ test("reports a failure only for the newest write", async () => {
   act(() => result.current.push(3));
   await settle();
   expect(onError).toHaveBeenCalledTimes(1);
-  expect(onError).toHaveBeenCalledWith(expect.any(Error), 3);
+  // The rollback target is the last value the desktop accepted.
+  expect(onError).toHaveBeenCalledWith(expect.any(Error), 3, 2);
 });
 
 test("reset drops the pending value and silences in-flight failures", async () => {
@@ -84,4 +85,38 @@ test("uses the latest sender without re-queuing", async () => {
   await settle();
   expect(sendA).not.toHaveBeenCalled();
   expect(sendB).toHaveBeenCalledWith(7);
+});
+
+test("a failed write gives way to the newer queued value; only the last failure rolls back", async () => {
+  const first = deferred();
+  const send = jest
+    .fn<Promise<void>, [number]>()
+    .mockReturnValueOnce(first.promise)
+    .mockRejectedValueOnce(new Error("again"));
+  const onError = jest.fn();
+  const { result } = renderHook(() => useLatestWriteQueue(send, onError));
+
+  // Committed 50 on the desktop; 60 goes out, 70 waits behind it.
+  act(() => result.current.push(60, 50));
+  act(() => result.current.push(70, 60));
+  first.reject(new Error("lost"));
+  await settle();
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send).toHaveBeenLastCalledWith(70);
+  // 70 failed too and nothing newer is queued: roll back to what the desktop holds.
+  expect(onError).toHaveBeenCalledTimes(1);
+  expect(onError).toHaveBeenCalledWith(expect.any(Error), 70, 50);
+});
+
+test("the rollback target follows the last write the desktop accepted", async () => {
+  const send = jest.fn<Promise<void>, [number]>().mockResolvedValueOnce(undefined);
+  send.mockRejectedValueOnce(new Error("nope"));
+  const onError = jest.fn();
+  const { result } = renderHook(() => useLatestWriteQueue(send, onError));
+
+  act(() => result.current.push(60, 50));
+  await settle();
+  act(() => result.current.push(70, 60));
+  await settle();
+  expect(onError).toHaveBeenCalledWith(expect.any(Error), 70, 60);
 });

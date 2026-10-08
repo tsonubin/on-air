@@ -54,7 +54,9 @@ export type ApiErrorCode =
   | "not_found" // 404
   | "no_active_output" // 404
   | "method_not_allowed" // 405
-  | "conflict" // 409
+  | "conflict" // 409: exclusivity / switching conflict
+  | "not_ready" // 409: the chosen device or source is not ready (unpaired, disconnected, no disc)
+  | "stream_busy" // 409
   | "pin_lockout" // 429
   | "transport_unreachable" // 502
   | "service_paused" // 503
@@ -276,6 +278,8 @@ export interface CdSimulateRequest {
 // ---------------------------------------------------------------------------
 
 export type WsEvent =
+  /** Sent every 10 s as a text frame so browsers and React Native see liveness. Ignore it. */
+  | { type: "Heartbeat" }
   | { type: "OutputStateChanged"; transport: Transport; device_name: string; active: boolean }
   | { type: "InputStateChanged"; name: string | null; active: boolean; error?: string }
   | { type: "LevelMeter"; rms: number; peak: number }

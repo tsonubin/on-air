@@ -5,6 +5,7 @@ import { formatDesktopTarget, parseDesktopTarget, targetBase } from "@/desktop-t
 import { friendlyError } from "@/errors";
 import { prettyInput, uniqueByLabel } from "@/pretty-input";
 import { digitsOnly, isForeground } from "@/remote-session";
+import { outputAction } from "@/sheets/output-sheet";
 import { sheetProps } from "@/sheets/sheet-props";
 
 describe("sheetProps", () => {
@@ -84,6 +85,9 @@ test("error copy follows the envelope code, then the status", () => {
   expect(friendlyError(envelope(503, "service_paused"))).toMatch(/service is paused/);
   expect(friendlyError(envelope(502, "transport_unreachable"))).toMatch(/speaker did not answer/);
   expect(friendlyError(new HttpError("/api/x", 404))).toMatch(/no longer available/);
+  expect(friendlyError(envelope(409, "not_ready"))).toBe(
+    "That speaker isn't ready. Check it's on and connected, then try again.",
+  );
   expect(friendlyError(new Error("boom"), "do it")).toBe(
     "Could not do it. Check that both devices are on the same Wi-Fi and try again.",
   );
@@ -95,4 +99,21 @@ test("inputs are labelled and de-duplicated by label", () => {
     "a.monitor",
     "PipeWire Sound Server",
   ]);
+});
+
+test("a speaker row reads its phase: starting connects, failed offers a retry", () => {
+  const output = {
+    id: "s",
+    name: "S",
+    transport: "sonos" as const,
+    kind: "solo" as const,
+    member_count: 1,
+    needs_pair: false,
+    paired: true,
+  };
+  const base = { desktopOnly: false, working: false, output };
+  expect(outputAction({ ...base, selected: true, phase: "live" })).toBe("Connected");
+  expect(outputAction({ ...base, selected: true, phase: "starting" })).toBe("Connecting…");
+  expect(outputAction({ ...base, selected: true, phase: "failed" })).toBe("Failed · Retry");
+  expect(outputAction({ ...base, selected: false, phase: null })).toBe("Connect");
 });

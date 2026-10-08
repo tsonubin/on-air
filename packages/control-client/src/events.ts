@@ -41,9 +41,10 @@ export interface SubscribeOptions {
   /** Injected for tests or runtimes without a global `WebSocket`. */
   WebSocket?: WebSocketConstructor;
   /**
-   * Reconnect when no frame arrives for this long. The core sends a ping
-   * every 10 s and an event stream while casting; browsers cannot observe
-   * pings, so an idle desktop socket only sees events. `0` disables the timer.
+   * Reconnect when no frame arrives for this long. The core sends a
+   * `{"type":"Heartbeat"}` text frame every 10 s (delivered to `onEvent` like
+   * any event; callers ignore it), so any value comfortably above 10 s works
+   * in browsers and React Native too. `0` disables the timer.
    */
   stallMs?: number;
   /** First retry delay; doubles per attempt. */

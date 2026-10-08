@@ -1,4 +1,10 @@
-import type { AirPlayMode, OutputInfo, Transport } from "@on-air/api-types";
+import type {
+  ActiveOutputView,
+  AirPlayMode,
+  OutputInfo,
+  OutputPhase,
+  Transport,
+} from "@on-air/api-types";
 import { useCallback, useRef, useState } from "react";
 import { type ClientLike, liveClient } from "../lib/client";
 import { invokeCommand } from "../lib/tauri";
@@ -37,6 +43,11 @@ export interface OutputSelectionHandle {
 
 export function outputKey(output: Pick<OutputInfo, "transport" | "id">): string {
   return `${output.transport}-${output.id}`;
+}
+
+/** Phase of the active output; cores that predate the field only report live outputs. */
+export function outputPhase(active: Pick<ActiveOutputView, "state">): OutputPhase {
+  return active.state ?? "live";
 }
 
 /** AirPlay via the macOS route picker cannot be driven from this window. */
@@ -91,15 +102,21 @@ export function useOutputSelection({
       connecting.current = true;
       setConnectingOutput(outputKey(output));
       try {
-        return await perform(async () => {
+        const ok = await perform(async () => {
           await client.activateOutput(output.transport, output.id);
+          // The activation call returns once the output is live.
           patch.activeOutput({
             transport: output.transport,
             device_id: output.id,
             device_name: output.name,
+            state: "live",
           });
           await refresh("devices");
         });
+        // A failed start may leave the core idle, rolled back, or `failed`
+        // without an event; read back what it holds.
+        if (!ok) void refresh("devices").catch(() => undefined);
+        return ok;
       } finally {
         connecting.current = false;
         setConnectingOutput(null);

@@ -65,4 +65,66 @@ describe("DeviceList", () => {
     expect(screen.getByTestId("output-airplay-hp-1")).toHaveTextContent("Connecting…");
     expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Kitchen");
   });
+
+  it("shows a starting output as connecting, not as live", () => {
+    render(
+      <DeviceList
+        {...props({
+          outputs: [sonos, homepod],
+          activeOutput: {
+            transport: "sonos",
+            device_id: sonos.id,
+            device_name: sonos.name,
+            state: "starting",
+          },
+        })}
+      />,
+    );
+    const row = screen.getByTestId("output-sonos-uuid:mock-sonos");
+    expect(row).toHaveAttribute("aria-pressed", "false");
+    expect(row).toHaveAttribute("aria-busy", "true");
+    expect(row).toHaveTextContent("Connecting…");
+    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Kitchen (starting)");
+  });
+
+  it("shows a failed output as an error that can be chosen again", () => {
+    const onChooseOutput = vi.fn();
+    render(
+      <DeviceList
+        {...props({
+          outputs: [sonos, homepod],
+          onChooseOutput,
+          activeOutput: {
+            transport: "sonos",
+            device_id: sonos.id,
+            device_name: sonos.name,
+            state: "failed",
+          },
+        })}
+      />,
+    );
+    const row = screen.getByTestId("output-sonos-uuid:mock-sonos");
+    expect(row).toHaveAttribute("aria-pressed", "false");
+    expect(row).toHaveTextContent("Failed");
+    expect(row).toBeEnabled();
+    row.click();
+    expect(onChooseOutput).toHaveBeenCalledWith(sonos);
+    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Kitchen (failed)");
+  });
+
+  it("treats an output without a state (older core) as live", () => {
+    render(
+      <DeviceList
+        {...props({
+          outputs: [sonos],
+          activeOutput: { transport: "sonos", device_id: sonos.id, device_name: sonos.name },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("output-sonos-uuid:mock-sonos")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("active-output")).toHaveTextContent(/^sonos: Kitchen$/);
+  });
 });

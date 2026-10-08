@@ -1,5 +1,5 @@
 import type {
-  ActiveOutput,
+  ActiveOutputView,
   AirPlayMode,
   CdStatus,
   EqGains,
@@ -11,7 +11,7 @@ import type {
 import type { ConnectionState, SubscribeOptions } from "@on-air/control-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ClientLike, liveClient } from "../lib/client";
-import { errorCopy, isServicePaused } from "../lib/errorCopy";
+import { errorCopy, INPUT_STOPPED_COPY, isServicePaused } from "../lib/errorCopy";
 
 /** Everything the UI reads from the core. Each field is `null` until its first fetch lands. */
 export interface CoreSnapshot {
@@ -19,7 +19,8 @@ export interface CoreSnapshot {
   inputs: string[] | null;
   activeInput: string | null;
   outputs: OutputInfo[] | null;
-  activeOutput: ActiveOutput | null;
+  /** `state` is absent on older cores; treat that as live. */
+  activeOutput: ActiveOutputView | null;
   volume: number | null;
   gains: EqGains | null;
   sampleRate: SampleRateResponse | null;
@@ -63,13 +64,15 @@ export interface CoreSnapshotHandle {
   /** Apply the result of a user action without waiting for a poll. */
   patch: {
     cd(next: CdStatus): void;
-    activeOutput(next: ActiveOutput | null): void;
+    activeOutput(next: ActiveOutputView | null): void;
     activeInput(next: string | null): void;
   };
 }
 
 export const DEFAULT_POLL_MS = 15_000;
 export const DEFAULT_DEBOUNCE_MS = 300;
+/** The core sends a Heartbeat text frame every 10 s; three missed ones mean a dead socket. */
+export const EVENT_STALL_MS = 30_000;
 
 const EMPTY: CoreSnapshot = {
   status: null,
@@ -87,6 +90,8 @@ const EMPTY: CoreSnapshot = {
 
 const MISS = Symbol("miss");
 type Settled<T> = T | typeof MISS;
+
+type Field = keyof CoreSnapshot;
 
 /**
  * Fields a `DeviceJoined` event does not carry. A debounced devices refresh
@@ -133,6 +138,16 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
     setSnapshot((prev) => ({ ...prev, ...partial }));
   }, []);
 
+  // Every event or local patch bumps `generation` and stamps the fields it
+  // set. A fetch drops any field stamped after it started, so a poll that
+  // left before an event cannot land after it and restore stale state.
+  const generation = useRef(0);
+  const touchedAt = useRef<Partial<Record<Field, number>>>({});
+  const touch = useCallback((...fields: Field[]) => {
+    generation.current += 1;
+    for (const field of fields) touchedAt.current[field] = generation.current;
+  }, []);
+
   // ---------------------------------------------------------------------
   // Fetching
   // ---------------------------------------------------------------------
@@ -141,6 +156,8 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
   const fetchNow = useCallback(
     async (kind: RefreshKind): Promise<void> => {
       const api = clientRef.current;
+      const startedAt = generation.current;
+      const stale = (field: Field) => (touchedAt.current[field] ?? 0) > startedAt;
       let pausedByCode = false;
       const settle = async <T>(p: Promise<T>): Promise<Settled<T>> => {
         try {
@@ -158,6 +175,9 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
         setConnection("unreachable");
         return;
       }
+      // A ServiceStateChanged landed meanwhile; it set the connection itself
+      // and, when enabling, scheduled its own refresh.
+      if (stale("status")) return;
       patchSnapshot({ status });
       const paused = status.service_enabled === false;
       if (paused) {
@@ -194,6 +214,9 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
       if (sampleRate !== MISS) next.sampleRate = sampleRate;
       if (pin !== MISS) next.pin = pin;
       if (mode !== MISS) next.airplayMode = mode;
+      for (const field of Object.keys(next) as Field[]) {
+        if (stale(field)) delete next[field];
+      }
       patchSnapshot(next);
       setConnection(pausedByCode ? "paused" : "ok");
     },
@@ -281,69 +304,98 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
   // Live events
   // ---------------------------------------------------------------------
 
-  const applyEvent = useCallback((ev: WsEvent) => {
-    switch (ev.type) {
-      case "LevelMeter":
-        return;
-      case "CdStateChanged": {
-        const { type: _type, ...fields } = ev;
-        setSnapshot((prev) => ({
-          ...prev,
-          cd: { ...(prev.cd ?? { tracks: [] }), ...fields },
-        }));
-        return;
-      }
-      case "ServiceStateChanged":
-        setSnapshot((prev) =>
-          prev.status ? { ...prev, status: { ...prev.status, service_enabled: ev.enabled } } : prev,
-        );
-        if (ev.enabled) {
-          setConnection("ok");
-          void refreshRef.current("all").catch(() => undefined);
-        } else {
-          setConnection("paused");
-        }
-        return;
-      case "OutputStateChanged":
-        setSnapshot((prev) => {
-          if (!ev.active) {
-            return prev.activeOutput?.transport === ev.transport
-              ? { ...prev, activeOutput: null }
-              : prev;
-          }
-          // The event names the device but does not carry its id; the
-          // catalog usually has it, otherwise a devices refresh fills it.
-          const match = prev.outputs?.find(
-            (o) => o.transport === ev.transport && o.name === ev.device_name,
-          );
-          if (!match) void refreshRef.current("devices").catch(() => undefined);
-          return {
+  const applyEvent = useCallback(
+    (ev: WsEvent) => {
+      switch (ev.type) {
+        case "Heartbeat":
+        case "LevelMeter":
+          return;
+        case "CdStateChanged": {
+          const { type: _type, ...fields } = ev;
+          const wasPresent = snapshotRef.current.cd?.present ?? false;
+          touch("cd");
+          setSnapshot((prev) => ({
             ...prev,
-            activeOutput: {
-              transport: ev.transport,
-              device_name: ev.device_name,
-              device_id: match?.id ?? "",
-            },
-          };
-        });
-        return;
-      case "DeviceJoined":
-        setSnapshot((prev) => {
-          const outputs = prev.outputs ?? [];
-          if (outputs.some((o) => o.transport === ev.transport && o.id === ev.id)) return prev;
-          return { ...prev, outputs: [...outputs, provisionalOutput(ev)] };
-        });
-        void refreshRef.current("devices").catch(() => undefined);
-        return;
-      case "DeviceLeft":
-        setSnapshot((prev) => ({
-          ...prev,
-          outputs:
-            prev.outputs?.filter((o) => !(o.transport === ev.transport && o.id === ev.id)) ?? null,
-        }));
-        return;
-    }
-  }, []);
+            cd: { ...(prev.cd ?? { tracks: [] }), ...fields },
+          }));
+          // A disc arriving or leaving adds or removes the "Audio CD" input,
+          // and autoplay may switch to it.
+          if (ev.present !== wasPresent) void refreshRef.current("devices").catch(() => undefined);
+          return;
+        }
+        case "InputStateChanged":
+          touch("activeInput");
+          setSnapshot((prev) => {
+            if (ev.active) return { ...prev, activeInput: ev.name };
+            return ev.name === null || prev.activeInput === ev.name
+              ? { ...prev, activeInput: null }
+              : prev;
+          });
+          if (ev.error) setActionError({ message: INPUT_STOPPED_COPY, at: Date.now() });
+          void refreshRef.current("devices").catch(() => undefined);
+          return;
+        case "ServiceStateChanged":
+          touch("status");
+          setSnapshot((prev) =>
+            prev.status
+              ? { ...prev, status: { ...prev.status, service_enabled: ev.enabled } }
+              : prev,
+          );
+          if (ev.enabled) {
+            setConnection("ok");
+            void refreshRef.current("all").catch(() => undefined);
+          } else {
+            setConnection("paused");
+          }
+          return;
+        case "OutputStateChanged":
+          touch("activeOutput");
+          setSnapshot((prev) => {
+            if (!ev.active) {
+              return prev.activeOutput?.transport === ev.transport
+                ? { ...prev, activeOutput: null }
+                : prev;
+            }
+            // The event names the device but does not carry its id; the
+            // catalog usually has it, otherwise a devices refresh fills it.
+            const match = prev.outputs?.find(
+              (o) => o.transport === ev.transport && o.name === ev.device_name,
+            );
+            if (!match) void refreshRef.current("devices").catch(() => undefined);
+            return {
+              ...prev,
+              activeOutput: {
+                transport: ev.transport,
+                device_name: ev.device_name,
+                device_id: match?.id ?? "",
+                // The core only announces an active output once it is live.
+                state: "live",
+              },
+            };
+          });
+          return;
+        case "DeviceJoined":
+          touch("outputs");
+          setSnapshot((prev) => {
+            const outputs = prev.outputs ?? [];
+            if (outputs.some((o) => o.transport === ev.transport && o.id === ev.id)) return prev;
+            return { ...prev, outputs: [...outputs, provisionalOutput(ev)] };
+          });
+          void refreshRef.current("devices").catch(() => undefined);
+          return;
+        case "DeviceLeft":
+          touch("outputs");
+          setSnapshot((prev) => ({
+            ...prev,
+            outputs:
+              prev.outputs?.filter((o) => !(o.transport === ev.transport && o.id === ev.id)) ??
+              null,
+          }));
+          return;
+      }
+    },
+    [touch],
+  );
 
   // Re-subscribe when the HTTP side recovers: a socket left half-open by a
   // sleep/wake cycle looks "open" to the page until the OS notices.
@@ -370,12 +422,9 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
         onStateChange: setLiveUpdates,
       },
       {
-        // The core pings every 10 s, but browsers cannot observe pings and an
-        // idle desktop (nothing casting) produces no events, so a stall timer
-        // would cycle a healthy socket every `stallMs`. The poll above already
-        // detects a dead core, and the socket's own close/error handlers cover
-        // real drops, so the stall timer is off.
-        stallMs: 0,
+        // The core sends a `Heartbeat` text frame every 10 s even when idle,
+        // so a quiet socket for this long is a dead one.
+        stallMs: EVENT_STALL_MS,
         ...subscribeOptions,
       },
     );
@@ -393,11 +442,20 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
 
   const patch = useMemo(
     () => ({
-      cd: (next: CdStatus) => patchSnapshot({ cd: next }),
-      activeOutput: (next: ActiveOutput | null) => patchSnapshot({ activeOutput: next }),
-      activeInput: (next: string | null) => patchSnapshot({ activeInput: next }),
+      cd: (next: CdStatus) => {
+        touch("cd");
+        patchSnapshot({ cd: next });
+      },
+      activeOutput: (next: ActiveOutputView | null) => {
+        touch("activeOutput");
+        patchSnapshot({ activeOutput: next });
+      },
+      activeInput: (next: string | null) => {
+        touch("activeInput");
+        patchSnapshot({ activeInput: next });
+      },
     }),
-    [patchSnapshot],
+    [patchSnapshot, touch],
   );
 
   return {

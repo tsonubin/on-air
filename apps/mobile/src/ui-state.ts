@@ -1,8 +1,10 @@
+import type { OutputPhase } from "@on-air/api-types";
 import type { ConnectionPhase } from "@/hooks/useDesktopConnection";
 
 /**
  * The one state every label and enabled flag is derived from.
- * `ready`: connected, nothing casting. `live`: connected and casting.
+ * `ready`: connected, nothing casting (or the speaker failed to start).
+ * `starting`: connected, a speaker is connecting. `live`: connected and casting.
  */
 export type UiState =
   | "restoring"
@@ -11,18 +13,20 @@ export type UiState =
   | "reconnecting"
   | "paused"
   | "ready"
+  | "starting"
   | "live";
 
 export function deriveUiState({
   hydrated,
   paired,
   phase,
-  casting,
+  output,
 }: {
   hydrated: boolean;
   paired: boolean;
   phase: ConnectionPhase;
-  casting: boolean;
+  /** Phase of the active output, `null` when none is selected. */
+  output: OutputPhase | null;
 }): UiState {
   if (!hydrated) return "restoring";
   if (!paired) return "pairing";
@@ -37,7 +41,7 @@ export function deriveUiState({
     case "unauthorized":
       return "pairing";
     case "connected":
-      return casting ? "live" : "ready";
+      return output === "live" ? "live" : output === "starting" ? "starting" : "ready";
   }
 }
 
@@ -65,6 +69,7 @@ const statusText: Record<UiState, string> = {
   reconnecting: "Reconnecting",
   paused: "Paused",
   ready: "Ready",
+  starting: "Connecting speaker",
   live: "Live",
 };
 
@@ -75,11 +80,12 @@ const connectionText: Record<UiState, string> = {
   reconnecting: "Reconnecting…",
   paused: "Connected to desktop",
   ready: "Connected to desktop",
+  starting: "Connected to desktop",
   live: "Connected to desktop",
 };
 
 export function describeUiState(state: UiState): UiView {
-  const connected = state === "ready" || state === "live";
+  const connected = state === "ready" || state === "starting" || state === "live";
   return {
     statusText: statusText[state],
     statusAnnouncement:

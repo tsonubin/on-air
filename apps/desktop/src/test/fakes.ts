@@ -1,5 +1,5 @@
 import type {
-  ActiveOutput,
+  ActiveOutputView,
   CdStatus,
   EqGains,
   OutputInfo,
@@ -93,7 +93,7 @@ export interface FakeCore {
   inputs: string[];
   activeInput: string | null;
   outputs: OutputInfo[];
-  activeOutput: ActiveOutput | null;
+  activeOutput: ActiveOutputView | null;
   volume: number;
   gains: EqGains;
   sampleRate: SampleRateResponse;

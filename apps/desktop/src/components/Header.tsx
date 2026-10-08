@@ -1,7 +1,8 @@
-import type { ActiveOutput, StatusResponse } from "@on-air/api-types";
+import type { ActiveOutputView, StatusResponse } from "@on-air/api-types";
 import { DEFAULT_PORT } from "@on-air/api-types";
 import type { ConnectionState } from "@on-air/control-client";
 import type { Connection } from "../hooks/useCoreSnapshot";
+import { outputPhase } from "../hooks/useOutputSelection";
 import { LedReadout } from "../ui/LedReadout";
 import { StatusPopover, type StatusPopoverProps } from "./StatusPopover";
 
@@ -9,7 +10,7 @@ export type LampMode = "wait" | "ok" | "warn" | "live";
 
 export function lampState(
   connection: Connection,
-  activeOutput: ActiveOutput | null,
+  activeOutput: ActiveOutputView | null,
 ): { mode: LampMode; label: string } {
   switch (connection) {
     case "connecting":
@@ -19,7 +20,15 @@ export function lampState(
     case "paused":
       return { mode: "warn", label: "service paused" };
     case "ok":
-      return activeOutput ? { mode: "live", label: "ok, on air" } : { mode: "ok", label: "ok" };
+      if (!activeOutput) return { mode: "ok", label: "ok" };
+      switch (outputPhase(activeOutput)) {
+        case "live":
+          return { mode: "live", label: "ok, on air" };
+        case "starting":
+          return { mode: "ok", label: "ok, connecting speaker" };
+        case "failed":
+          return { mode: "warn", label: "speaker failed" };
+      }
   }
 }
 
@@ -34,7 +43,7 @@ export interface HeaderProps extends Omit<StatusPopoverProps, "paused" | "status
   connection: Connection;
   liveUpdates: ConnectionState;
   status: StatusResponse | null;
-  activeOutput: ActiveOutput | null;
+  activeOutput: ActiveOutputView | null;
   pin: string | null;
 }
 

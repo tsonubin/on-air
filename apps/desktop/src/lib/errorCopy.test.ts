@@ -24,6 +24,15 @@ describe("errorCopy", () => {
     expect(copy).not.toContain("raw server text");
   });
 
+  it("gives not_ready its own copy and keeps conflict for switching", () => {
+    const notReady = errorCopy(
+      envelope(409, "not_ready", "bluetooth speaker is not connected — pair it first"),
+    );
+    expect(notReady).toMatch(/isn't ready/i);
+    expect(notReady).not.toMatch(/switching/i);
+    expect(errorCopy(envelope(409, "conflict"))).toMatch(/switching/i);
+  });
+
   it("falls back to the status when the code is unknown", () => {
     expect(errorCopy(envelope(502, "brand_new_code"))).toMatch(/did not answer/i);
     expect(errorCopy(new HttpError("/api/x", 418, "teapot"))).toContain("418");

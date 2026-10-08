@@ -5,7 +5,7 @@ import { useState } from "react";
 import { View } from "react-native";
 import { MixerHome } from "@/mixer-home";
 import { PairingHome } from "@/pairing-home";
-import { type DevicePairTarget, useRemoteSession } from "@/remote-session";
+import { type DevicePairTarget, outputPhase, useRemoteSession } from "@/remote-session";
 import { DevicePairSheet } from "@/sheets/device-pair-sheet";
 import { OutputSheet } from "@/sheets/output-sheet";
 import { SourceSheet } from "@/sheets/source-sheet";
@@ -59,6 +59,7 @@ function MixerScreen() {
       <MixerHome
         activeInput={remote.activeInputLabel}
         activeOutput={remote.activeOutput?.device_name ?? ""}
+        outputPhase={remote.activeOutput ? outputPhase(remote.activeOutput) : undefined}
         volume={remote.volume}
         status={{ text: view.statusText, announcement: view.statusAnnouncement, live: view.live }}
         error={remote.error ?? remote.warning}

@@ -1,6 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import { FakeSocket, fakeClient, fakeCore, homepod, sonos, tick } from "../test/fakes";
+import { INPUT_STOPPED_COPY } from "../lib/errorCopy";
+import {
+  deferred,
+  FakeSocket,
+  fakeClient,
+  fakeCore,
+  homepod,
+  idleCd,
+  sonos,
+  tick,
+} from "../test/fakes";
 import { useCoreSnapshot } from "./useCoreSnapshot";
 
 const DEBOUNCE = 20;
@@ -33,7 +43,8 @@ describe("useCoreSnapshot", () => {
   });
 
   it("applies WebSocket payloads directly without refetching", async () => {
-    const { hook, client } = setup();
+    // A disc already present: a track change is not a presence flip.
+    const { hook, client } = setup(fakeCore({ cd: { ...idleCd, present: true } }));
     await loaded(hook);
     const socket = FakeSocket.latest();
     act(() => socket.open());
@@ -67,6 +78,7 @@ describe("useCoreSnapshot", () => {
       transport: "sonos",
       device_id: "uuid:mock-sonos",
       device_name: "Kitchen",
+      state: "live",
     });
 
     act(() =>
@@ -89,6 +101,130 @@ describe("useCoreSnapshot", () => {
     await tick(DEBOUNCE * 2);
     expect(client.getCd.mock.calls.length).toBe(cdCalls);
     expect(client.getActiveOutput.mock.calls.length).toBe(activeCalls);
+  });
+
+  it("applies InputStateChanged to the active input and refreshes devices", async () => {
+    const { hook, client, core } = setup();
+    await loaded(hook);
+    const socket = FakeSocket.latest();
+    act(() => socket.open());
+    await tick(DEBOUNCE * 2);
+    const before = client.listInputs.mock.calls.length;
+    core.inputs = [...core.inputs, "Audio CD"];
+    core.activeInput = "Audio CD";
+    act(() => socket.send({ type: "InputStateChanged", name: "Audio CD", active: true }));
+    expect(hook.result.current.snapshot.activeInput).toBe("Audio CD");
+    await waitFor(() => expect(client.listInputs.mock.calls.length).toBe(before + 1));
+    await waitFor(() => expect(hook.result.current.snapshot.inputs).toContain("Audio CD"));
+    expect(hook.result.current.actionError).toBeNull();
+  });
+
+  it("clears the active input and shows a notice when the input stops with an error", async () => {
+    const core = fakeCore({ activeInput: "Line In" });
+    const { hook } = setup(core);
+    await loaded(hook);
+    expect(hook.result.current.snapshot.activeInput).toBe("Line In");
+    const socket = FakeSocket.latest();
+    act(() => socket.open());
+    // A stop for some other input leaves the current one alone.
+    act(() => socket.send({ type: "InputStateChanged", name: "Mock Monitor", active: false }));
+    expect(hook.result.current.snapshot.activeInput).toBe("Line In");
+    core.activeInput = null;
+    act(() =>
+      socket.send({
+        type: "InputStateChanged",
+        name: "Line In",
+        active: false,
+        error: "processing thread panicked",
+      }),
+    );
+    expect(hook.result.current.snapshot.activeInput).toBeNull();
+    expect(hook.result.current.actionError?.message).toBe(INPUT_STOPPED_COPY);
+  });
+
+  it("refreshes devices when a disc is inserted or removed, not on track changes", async () => {
+    const { hook, client, core } = setup();
+    await loaded(hook);
+    const socket = FakeSocket.latest();
+    act(() => socket.open());
+    await tick(DEBOUNCE * 2);
+    const before = client.listInputs.mock.calls.length;
+    const discFields = {
+      present: true,
+      playing: true,
+      track: 1,
+      track_count: 2,
+      position_ms: 0,
+      duration_ms: 1000,
+    };
+    const disc = { type: "CdStateChanged" as const, ...discFields };
+    core.cd = { ...idleCd, ...discFields };
+    act(() => socket.send(disc));
+    await waitFor(() => expect(client.listInputs.mock.calls.length).toBe(before + 1));
+    await tick(DEBOUNCE * 2);
+    act(() => socket.send({ ...disc, track: 2 }));
+    await tick(DEBOUNCE * 2);
+    expect(client.listInputs.mock.calls.length).toBe(before + 1);
+    core.cd = idleCd;
+    act(() => socket.send({ ...disc, present: false, playing: false }));
+    await waitFor(() => expect(client.listInputs.mock.calls.length).toBe(before + 2));
+  });
+
+  it("does not let a poll that started before an event overwrite what the event set", async () => {
+    const { hook, client } = setup();
+    await loaded(hook);
+    const socket = FakeSocket.latest();
+    act(() => socket.open());
+    await tick(DEBOUNCE * 2);
+    const staleActive = deferred<null>();
+    const staleOutputs = deferred<(typeof sonos)[]>();
+    client.getActiveOutput.mockReturnValueOnce(staleActive.promise);
+    client.listOutputs.mockReturnValueOnce(staleOutputs.promise);
+    let poll: Promise<void> = Promise.resolve();
+    act(() => {
+      poll = hook.result.current.refresh("devices");
+    });
+    await waitFor(() => expect(client.getActiveOutput).toHaveBeenCalledTimes(2));
+    act(() =>
+      socket.send({
+        type: "OutputStateChanged",
+        transport: "sonos",
+        device_name: "Kitchen",
+        active: true,
+      }),
+    );
+    act(() => socket.send({ type: "DeviceLeft", transport: "airplay", id: "hp-1" }));
+    await act(async () => {
+      staleActive.resolve(null);
+      staleOutputs.resolve([sonos, homepod]);
+      await poll;
+    });
+    expect(hook.result.current.snapshot.activeOutput?.device_name).toBe("Kitchen");
+    expect(hook.result.current.snapshot.outputs?.map((o) => o.id)).toEqual(["uuid:mock-sonos"]);
+  });
+
+  it("ignores Heartbeat frames and runs the socket with a real stall timer", async () => {
+    const { hook, client } = setup();
+    await loaded(hook);
+    const socket = FakeSocket.latest();
+    act(() => socket.open());
+    const before = hook.result.current.snapshot;
+    act(() => socket.send({ type: "Heartbeat" }));
+    expect(hook.result.current.snapshot).toBe(before);
+    expect(client.subscribeEvents.mock.calls[0][1]?.stallMs).toBe(30_000);
+  });
+
+  it("keeps the output phase the core reports", async () => {
+    const core = fakeCore({
+      activeOutput: {
+        transport: "sonos",
+        device_id: sonos.id,
+        device_name: sonos.name,
+        state: "starting",
+      },
+    });
+    const { hook } = setup(core);
+    await waitFor(() => expect(hook.result.current.snapshot.activeOutput?.state).toBe("starting"));
   });
 
   it("patches a joined device in place and then fills its details from one refresh", async () => {

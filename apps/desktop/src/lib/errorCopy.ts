@@ -13,6 +13,7 @@ const COPY_BY_CODE: Partial<Record<ApiErrorCode, string>> = {
   pin_lockout: "Too many PIN attempts. Wait a minute, then try again.",
   transport_unreachable: "The speaker did not answer. Check it is on and on this network.",
   conflict: "Another output is still switching. Try again in a moment.",
+  not_ready: "That speaker isn't ready. Check it's on and connected, then try again.",
   no_active_output: "Nothing is playing yet. Pick a speaker first.",
   not_found: "That device is no longer available. Refresh devices and try again.",
   invalid_request: "The audio service rejected that request.",
@@ -33,6 +34,8 @@ const COPY_BY_STATUS: Record<number, string> = {
 export const UNREACHABLE_COPY = "Cannot reach the audio service on this computer.";
 export const TIMEOUT_COPY = "The audio service did not answer in time.";
 export const GENERIC_COPY = "Something went wrong.";
+/** Shown when the core reports that the active source stopped on its own. */
+export const INPUT_STOPPED_COPY = "The source stopped unexpectedly. Choose it again to restart.";
 
 function errorName(err: unknown): string | undefined {
   if (err && typeof err === "object" && "name" in err) {

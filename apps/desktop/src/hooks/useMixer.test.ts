@@ -74,6 +74,61 @@ describe("useMixer", () => {
     expect(hook.result.current.volume).toBe(31);
   });
 
+  it("sends a queued newer volume when the in-flight write fails", async () => {
+    const { client, hook, reportError } = setup();
+    const first = deferred();
+    client.setVolume.mockReturnValueOnce(first.promise);
+    act(() => hook.result.current.setVolume(60));
+    act(() => hook.result.current.setVolume(70));
+    first.reject(new Error("nope"));
+    await waitFor(() => expect(client.setVolume).toHaveBeenCalledTimes(2));
+    expect(client.setVolume.mock.calls.map((c) => c[0])).toEqual([60, 70]);
+    await tick();
+    expect(hook.result.current.volume).toBe(70);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("rolls back to the last committed volume when the newest queued write also fails", async () => {
+    const { client, hook, reportError } = setup();
+    const first = deferred();
+    client.setVolume.mockReturnValueOnce(first.promise);
+    client.setVolume.mockRejectedValueOnce(new Error("again"));
+    act(() => hook.result.current.setVolume(60));
+    act(() => hook.result.current.setVolume(70));
+    first.reject(new Error("nope"));
+    await waitFor(() => expect(reportError).toHaveBeenCalledTimes(1));
+    expect(client.setVolume.mock.calls.map((c) => c[0])).toEqual([60, 70]);
+    expect(hook.result.current.volume).toBe(50);
+  });
+
+  it("sends queued gains when the in-flight EQ write fails", async () => {
+    const { client, hook, reportError } = setup();
+    const first = deferred();
+    client.setEq.mockReturnValueOnce(first.promise);
+    act(() => hook.result.current.setGain(0, 2));
+    act(() => hook.result.current.setGain(1, 5));
+    first.reject(new Error("nope"));
+    await waitFor(() => expect(client.setEq).toHaveBeenCalledTimes(2));
+    expect(client.setEq.mock.calls[1][0]).toEqual([2, 5, 0, 0, 0]);
+    await tick();
+    expect(hook.result.current.gains).toEqual([2, 5, 0, 0, 0]);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
+  it("sends a queued rate when the in-flight rate write fails", async () => {
+    const { client, hook, reportError } = setup();
+    const first = deferred();
+    client.setSampleRate.mockReturnValueOnce(first.promise);
+    act(() => hook.result.current.setOutputRate(96000));
+    act(() => hook.result.current.setOutputRate(44100));
+    first.reject(new Error("nope"));
+    await waitFor(() => expect(client.setSampleRate).toHaveBeenCalledTimes(2));
+    expect(client.setSampleRate).toHaveBeenLastCalledWith({ output_hz: 44100 });
+    await tick();
+    expect(hook.result.current.outputHz).toBe(44100);
+    expect(reportError).not.toHaveBeenCalled();
+  });
+
   it("rolls back only the band whose write failed", async () => {
     const { client, hook, reportError } = setup();
     act(() => hook.result.current.setGain(1, 4));

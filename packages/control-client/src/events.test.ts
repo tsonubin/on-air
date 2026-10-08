@@ -250,3 +250,17 @@ test("a throwing WebSocket constructor is retried", async () => {
   assert.equal(FakeSocket.instances[0].url, "ws://10.0.0.2:47990/api/ws");
   sub.close();
 });
+
+test("a Heartbeat text frame keeps the stall timer alive and reaches onEvent", async () => {
+  const h = harness({ stallMs: 30 });
+  h.socket(0).open();
+  for (let i = 0; i < 6; i += 1) {
+    await sleep(10);
+    h.socket(0).send(JSON.stringify({ type: "Heartbeat" }));
+  }
+  assert.equal(FakeSocket.instances.length, 1, "heartbeats must not trigger a reconnect");
+  assert.deepEqual(h.closes, []);
+  assert.equal(h.events.length, 6);
+  assert.deepEqual(h.events[0], { type: "Heartbeat" });
+  h.sub.close();
+});

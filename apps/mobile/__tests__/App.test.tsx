@@ -306,6 +306,70 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(FakeWebSocket.last?.closed).toBe(true);
 });
 
+/** Numbers rendered in host Text nodes (the volume readout among them). */
+function numbersShown(): number[] {
+  return (tree as ReactTestRenderer.ReactTestRenderer).root
+    .findAll((node) => (node.type as unknown) === "Text" && typeof node.props.children === "number")
+    .map((node) => node.props.children as number);
+}
+
+test("a failed volume write rolls the readout back to what the desktop holds", async () => {
+  api.getActiveOutput.mockResolvedValue({
+    transport: "sonos",
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    state: "live",
+  });
+  await renderApp();
+  await pairWith();
+  expect(host("status-pill").props.accessibilityLabel).toBe("Audio is live");
+  expect(numbersShown()).toContain(50);
+  api.setVolume.mockRejectedValue(
+    new client.HttpError("/api/outputs/volume", 502, '{"error":"","code":"transport_unreachable"}'),
+  );
+  jest.useFakeTimers();
+  ReactTestRenderer.act(() => host("volume-slider-native").props.onValueChange(73));
+  await ReactTestRenderer.act(async () => {
+    jest.advanceTimersByTime(180);
+  });
+  jest.useRealTimers();
+  await flush();
+  expect(api.setVolume).toHaveBeenCalledWith(BASE, 73, TOKEN);
+  expect(numbersShown()).toContain(50);
+  expect(numbersShown()).not.toContain(73);
+  expect(text()).toContain("speaker did not answer");
+});
+
+test("a speaker that is still starting is not shown as live; a failed one can be chosen again", async () => {
+  api.getActiveOutput.mockResolvedValue({
+    transport: "sonos",
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    state: "starting",
+  });
+  await renderApp();
+  await pairWith();
+  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Connecting speaker");
+  expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
+  expect(text()).toContain("Connecting…");
+
+  api.getActiveOutput.mockResolvedValue({
+    transport: "sonos",
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    state: "failed",
+  });
+  await press("more-button");
+  await press("refresh-button");
+  await press("native-back");
+  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
+  expect(text()).toContain("Speaker failed. Choose it again.");
+  await press("output-row");
+  expect(text()).toContain("Failed · Retry");
+  await press("output-sonos-uuid:mock-sonos");
+  expect(api.activateOutput).toHaveBeenCalledWith(BASE, "sonos", "uuid:mock-sonos", TOKEN);
+});
+
 test("restores a saved pairing, including a non-default port, without discovery", async () => {
   await store.setItemAsync(
     PAIRING_KEY,

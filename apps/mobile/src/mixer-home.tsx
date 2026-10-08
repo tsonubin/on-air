@@ -279,6 +279,7 @@ function CdDeck({
 export function MixerHome({
   activeInput,
   activeOutput,
+  outputPhase,
   volume,
   status,
   error,
@@ -297,6 +298,8 @@ export function MixerHome({
 }: {
   activeInput: string;
   activeOutput: string;
+  /** Phase of the active output; absent means live (older desktops). */
+  outputPhase?: "starting" | "live" | "failed";
   volume: number;
   status: HeaderStatus;
   error?: string | null;
@@ -320,7 +323,13 @@ export function MixerHome({
   const shortWide = wide && height < 600;
   const source = activeInput || "Choose a source";
   const output = activeOutput || "Choose a speaker";
-  const outputSubtitle = activeOutput ? "Selected speaker" : "No speaker selected";
+  const outputSubtitle = !activeOutput
+    ? "No speaker selected"
+    : outputPhase === "starting"
+      ? "Connecting…"
+      : outputPhase === "failed"
+        ? "Speaker failed. Choose it again."
+        : "Selected speaker";
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }} testID="mixer-screen">

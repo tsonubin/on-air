@@ -1,11 +1,12 @@
 import type {
-  ActiveOutput,
+  ActiveOutputView,
   AirPlayMode,
   CdAction,
   CdStatus,
   DiscoveredHost,
   EqGains,
   OutputInfo,
+  OutputPhase,
 } from "@on-air/api-types";
 import {
   activateInput,
@@ -41,6 +42,11 @@ const BLUETOOTH_FOLLOW_UP_MS = 2_500;
 /** Keeps the digits of what was typed or pasted, up to `max`. */
 export function digitsOnly(value: string, max: number): string {
   return value.replace(/\D/g, "").slice(0, max);
+}
+
+/** Phase of the active output; desktops that predate the field only report live outputs. */
+export function outputPhase(active: Pick<ActiveOutputView, "state">): OutputPhase {
+  return active.state ?? "live";
 }
 
 /** iOS reports `inactive` during transitions and `unknown` before the first event. */
@@ -82,7 +88,7 @@ export type RemoteState = {
   activeInput: string;
   activeInputLabel: string;
   outputs: OutputInfo[];
-  activeOutput: ActiveOutput | null;
+  activeOutput: ActiveOutputView | null;
   volume: number;
   gains: EqGains;
   sampleRate: number;
@@ -154,7 +160,13 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     [clearPairing, discoverySelect, store.pairing],
   );
 
-  const connection = useDesktopConnection({ base, token, active: appActive, onUnauthorized });
+  const connection = useDesktopConnection({
+    base,
+    token,
+    active: appActive,
+    onUnauthorized,
+    onNotice: setActionError,
+  });
   const { patch, refreshNow, scheduleRefresh } = connection;
 
   /** Shows the failure; a 401 from any call ends the pairing. */
@@ -167,19 +179,38 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     [onUnauthorized],
   );
 
+  const gainsRef = useRef(connection.gains);
+  gainsRef.current = connection.gains;
+  const volumeRef = useRef(connection.volume);
+  volumeRef.current = connection.volume;
+
+  // On a final failure (nothing newer queued) the optimistic patch goes back
+  // to the value the desktop holds; without one, read it back instead.
   const volumeQueue = useLatestWriteQueue<number>(
     async (value) => {
       const creds = credentials.current;
       if (creds) await setVolume(creds.base, value, creds.token);
     },
-    (error) => fail(error, "change the volume"),
+    (error, _value, committed) => {
+      if (committed === undefined) scheduleRefresh("control", ["volume"]);
+      else patch({ volume: committed });
+      fail(error, "change the volume");
+    },
   );
   const eqQueue = useLatestWriteQueue<EqGains>(
     async (value) => {
       const creds = credentials.current;
       if (creds) await setEq(creds.base, value, creds.token);
     },
-    (error) => fail(error, "change the equalizer"),
+    (error, _value, committed) => {
+      if (committed === undefined) {
+        scheduleRefresh("control", ["eq"]);
+      } else {
+        gainsRef.current = committed;
+        patch({ gains: committed });
+      }
+      fail(error, "change the equalizer");
+    },
   );
   const { reset: resetVolume } = volumeQueue;
   const { reset: resetEq } = eqQueue;
@@ -196,9 +227,6 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       followUp.current = null;
     };
   }, [base, token, resetVolume, resetEq]);
-
-  const gainsRef = useRef(connection.gains);
-  gainsRef.current = connection.gains;
 
   const { scan: discoveryScan, changeHost: discoveryChangeHost, reset: resetDiscovery } = discovery;
   const scan = useCallback(() => void discoveryScan(), [discoveryScan]);
@@ -300,12 +328,14 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
         return true;
       } catch (error) {
         fail(error, "connect that speaker");
+        // A failed start may leave the desktop idle, rolled back or `failed`.
+        scheduleRefresh("control", ["activeOutput"]);
         return false;
       } finally {
         releaseBusy();
       }
     },
-    [activateNow, claim, fail, releaseBusy],
+    [activateNow, claim, fail, releaseBusy, scheduleRefresh],
   );
 
   const outputsRef = useRef(connection.outputs);
@@ -397,8 +427,10 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
   const { push: pushVolume } = volumeQueue;
   const applyVolume = useCallback(
     (value: number) => {
+      const shown = volumeRef.current;
+      volumeRef.current = value;
       patch({ volume: value });
-      pushVolume(value);
+      pushVolume(value, shown);
     },
     [patch, pushVolume],
   );
@@ -406,9 +438,10 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
   const { push: pushEq } = eqQueue;
   const applyEq = useCallback(
     (gains: EqGains) => {
+      const shown = gainsRef.current;
       gainsRef.current = gains;
       patch({ gains });
-      pushEq(gains);
+      pushEq(gains, shown);
     },
     [patch, pushEq],
   );
@@ -440,7 +473,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     hydrated: store.hydrated,
     paired: Boolean(saved),
     phase: connection.phase,
-    casting: Boolean(connection.activeOutput),
+    output: connection.activeOutput ? outputPhase(connection.activeOutput) : null,
   });
   const view = useMemo(() => describeUiState(uiState), [uiState]);
   const inputs = useMemo(() => uniqueByLabel(connection.inputs), [connection.inputs]);
