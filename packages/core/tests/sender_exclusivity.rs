@@ -113,7 +113,7 @@ async fn failed_stop_blocks_activating_the_next_sender_and_preserves_the_active_
     let entries = log.lock().await.clone();
     assert_eq!(entries, vec!["A:start", "A:stop"]);
     assert!(matches!(error, SenderError::StopFailed(_)), "{error}");
-    assert!(state.active_sender.lock().await.is_some());
+    assert!(state.output().sender_name().await.is_some());
 }
 
 #[tokio::test]
@@ -130,5 +130,5 @@ async fn failed_deactivation_preserves_the_active_sender() {
         .unwrap();
 
     assert!(state.deactivate_sender().await.is_err());
-    assert!(state.active_sender.lock().await.is_some());
+    assert!(state.output().sender_name().await.is_some());
 }

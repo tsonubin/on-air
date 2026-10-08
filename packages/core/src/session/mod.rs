@@ -6,8 +6,12 @@ use crate::sender::bluetooth::{
 };
 use crate::sender::sonos::SonosSender;
 use crate::sender::{AudioSender, NullSender, SenderError};
-use crate::state::{ActiveOutput, CoreState};
+use crate::state::CoreState;
 use std::fmt::Write as _;
+
+mod output;
+
+pub use output::{ActiveOutput, OutputPhase, OutputSession, OutputSnapshot};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ActivateError {
@@ -38,7 +42,7 @@ pub struct OutputInfo {
 
 pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     let mut outputs = Vec::new();
-    for d in state.outputs.lock().await.list() {
+    for d in state.sonos.lock().await.list() {
         outputs.push(OutputInfo {
             id: d.usn,
             name: d.friendly_name,
@@ -49,7 +53,7 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
             paired: true,
         });
     }
-    for d in state.airplay_outputs.lock().iter() {
+    for d in state.airplay.lock().iter() {
         outputs.push(OutputInfo {
             id: d.id.clone(),
             name: d.name.clone(),
@@ -113,38 +117,28 @@ pub async fn activate(
         _ => return Err(ActivateError::UnknownTransport(transport.to_string())),
     };
     let result = state
-        .activate_sender_streaming(built.sender, Some(built.identity), built.stream_nonce)
+        .output()
+        .activate(built.sender, Some(built.identity), built.stream_nonce)
         .await;
     if transport == "bluetooth" {
         state.invalidate_bluetooth_cache().await;
     }
     result?;
-    let active = state.active_output.lock().clone();
-    if let Some(active) = active {
+    if let Some(active) = state.output().active() {
         state.remember_output(active);
     }
     state.remember_sample_rates();
-    let volume = state
-        .output_volume
-        .load(std::sync::atomic::Ordering::Acquire);
-    if let Err(error) = set_active_sender_volume(state, volume).await {
+    let volume = state.output_volume();
+    if let Err(error) = state.output().set_volume(volume).await {
         eprintln!("could not restore volume on the active {transport} output: {error}");
     }
     Ok(())
 }
 
 pub async fn set_volume(state: &CoreState, volume: u8) -> Result<(), ActivateError> {
-    set_active_sender_volume(state, volume).await?;
+    state.output().set_volume(volume).await?;
     state.remember_volume(volume);
     Ok(())
-}
-
-async fn set_active_sender_volume(state: &CoreState, volume: u8) -> Result<(), SenderError> {
-    let mut guard = state.active_sender.lock().await;
-    match guard.as_mut() {
-        Some(sender) => sender.set_volume(volume).await,
-        None => Err(SenderError::NoActiveOutput),
-    }
 }
 
 fn snap_output_rate(state: &CoreState, transport: &str) {
@@ -155,7 +149,7 @@ fn snap_output_rate(state: &CoreState, transport: &str) {
 async fn build_sonos(state: &CoreState, device_id: &str) -> Result<Built, ActivateError> {
     snap_output_rate(state, "sonos");
     let device = {
-        let registry = state.outputs.lock().await;
+        let registry = state.sonos.lock().await;
         registry.list().into_iter().find(|d| d.usn == device_id)
     };
     let Some(device) = device else {
@@ -199,7 +193,7 @@ fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateEr
         ));
     }
     let device = state
-        .airplay_outputs
+        .airplay
         .lock()
         .iter()
         .find(|d| d.id == device_id)
@@ -261,9 +255,7 @@ async fn build_bluetooth(state: &CoreState, device_id: &str) -> Result<Built, Ac
     let config = BluetoothPlaybackConfig {
         pipeline_hz: *state.target_sample_rate_hz.lock(),
         output_hz: *state.output_sample_rate_hz.lock(),
-        volume: state
-            .output_volume
-            .load(std::sync::atomic::Ordering::Acquire),
+        volume: state.output_volume(),
     };
     Ok(Built {
         sender: Box::new(BluetoothSender::new(

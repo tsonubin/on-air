@@ -124,6 +124,7 @@ async fn active_output_is_wrapped_and_delete_stops_casting() {
     assert_eq!(body["active"]["transport"], "sonos");
     assert_eq!(body["active"]["device_id"], "uuid:mock-sonos");
     assert_eq!(body["active"]["device_name"], "Mock Sonos");
+    assert_eq!(body["active"]["state"], "live");
 
     let (status, _) = send(
         app.clone(),
@@ -135,7 +136,7 @@ async fn active_output_is_wrapped_and_delete_stops_casting() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    assert!(state.active_output.lock().is_none());
+    assert!(state.active_output().is_none());
     assert_eq!(
         state.mock_log.lock().await.as_slice(),
         [

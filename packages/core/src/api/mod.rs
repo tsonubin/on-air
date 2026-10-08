@@ -1,4 +1,5 @@
 pub mod airplay;
+pub mod auth;
 pub mod bluetooth;
 pub mod cd;
 pub mod eq;

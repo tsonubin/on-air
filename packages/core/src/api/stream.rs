@@ -53,16 +53,11 @@ fn silence_chunk(sample_rate: u32) -> Bytes {
     Bytes::from(vec![0; frames.saturating_mul(2)])
 }
 
-/// True while a Sonos or AirPlay output is live and `nonce` is the path
-/// segment issued for that activation. Bluetooth plays through the OS and
-/// never exposes the radio.
+/// True while a Sonos or AirPlay output owns `nonce`, the path segment
+/// issued for that activation. Bluetooth plays through the OS and never
+/// exposes the radio.
 pub fn radio_stream_is_live(state: &CoreState, nonce: &str) -> bool {
-    let pulls_radio = state
-        .active_output
-        .lock()
-        .as_ref()
-        .is_some_and(|o| o.transport == "sonos" || o.transport == "airplay");
-    pulls_radio && state.stream_nonce.lock().as_deref() == Some(nonce)
+    state.output().snapshot().serves_radio(nonce)
 }
 
 pub async fn stream_audio(
@@ -123,11 +118,11 @@ pub async fn stream_audio(
             }
         })
         .take_while({
-            let stream_nonce = state.stream_nonce.clone();
+            let output = state.output().subscribe();
             let service_enabled = state.service_enabled.clone();
             move |_| {
                 service_enabled.load(Ordering::Acquire)
-                    && stream_nonce.lock().as_deref() == Some(nonce.as_str())
+                    && output.borrow().nonce.as_deref() == Some(nonce.as_str())
             }
         });
     let body = Body::from_stream(tokio_stream::once(Ok(header)).chain(pcm));

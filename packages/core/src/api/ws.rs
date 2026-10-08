@@ -1,51 +1,14 @@
-use crate::auth::Paired;
+use crate::api::auth::Paired;
 use crate::state::CoreState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
-use serde::Serialize;
 use std::time::Duration;
 
 /// Keep-alive interval; clients treat a 20 s silence as a dead socket.
 pub const PING_INTERVAL: Duration = Duration::from_secs(10);
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
-pub enum WsEvent {
-    OutputStateChanged {
-        transport: String,
-        device_name: String,
-        active: bool,
-    },
-    LevelMeter {
-        rms: f32,
-        peak: f32,
-    },
-    DeviceJoined {
-        transport: String,
-        id: String,
-        name: String,
-    },
-    DeviceLeft {
-        transport: String,
-        id: String,
-    },
-    ServiceStateChanged {
-        enabled: bool,
-    },
-    CdStateChanged {
-        present: bool,
-        playing: bool,
-        track: u8,
-        track_count: u8,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        album: Option<String>,
-        position_ms: u64,
-        duration_ms: u64,
-    },
-}
+pub use crate::events::WsEvent;
 
 pub async fn ws_handler(
     Paired: Paired,

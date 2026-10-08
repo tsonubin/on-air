@@ -1,8 +1,8 @@
 //! The one error envelope every non-2xx core response carries:
 //! `{"error": "<message>", "code": "<snake_case>"}` as JSON.
 
-use crate::api::inputs::InputError;
 use crate::pairing::VerifyError;
+use crate::pipeline::InputError;
 use crate::sender::SenderError;
 use crate::session::ActivateError;
 use axum::extract::rejection::JsonRejection;

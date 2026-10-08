@@ -330,13 +330,13 @@ fn paired_phone_survives_desktop_restart_without_saving_bearer_token() {
     let path = dir.join("settings.json");
     let state = on_air_core::state::CoreState::new_persistent(&path);
     let token = {
-        let mut pairing = state.pairing.lock();
+        let mut pairing = state.pairing();
         let pin = pairing.pin().to_string();
         pairing.verify(&pin).unwrap()
     };
     drop(state);
     let restarted = on_air_core::state::CoreState::new_persistent(&path);
-    assert!(restarted.pairing.lock().token_valid(&token));
+    assert!(restarted.pairing().token_valid(&token));
     let persisted = std::fs::read_to_string(dir.join("paired-remotes.json")).unwrap();
     assert!(!persisted.contains(&token));
     drop(restarted);

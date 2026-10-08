@@ -8,9 +8,9 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
 pub mod api;
-pub mod auth;
 pub mod cd;
 pub mod dsp;
+pub mod events;
 pub mod http;
 pub mod mdns;
 pub mod net;
@@ -22,6 +22,9 @@ pub mod settings;
 pub mod state;
 
 use state::CoreState;
+
+/// The pairing extractors live with the HTTP layer; re-exported at the old path.
+pub use api::auth;
 
 // Keep in sync with DEFAULT_PORT in packages/api-types/src/index.ts
 pub const DEFAULT_PORT: u16 = 47990;
@@ -143,9 +146,10 @@ pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::i
             port,
             env!("CARGO_PKG_VERSION"),
         ));
-        background.push(state.spawn_sonos_discovery());
-        background.push(state.spawn_airplay_discovery());
-        background.push(crate::api::cd::spawn_watch(state.clone()));
+        for discovery in state.spawn_discovery() {
+            background.push(discovery);
+        }
+        background.push(crate::cd::autoplay::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
     axum::serve(

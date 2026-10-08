@@ -1,5 +1,5 @@
+use crate::api::auth::Paired;
 use crate::api::error::{ApiError, JsonBody};
-use crate::auth::Paired;
 use crate::dsp::eq::EQ_GAIN_RANGE_DB;
 use crate::state::CoreState;
 use axum::extract::State;

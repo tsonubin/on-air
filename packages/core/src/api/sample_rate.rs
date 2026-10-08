@@ -1,5 +1,5 @@
+use crate::api::auth::Paired;
 use crate::api::error::{ApiError, JsonBody};
-use crate::auth::Paired;
 use crate::dsp::rates;
 use crate::session;
 use crate::state::CoreState;
@@ -78,15 +78,17 @@ pub async fn set_sample_rate(
         return Ok(StatusCode::NO_CONTENT);
     }
 
-    let active_output = state.active_output.lock().clone();
+    let active_output = state.output().active();
     *state.target_sample_rate_hz.lock() = new_input_hz;
     *state.output_sample_rate_hz.lock() = new_output_hz;
 
     if input_changed {
-        if let Err(error) = crate::api::inputs::restart_active_capture(&state).await {
+        if let Err(error) = state.input().restart().await {
             *state.target_sample_rate_hz.lock() = old_input_hz;
             *state.output_sample_rate_hz.lock() = old_output_hz;
-            let restore = crate::api::inputs::restart_active_capture(&state)
+            let restore = state
+                .input()
+                .restart()
                 .await
                 .err()
                 .map(|e| format!("; restoring previous capture also failed: {e}"))
@@ -102,7 +104,9 @@ pub async fn set_sample_rate(
             *state.target_sample_rate_hz.lock() = old_input_hz;
             *state.output_sample_rate_hz.lock() = old_output_hz;
             let capture_restore = if input_changed {
-                crate::api::inputs::restart_active_capture(&state)
+                state
+                    .input()
+                    .restart()
                     .await
                     .err()
                     .map(|e| format!("; restoring previous capture failed: {e}"))
@@ -151,25 +155,22 @@ pub(crate) fn current_sample_rates(state: &CoreState) -> SampleRateResponse {
 }
 
 fn supported_input_rates(state: &CoreState) -> Vec<u32> {
-    state.input_supported_hz.lock().clone()
+    state.input().supported_hz()
 }
 
 fn output_side(state: &CoreState) -> (u32, Vec<u32>, Option<String>) {
-    // Match the snapshot to its identity rather than waiting for a connection
-    // that can take longer than the remote's polling deadline.
-    let published = state.active_output_format.lock();
-    let active = state.active_output.lock();
-    if let Some((identity, format)) = published.as_ref() {
-        if active.as_ref() == Some(identity) {
-            return (
-                format.sample_rate_hz,
-                format.supported_hz.clone(),
-                Some(identity.transport.clone()),
-            );
-        }
+    // Read the published snapshot rather than waiting for a connection that
+    // can take longer than the remote's polling deadline.
+    let snapshot = state.output().snapshot();
+    if let (Some(identity), Some(format)) = (snapshot.identity.as_ref(), snapshot.format.as_ref()) {
+        return (
+            format.sample_rate_hz,
+            format.supported_hz.clone(),
+            Some(identity.transport.clone()),
+        );
     }
     let requested = *state.output_sample_rate_hz.lock();
-    match active.as_ref() {
+    match snapshot.identity.as_ref() {
         Some(active) => (
             requested,
             rates::transport_rates(&active.transport).to_vec(),

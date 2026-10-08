@@ -65,7 +65,7 @@ async fn insert_autoplays_track_one_and_lists_cd_input() {
     assert_eq!(body["track_count"], 2);
     assert_eq!(body["title"], "So What");
     assert_eq!(body["album"], "Kind of Blue");
-    assert_eq!(state.active_input.lock().as_deref(), Some("Audio CD"));
+    assert_eq!(state.input().active_name().as_deref(), Some("Audio CD"));
 
     let (status, listed) = send(
         app,
@@ -209,7 +209,7 @@ async fn software_eject_clears_the_deck() {
     let (status, body) = send(app, post_json("/api/cd/control", r#"{"action":"eject"}"#)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["present"], false);
-    assert!(state.active_input.lock().is_none());
+    assert!(state.input().active_name().is_none());
 }
 
 #[tokio::test]
@@ -226,7 +226,7 @@ async fn eject_clears_cd_input() {
     let (status, body) = send(app, post_json("/api/mock/cd", r#"{"present":false}"#)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["present"], false);
-    assert!(state.active_input.lock().is_none());
+    assert!(state.input().active_name().is_none());
 }
 
 #[tokio::test]

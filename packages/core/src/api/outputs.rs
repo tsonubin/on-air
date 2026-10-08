@@ -1,12 +1,11 @@
+use crate::api::auth::Paired;
 use crate::api::error::{ApiError, JsonBody};
-use crate::auth::Paired;
-use crate::session::{self, OutputInfo};
-use crate::state::{ActiveOutput, CoreState};
+use crate::session::{self, ActiveOutput, OutputInfo, OutputPhase};
+use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
 
 #[derive(Serialize)]
 pub struct OutputsResponse {
@@ -19,17 +18,30 @@ pub async fn list_outputs(Paired: Paired, State(state): State<CoreState>) -> Jso
     })
 }
 
+/// The active output's identity plus where it is in its lifecycle
+/// (`"starting"`, `"live"` or `"failed"`).
+#[derive(Serialize)]
+pub struct ActiveOutputView {
+    #[serde(flatten)]
+    pub output: ActiveOutput,
+    pub state: OutputPhase,
+}
+
 #[derive(Serialize)]
 pub struct ActiveOutputResponse {
-    pub active: Option<ActiveOutput>,
+    pub active: Option<ActiveOutputView>,
 }
 
 pub async fn get_active_output(
     Paired: Paired,
     State(state): State<CoreState>,
 ) -> Json<ActiveOutputResponse> {
+    let snapshot = state.output().snapshot();
     Json(ActiveOutputResponse {
-        active: state.active_output.lock().clone(),
+        active: snapshot.identity.map(|output| ActiveOutputView {
+            output,
+            state: snapshot.phase,
+        }),
     })
 }
 
@@ -56,7 +68,7 @@ pub async fn deactivate_output(
     State(state): State<CoreState>,
 ) -> Result<StatusCode, ApiError> {
     let _configuration = state.config_lock.lock().await;
-    state.deactivate_sender().await?;
+    state.output().deactivate().await?;
     state.clear_saved_output();
     Ok(StatusCode::NO_CONTENT)
 }
@@ -76,7 +88,7 @@ pub async fn get_output_volume(
     State(state): State<CoreState>,
 ) -> Json<OutputVolumeResponse> {
     Json(OutputVolumeResponse {
-        volume: state.output_volume.load(Ordering::Acquire),
+        volume: state.output_volume(),
     })
 }
 

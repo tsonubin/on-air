@@ -84,11 +84,7 @@ async fn non_finite_eq_gains_are_rejected_with_a_400_envelope() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["code"], "invalid_request");
     assert!(json["error"].as_str().unwrap().contains("finite"));
-    assert_eq!(
-        *state.eq_gains_db.lock(),
-        [0.0; 5],
-        "gains must be untouched"
-    );
+    assert_eq!(state.eq_gains_db(), [0.0; 5], "gains must be untouched");
 }
 
 #[tokio::test]

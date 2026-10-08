@@ -1,5 +1,5 @@
+use crate::api::auth::Paired;
 use crate::api::error::{ApiError, JsonBody};
-use crate::auth::Paired;
 use crate::sender::airplay;
 use crate::state::CoreState;
 use axum::extract::State;
@@ -30,11 +30,7 @@ pub async fn pair(
     State(state): State<CoreState>,
     JsonBody(req): JsonBody<AirPlayPairRequest>,
 ) -> Result<StatusCode, ApiError> {
-    let known = state
-        .airplay_outputs
-        .lock()
-        .iter()
-        .any(|d| d.id == req.device_id);
+    let known = state.airplay.lock().iter().any(|d| d.id == req.device_id);
     if !known && !state.mock {
         return Err(ApiError::not_found("airplay receiver not found"));
     }
@@ -52,12 +48,7 @@ pub async fn pair(
 }
 
 fn mark_paired(state: &CoreState, device_id: &str) {
-    if let Some(device) = state
-        .airplay_outputs
-        .lock()
-        .iter_mut()
-        .find(|d| d.id == device_id)
-    {
+    if let Some(device) = state.airplay.lock().iter_mut().find(|d| d.id == device_id) {
         device.paired = true;
         device.needs_pair = false;
     }

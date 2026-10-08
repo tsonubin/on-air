@@ -246,3 +246,108 @@ pub async fn search_mdns(duration: Duration) -> Vec<CatalogDevice> {
     .await;
     collapse_pairs(raw)
 }
+
+const EMPTY_SCANS_BEFORE_EVICTION: u8 = 3;
+const SCAN_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Merge one AirPlay scan into the catalog. Returns `true` when the catalog
+/// changed so the caller can diff it for join/left events. A receiver
+/// survives a few empty scans because mDNS answers are lossy.
+fn apply_scan(
+    current: &mut Vec<CatalogDevice>,
+    found: Vec<CatalogDevice>,
+    consecutive_empty_scans: &mut u8,
+) -> bool {
+    if found.is_empty() {
+        *consecutive_empty_scans = consecutive_empty_scans.saturating_add(1);
+        if *consecutive_empty_scans >= EMPTY_SCANS_BEFORE_EVICTION && !current.is_empty() {
+            current.clear();
+            return true;
+        }
+        return false;
+    }
+    *consecutive_empty_scans = 0;
+    if *current != found {
+        *current = found;
+        return true;
+    }
+    false
+}
+
+fn catalog_ids(devices: &[CatalogDevice]) -> Vec<(String, String)> {
+    devices
+        .iter()
+        .map(|d| (d.id.clone(), d.name.clone()))
+        .collect()
+}
+
+/// The AirPlay finder: every 15 s, browse `_airplay._tcp`, merge OwnTone's
+/// outputs from `owntone_base`, and replace `catalog`. Changes are broadcast
+/// as `DeviceJoined`/`DeviceLeft`.
+pub fn spawn(
+    catalog: std::sync::Arc<parking_lot::Mutex<Vec<CatalogDevice>>>,
+    owntone_base: std::sync::Arc<parking_lot::Mutex<String>>,
+    ws_tx: tokio::sync::broadcast::Sender<crate::events::WsEvent>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let owntone_http = crate::net::lan_http_client(Duration::from_millis(500));
+        let mut consecutive_empty_scans = 0;
+        loop {
+            let mut found = search_mdns(Duration::from_secs(2)).await;
+            let url = owntone_base.lock().clone();
+            if let Ok(owntone) =
+                crate::sender::airplay::fetch_owntone_outputs_with_client(&owntone_http, &url).await
+            {
+                merge_owntone(&mut found, owntone);
+            }
+            let diff = {
+                let mut current = catalog.lock();
+                let before = catalog_ids(&current);
+                apply_scan(&mut current, found, &mut consecutive_empty_scans)
+                    .then(|| (before, catalog_ids(&current)))
+            };
+            if let Some((before, after)) = diff {
+                crate::events::emit_catalog_diff(&ws_tx, "airplay", &before, &after);
+            }
+            tokio::time::sleep(SCAN_INTERVAL).await;
+        }
+    })
+}
+
+#[cfg(test)]
+mod spawn_tests {
+    use super::*;
+
+    fn receiver(id: &str) -> CatalogDevice {
+        CatalogDevice {
+            id: id.into(),
+            name: format!("Receiver {id}"),
+            needs_pair: false,
+            paired: true,
+            kind: "solo",
+            member_count: 1,
+            address: "192.168.1.2".into(),
+        }
+    }
+
+    #[test]
+    fn airplay_catalog_tolerates_transient_misses_then_evicts_stale_receivers() {
+        let mut current = vec![receiver("old")];
+        let mut misses = 0;
+
+        assert!(!apply_scan(&mut current, Vec::new(), &mut misses));
+        assert!(!apply_scan(&mut current, Vec::new(), &mut misses));
+        assert_eq!(current, vec![receiver("old")]);
+
+        assert!(apply_scan(&mut current, vec![receiver("new")], &mut misses));
+        assert_eq!(current, vec![receiver("new")]);
+        assert_eq!(misses, 0);
+
+        let mut changed = false;
+        for _ in 0..EMPTY_SCANS_BEFORE_EVICTION {
+            changed |= apply_scan(&mut current, Vec::new(), &mut misses);
+        }
+        assert!(current.is_empty());
+        assert!(changed);
+    }
+}

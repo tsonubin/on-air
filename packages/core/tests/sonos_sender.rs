@@ -117,7 +117,7 @@ async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
         "Failed Stop",
     );
     let mut state = CoreState::new();
-    state.mock = true;
+    state.set_mock(true);
     let sender = SonosSender::new(
         device,
         reqwest::Client::builder().no_proxy().build().unwrap(),
@@ -137,7 +137,7 @@ async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
         .unwrap();
 
     assert!(state.deactivate_sender().await.is_err());
-    assert!(state.active_sender.lock().await.is_some());
+    assert!(state.output().sender_name().await.is_some());
     let recovered = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
             let play_count = probe

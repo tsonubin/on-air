@@ -346,7 +346,7 @@ async fn failed_switch_reopens_bluetooth_with_saved_volume_and_format() {
         ]
     );
     assert_eq!(f.sample(10_000).await, 3_700);
-    assert_eq!(*state.output_sample_rate_hz.lock(), 44_100);
+    assert_eq!(state.output_sample_rate_hz(), 44_100);
     state.deactivate_sender().await.unwrap();
 }
 
@@ -376,10 +376,7 @@ async fn failed_cleanup_retains_new_sender_and_does_not_resume_bluetooth() {
         1,
         "old output must not reopen"
     );
-    assert_eq!(
-        state.active_sender.lock().await.as_ref().unwrap().name(),
-        "replacement"
-    );
+    assert_eq!(state.output().sender_name().await.unwrap(), "replacement");
     assert!(
         state.deactivate_sender().await.is_err(),
         "unresolved sender remains available for cleanup"
@@ -437,15 +434,8 @@ async fn changing_rates_closes_old_stream_before_opening_the_new_one() {
             "volume:50"
         ]
     );
-    assert_eq!(*state.output_sample_rate_hz.lock(), 48_000);
-    let format = state
-        .active_sender
-        .lock()
-        .await
-        .as_ref()
-        .unwrap()
-        .output_format()
-        .unwrap();
+    assert_eq!(state.output_sample_rate_hz(), 48_000);
+    let format = state.output().snapshot().format.unwrap();
     assert_eq!(format.supported_hz, [44_100, 48_000]);
     state.deactivate_sender().await.unwrap();
 }
@@ -464,7 +454,7 @@ async fn failed_volume_write_keeps_saved_volume_and_rollback_volume() {
         .reject_volume
         .store(true, Ordering::SeqCst);
     assert!(on_air_core::session::set_volume(&state, 0).await.is_err());
-    assert_eq!(state.output_volume.load(Ordering::SeqCst), 37);
+    assert_eq!(state.output_volume(), 37);
     assert!(state
         .activate_sender(Box::new(Replacement {
             log: f.log.clone(),
@@ -645,8 +635,8 @@ async fn failed_bluetooth_rollback_cleans_up_its_connection_attempt() {
     assert!(error
         .to_string()
         .contains("restoring previous output failed"));
-    assert!(state.active_sender.lock().await.is_none());
-    assert!(state.active_output.lock().is_none());
+    assert!(state.output().sender_name().await.is_none());
+    assert!(state.active_output().is_none());
     assert_eq!(f.log.lock().unwrap().last().unwrap(), "disconnect");
     assert!(*f.output.latest().closed.lock().unwrap());
 }

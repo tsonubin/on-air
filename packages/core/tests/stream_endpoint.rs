@@ -4,16 +4,36 @@ use on_air_core::state::{ActiveOutput, CoreState};
 use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
 
+/// Make a fake sender with this identity the exclusive output, serving the
+/// radio at `nonce`.
+async fn make_live(
+    state: &CoreState,
+    transport: &str,
+    device_id: &str,
+    device_name: &str,
+    nonce: String,
+) {
+    use on_air_core::sender::NullSender;
+    state.output().set_manage_local_sink(false);
+    state
+        .activate_sender_streaming(
+            Box::new(NullSender::new(device_name, state.mock_log.clone())),
+            Some(ActiveOutput {
+                transport: transport.into(),
+                device_id: device_id.into(),
+                device_name: device_name.into(),
+            }),
+            Some(nonce),
+        )
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn streams_published_pcm_chunks_with_correct_content_type() {
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "sonos".into(),
-        device_id: "uuid:test".into(),
-        device_name: "Test".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce.clone());
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     let audio_tx = state.audio_tx.clone();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -69,12 +89,7 @@ async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
 
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "sonos".into(),
-        device_id: "uuid:test".into(),
-        device_name: "Test".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce.clone());
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     let audio_tx = state.audio_tx.clone();
     let response = on_air_core::build_router(state)
         .oneshot(
@@ -125,12 +140,7 @@ async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
 async fn stream_with_a_stale_nonce_is_not_found() {
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "sonos".into(),
-        device_id: "uuid:test".into(),
-        device_name: "Test".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce);
+    make_live(&state, "sonos", "uuid:test", "Test", nonce).await;
     let stale = new_stream_nonce();
     let response = tower::ServiceExt::oneshot(
         on_air_core::build_router(state),
@@ -148,12 +158,7 @@ async fn stream_with_a_stale_nonce_is_not_found() {
 async fn stream_is_unavailable_while_service_is_disabled() {
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "sonos".into(),
-        device_id: "uuid:test".into(),
-        device_name: "Test".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce.clone());
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     state.service_enabled.store(false, Ordering::Release);
     let app = on_air_core::build_router(state);
     let response = tower::ServiceExt::oneshot(
@@ -179,12 +184,7 @@ async fn silent_stream_closes_when_service_is_disabled() {
 
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "sonos".into(),
-        device_id: "uuid:test".into(),
-        device_name: "Test".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce.clone());
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     let response = on_air_core::build_router(state.clone())
         .oneshot(
             Request::builder()
@@ -270,12 +270,14 @@ async fn silent_stream_releases_its_slot_when_output_is_deactivated() {
 async fn stream_is_live_when_airplay_is_the_exclusive_output() {
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "airplay".into(),
-        device_id: "EE:C7:74:A7:D8:56".into(),
-        device_name: "卧室".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce.clone());
+    make_live(
+        &state,
+        "airplay",
+        "EE:C7:74:A7:D8:56",
+        "卧室",
+        nonce.clone(),
+    )
+    .await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = on_air_core::build_router(state);
@@ -574,12 +576,14 @@ async fn start_sonos_recovery_harness(
         use axum::http::Request;
         use tower::ServiceExt;
 
-        *state.active_output.lock() = Some(ActiveOutput {
-            transport: "sonos".into(),
-            device_id: "uuid:recovery-test".into(),
-            device_name: "Recovery Test".into(),
-        });
-        *state.stream_nonce.lock() = Some(nonce.clone());
+        make_live(
+            &state,
+            "sonos",
+            "uuid:recovery-test",
+            "Recovery Test",
+            nonce.clone(),
+        )
+        .await;
         let response = on_air_core::build_router(state.clone())
             .oneshot(
                 Request::builder()
@@ -684,7 +688,7 @@ async fn sonos_stream_resumes_after_input_stops_producing_pcm() {
     // A record change can leave capture producing no frames at all. This is
     // deliberately longer than the fake receiver's playback-buffer timeout.
     tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    assert!(state.active_output.lock().is_some());
+    assert!(state.active_output().is_some());
 
     assert!(
         publish_until_seen(&audio_tx, RESUMED_AUDIO, &probe.inner.resumed_audio_seen).await,
@@ -708,7 +712,7 @@ async fn sonos_stream_recovers_when_reader_drops_but_output_remains_active() {
         publish_until_seen(&audio_tx, FIRST_AUDIO, &probe.inner.first_audio_seen).await,
         "fake Sonos never received initial PCM"
     );
-    assert!(state.active_output.lock().is_some());
+    assert!(state.active_output().is_some());
 
     assert!(
         publish_until_seen(&audio_tx, RESUMED_AUDIO, &probe.inner.resumed_audio_seen).await,
@@ -739,7 +743,7 @@ async fn sonos_stream_recovers_when_connected_reader_stalls() {
         start_sonos_recovery_harness(FakeSonosFailure::StallFirstPull).await;
     let _stalled_reader = stalled_reader.expect("harness must retain the stalled stream body");
     assert_eq!(state.stream_clients.load(Ordering::Acquire), 1);
-    assert!(state.active_output.lock().is_some());
+    assert!(state.active_output().is_some());
 
     assert!(
         publish_until_seen(&audio_tx, RESUMED_AUDIO, &probe.inner.resumed_audio_seen).await,
@@ -773,12 +777,7 @@ async fn sonos_stream_reader_recovers_after_broadcast_lag() {
 
     let state = CoreState::new();
     let nonce = new_stream_nonce();
-    *state.active_output.lock() = Some(ActiveOutput {
-        transport: "sonos".into(),
-        device_id: "uuid:test".into(),
-        device_name: "Test".into(),
-    });
-    *state.stream_nonce.lock() = Some(nonce.clone());
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     let audio_tx = state.audio_tx.clone();
     let response = on_air_core::build_router(state)
         .oneshot(

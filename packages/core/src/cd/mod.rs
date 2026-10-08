@@ -1,6 +1,6 @@
 //! Compact-disc capture: watch for an audio CD, play it into the pipeline.
 
-use crate::api::ws::WsEvent;
+use crate::events::WsEvent;
 use parking_lot::Mutex;
 use ringbuf::HeapProd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -8,6 +8,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
+pub mod autoplay;
 mod sys;
 
 pub const AUDIO_CD_INPUT: &str = "Audio CD";

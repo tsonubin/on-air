@@ -1,5 +1,5 @@
 use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates};
-use crate::state::ActiveOutput;
+use crate::session::ActiveOutput;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;

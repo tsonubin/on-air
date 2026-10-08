@@ -1,5 +1,5 @@
+use crate::api::auth::LocalClient;
 use crate::api::error::{ApiError, JsonBody};
-use crate::auth::LocalClient;
 use crate::pairing::persist_tokens;
 use crate::state::CoreState;
 use axum::extract::{ConnectInfo, State};
