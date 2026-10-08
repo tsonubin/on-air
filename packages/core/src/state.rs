@@ -19,7 +19,7 @@ use bytes::Bytes;
 use parking_lot::Mutex as StdMutex;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
@@ -131,6 +131,9 @@ pub struct CoreState {
     /// Sonos recovery uses it to distinguish a connected reader from one that
     /// has stopped draining audio.
     pub stream_progress: Arc<AtomicU64>,
+    /// The HTTP port, recorded by `serve_with_state`; receivers pull the
+    /// radio stream from it.
+    pub(crate) serve_port: Arc<AtomicU16>,
 
     // Mode, config and host plumbing.
     pub(crate) mock: bool,
@@ -220,6 +223,7 @@ impl CoreState {
             pairing_verify_lock: Arc::new(Mutex::new(())),
             stream_clients: Arc::new(AtomicUsize::new(0)),
             stream_progress: Arc::new(AtomicU64::new(0)),
+            serve_port: Arc::new(AtomicU16::new(crate::DEFAULT_PORT)),
             mock: false,
             config: CoreConfig::default(),
             background: Arc::new(StdMutex::new(BackgroundTasks::default())),
@@ -357,6 +361,12 @@ impl CoreState {
     /// The requested or negotiated output sample rate.
     pub fn output_sample_rate_hz(&self) -> u32 {
         *self.output_sample_rate_hz.lock()
+    }
+
+    /// The radio stream URL receivers pull for `nonce`, on the port this
+    /// core is served on.
+    pub fn stream_url(&self, lan_ip: IpAddr, nonce: &str) -> String {
+        crate::session::stream_url(lan_ip, self.serve_port.load(Ordering::Acquire), nonce)
     }
 
     pub fn output_volume(&self) -> u8 {

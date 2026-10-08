@@ -123,11 +123,11 @@ async fn transport_controls_change_track_and_pause() {
 }
 
 #[tokio::test]
-async fn control_without_disc_conflicts() {
+async fn control_without_disc_is_not_ready() {
     let (app, _) = mock_app().await;
     let (status, body) = send(app, post_json("/api/cd/control", r#"{"action":"play"}"#)).await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["code"], "conflict");
+    assert_eq!(body["code"], "not_ready");
 }
 
 #[tokio::test]

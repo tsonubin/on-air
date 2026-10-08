@@ -66,10 +66,16 @@ impl ApiError {
         )
     }
 
-    /// 409: exclusivity or state conflict (previous output would not stop,
-    /// no disc in the drive, device not ready).
+    /// 409: exclusivity or switching conflict (the previous output would
+    /// not stop).
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, "conflict", message)
+    }
+
+    /// 409: the chosen device or source is not ready (speaker not
+    /// connected, helper not running, no disc in the drive).
+    pub fn not_ready(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, "not_ready", message)
     }
 
     /// 429: too many wrong PINs from this peer.
@@ -137,7 +143,10 @@ impl From<SenderError> for ApiError {
         match error.root() {
             SenderError::NoActiveOutput => ApiError::no_active_output(),
             SenderError::DeviceNotFound(_) => ApiError::not_found(message),
-            SenderError::NotReady(_) => ApiError::conflict(message),
+            SenderError::NotReady(_) => match error {
+                SenderError::StopFailed(_) => ApiError::conflict(message),
+                _ => ApiError::not_ready(message),
+            },
             SenderError::Transport(_) => match error {
                 SenderError::StopFailed(_) => ApiError::conflict(message),
                 _ => ApiError::transport_unreachable(message),
@@ -272,5 +281,24 @@ mod tests {
             ApiError::from(VerifyError::RateLimited).status(),
             StatusCode::TOO_MANY_REQUESTS
         );
+    }
+
+    #[test]
+    fn not_ready_devices_are_distinct_from_switching_conflicts() {
+        let not_ready = ApiError::from(SenderError::not_ready(
+            "bluetooth speaker is not connected — pair it in Bluetooth settings first",
+        ));
+        assert_eq!(not_ready.status(), StatusCode::CONFLICT);
+        assert_eq!(not_ready.code(), "not_ready");
+        assert!(not_ready.message().contains("not connected"));
+        let wrapped = ApiError::from(SenderError::RollbackFailed {
+            error: Box::new(SenderError::not_ready("AirPlay helper is not running")),
+            rollback: "deselect failed".into(),
+        });
+        assert_eq!(wrapped.code(), "not_ready");
+        let switching = ApiError::from(SenderError::StopFailed(Box::new(SenderError::transport(
+            "down",
+        ))));
+        assert_eq!(switching.code(), "conflict");
     }
 }

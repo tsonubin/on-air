@@ -140,6 +140,7 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
 
 pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::io::Result<()> {
     let port = listener.local_addr()?.port();
+    state.serve_port.store(port, Ordering::Release);
     if !state.mock {
         let mut background = state.background.lock();
         background.set_mdns(crate::mdns::spawn_advertisement(

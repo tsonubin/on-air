@@ -16,6 +16,10 @@ static NETWORK_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 struct OwnToneCapture {
     events: Arc<Mutex<Vec<String>>>,
     queue_uri: Arc<Mutex<Option<String>>>,
+    /// The sidecar's play queue, so a stale item left behind is observable.
+    queue: Arc<Mutex<Vec<String>>>,
+    /// What `/api/player/play` started: the head of the queue.
+    played: Arc<Mutex<Vec<Option<String>>>>,
     queue_status: Arc<AtomicU16>,
     play_status: Arc<AtomicU16>,
     stop_status: Arc<AtomicU16>,
@@ -26,6 +30,8 @@ impl Default for OwnToneCapture {
         Self {
             events: Arc::new(Mutex::new(Vec::new())),
             queue_uri: Arc::new(Mutex::new(None)),
+            queue: Arc::new(Mutex::new(Vec::new())),
+            played: Arc::new(Mutex::new(Vec::new())),
             queue_status: Arc::new(AtomicU16::new(StatusCode::NO_CONTENT.as_u16())),
             play_status: Arc::new(AtomicU16::new(StatusCode::NO_CONTENT.as_u16())),
             stop_status: Arc::new(AtomicU16::new(StatusCode::NO_CONTENT.as_u16())),
@@ -60,7 +66,21 @@ async fn add_queue_item(
 ) -> StatusCode {
     *state.queue_uri.lock().unwrap() = query.get("uris").cloned();
     state.record("queue:add");
-    StatusCode::from_u16(state.queue_status.load(Ordering::Relaxed)).unwrap()
+    let status = StatusCode::from_u16(state.queue_status.load(Ordering::Relaxed)).unwrap();
+    if status.is_success() {
+        let mut queue = state.queue.lock().unwrap();
+        if query.get("clear").map(String::as_str) == Some("true") {
+            queue.clear();
+        }
+        queue.extend(query.get("uris").cloned());
+    }
+    status
+}
+
+async fn clear_queue(State(state): State<OwnToneCapture>) -> StatusCode {
+    state.queue.lock().unwrap().clear();
+    state.record("queue:clear");
+    StatusCode::NO_CONTENT
 }
 
 async fn player_action(
@@ -70,6 +90,8 @@ async fn player_action(
     state.record(uri.path().to_string());
     match uri.path() {
         "/api/player/play" => {
+            let head = state.queue.lock().unwrap().first().cloned();
+            state.played.lock().unwrap().push(head);
             StatusCode::from_u16(state.play_status.load(Ordering::Relaxed)).unwrap()
         }
         "/api/player/stop" => {
@@ -84,6 +106,7 @@ async fn spawn_owntone(state: OwnToneCapture) -> std::net::SocketAddr {
         .route("/api/outputs", get(catalog))
         .route("/api/outputs/:id", put(select_output))
         .route("/api/queue/items/add", post(add_queue_item))
+        .route("/api/queue/clear", put(clear_queue))
         .route("/api/player/play", put(player_action))
         .route("/api/player/stop", put(player_action))
         .route("/api/player/volume", put(player_action))
@@ -165,6 +188,7 @@ async fn owntone_start_and_stop_are_transactional_and_preserve_the_stream_url() 
             "/api/player/play",
             "/api/player/volume",
             "/api/player/stop",
+            "queue:clear",
             "select:speaker/id:false",
         ]
     );
@@ -248,4 +272,41 @@ async fn failed_owntone_stop_is_reported_but_still_deselects_the_output() {
         .lock()
         .unwrap()
         .contains(&"select:speaker/id:false".to_string()));
+}
+
+#[tokio::test]
+async fn a_second_owntone_activation_plays_the_new_stream_not_the_stale_one() {
+    let _network = NETWORK_TEST_LOCK.lock().await;
+    let capture = OwnToneCapture::default();
+    let addr = spawn_owntone(capture.clone()).await;
+    let first_url = "http://192.168.1.5:47990/stream/aaaa/audio.wav";
+    let second_url = "http://192.168.1.5:47990/stream/bbbb/audio.wav";
+
+    let mut first = on_air_core::sender::airplay::AirPlaySender::new(
+        "HomePod",
+        "speaker/id",
+        format!("http://{addr}"),
+    )
+    .with_radio(first_url, "192.168.1.10");
+    first.start().await.unwrap();
+    first.stop().await.unwrap();
+    assert!(
+        capture.queue.lock().unwrap().is_empty(),
+        "stop must not leave the old stream queued"
+    );
+
+    // Even if something else left an item queued, the add replaces it.
+    capture.queue.lock().unwrap().push(first_url.to_string());
+    let mut second = on_air_core::sender::airplay::AirPlaySender::new(
+        "HomePod",
+        "speaker/id",
+        format!("http://{addr}"),
+    )
+    .with_radio(second_url, "192.168.1.10");
+    second.start().await.unwrap();
+
+    assert_eq!(
+        *capture.played.lock().unwrap(),
+        vec![Some(first_url.to_string()), Some(second_url.to_string())]
+    );
 }

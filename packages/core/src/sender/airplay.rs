@@ -108,9 +108,13 @@ impl AirPlaySender {
             .await
     }
 
+    /// Replace the queue with this activation's stream: each activation has a
+    /// fresh stream nonce, so an item left from an earlier one is a dead URL.
     async fn add_owntone_stream(&self) -> Result<(), SenderError> {
         let mut url = endpoint_url(&self.base_url, "/api/queue/items/add")?;
-        url.query_pairs_mut().append_pair("uris", &self.stream_url);
+        url.query_pairs_mut()
+            .append_pair("uris", &self.stream_url)
+            .append_pair("clear", "true");
         let response = self
             .http
             .post(url)
@@ -387,6 +391,12 @@ impl AudioSender for AirPlaySender {
                 let mut failures = Vec::new();
                 if let Err(error) = self
                     .put_json("/api/player/stop", serde_json::json!({}))
+                    .await
+                {
+                    failures.push(error.to_string());
+                }
+                if let Err(error) = self
+                    .put_json("/api/queue/clear", serde_json::json!({}))
                     .await
                 {
                     failures.push(error.to_string());

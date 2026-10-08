@@ -51,6 +51,10 @@ pub enum WsEvent {
         position_ms: u64,
         duration_ms: u64,
     },
+    /// Keep-alive text frame every [`HEARTBEAT_INTERVAL`](crate::api::ws::HEARTBEAT_INTERVAL)
+    /// per socket; never broadcast. Clients ignore it beyond resetting their
+    /// stall timer.
+    Heartbeat,
 }
 
 /// `DeviceJoined`/`DeviceLeft` for whatever changed between two catalogs of

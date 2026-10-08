@@ -41,7 +41,7 @@ pub async fn control_cd(
         return Ok(Json(state.cd.status()));
     }
     if !state.cd.status().present {
-        return Err(ApiError::conflict("no audio compact disc"));
+        return Err(ApiError::not_ready("no audio compact disc"));
     }
     match req.action {
         CdAction::Play => {

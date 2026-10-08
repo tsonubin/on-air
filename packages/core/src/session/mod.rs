@@ -92,11 +92,8 @@ pub fn new_stream_nonce() -> String {
     nonce
 }
 
-pub fn stream_url(lan_ip: std::net::IpAddr, nonce: &str) -> String {
-    format!(
-        "http://{lan_ip}:{}/stream/{nonce}/audio.wav",
-        crate::DEFAULT_PORT
-    )
+pub fn stream_url(lan_ip: std::net::IpAddr, port: u16, nonce: &str) -> String {
+    format!("http://{lan_ip}:{port}/stream/{nonce}/audio.wav")
 }
 
 struct Built {
@@ -174,7 +171,7 @@ async fn build_sonos(state: &CoreState, device_id: &str) -> Result<Built, Activa
     let lan_ip = local_lan_ip_toward(device.ip)
         .or_else(|_| local_lan_ip())
         .map_err(ActivateError::NoLanAddress)?;
-    let url = stream_url(lan_ip, &nonce);
+    let url = state.stream_url(lan_ip, &nonce);
     Ok(Built {
         sender: Box::new(
             SonosSender::new(device, crate::sender::sonos::soap::http_client(), url)
@@ -222,7 +219,7 @@ fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateEr
     let lan_ip = local_lan_ip_toward(peer)
         .or_else(|_| local_lan_ip())
         .map_err(ActivateError::NoLanAddress)?;
-    let url = stream_url(lan_ip, &nonce);
+    let url = state.stream_url(lan_ip, &nonce);
     Ok(Built {
         sender: Box::new(
             AirPlaySender::new(device.name, device.id, base).with_radio(url, device.address),
