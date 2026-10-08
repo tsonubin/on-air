@@ -93,7 +93,7 @@ mod tests {
         assert!(alpha_at(&rgba, 8, 16) > 200, "left side of the dial");
         assert_eq!(alpha_at(&rgba, 9, 17), 0, "hole in the dial");
         assert!(alpha_at(&rgba, 32, 31) > 200, "stem of the a");
-        for pixel in rgba.chunks_exact(4) {
+        for pixel in rgba.as_chunks::<4>().0 {
             if pixel[3] > 0 {
                 assert_eq!(&pixel[..3], &[0, 0, 0], "template images are black");
             }
