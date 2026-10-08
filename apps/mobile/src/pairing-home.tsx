@@ -1,4 +1,3 @@
-import { Host, Icon, type IconName } from "@expo/ui";
 import type { DiscoveredHost } from "@on-air/api-types";
 import type React from "react";
 import { useRef, useState } from "react";
@@ -12,86 +11,149 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { mobileColors } from "./mixer-home";
+import { colors, layout, radius } from "./theme";
+import { Card } from "./ui/card";
+import { IconTile } from "./ui/icon-tile";
+import { icons } from "./ui/icons";
+import { NativeIcon } from "./ui/native-icon";
 
-const icons = {
-  computer: Icon.select({
-    ios: "macbook",
-    android: import("@expo/material-symbols/laptop_mac.xml"),
-  }),
-  search: Icon.select({
-    ios: "magnifyingglass",
-    android: import("@expo/material-symbols/search.xml"),
-  }),
-  lock: Icon.select({
-    ios: "lock.fill",
-    android: import("@expo/material-symbols/lock.xml"),
-  }),
-  check: Icon.select({
-    ios: "checkmark.circle.fill",
-    android: import("@expo/material-symbols/check_circle.xml"),
-  }),
-} satisfies Record<string, IconName>;
+const DEFAULT_NAME = "on-air on Mac";
 
-function NativeIcon({
-  name,
-  size = 24,
-  color = mobileColors.label,
-  accessibilityLabel,
+function DiscoveredRow({
+  hit,
+  selected,
+  last,
+  onPress,
 }: {
-  name: IconName;
-  size?: number;
-  color?: string;
-  accessibilityLabel?: string;
+  hit: DiscoveredHost;
+  selected: boolean;
+  last: boolean;
+  onPress: () => void;
 }) {
+  const name = hit.name ?? DEFAULT_NAME;
   return (
-    <Host
-      matchContents
-      ignoreSafeArea="all"
-      colorScheme="dark"
-      seedColor={mobileColors.accent}
-      style={{ width: size, height: size }}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${name}, ${hit.host}`}
+      accessibilityHint={selected ? undefined : "Selects this Mac for pairing"}
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      testID={`discovered-${hit.host}`}
+      style={({ pressed }) => ({
+        minHeight: 86,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        borderBottomWidth: last ? 0 : 1,
+        borderBottomColor: colors.separator,
+        backgroundColor: selected
+          ? colors.selectedSurface
+          : pressed
+            ? colors.surfacePressed
+            : "transparent",
+      })}
     >
-      <Icon name={name} size={size} color={color} accessibilityLabel={accessibilityLabel} />
-    </Host>
+      <IconTile name={icons.computer} />
+      <View style={{ flex: 1, gap: 3 }}>
+        <Text numberOfLines={1} style={{ color: colors.label, fontSize: 18, fontWeight: "700" }}>
+          {name}
+        </Text>
+        <Text numberOfLines={1} style={{ color: colors.secondaryLabel, fontSize: 15 }}>
+          {selected ? "Ready for your code" : "Nearby"}
+        </Text>
+      </View>
+      <NativeIcon
+        name={icons.check}
+        size={24}
+        color={selected ? colors.accent : colors.tertiaryLabel}
+      />
+    </Pressable>
   );
 }
 
-function IconTile({ name, label }: { name: IconName; label: string }) {
+function EmptyDiscovery({ scanning }: { scanning: boolean }) {
   return (
     <View
-      accessibilityElementsHidden
+      accessible
+      accessibilityLiveRegion="polite"
       style={{
-        width: 54,
-        height: 54,
-        borderRadius: 17,
-        borderCurve: "continuous",
+        minHeight: 148,
+        paddingHorizontal: 22,
+        paddingVertical: 22,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: mobileColors.iconSurface,
-        borderWidth: 1,
-        borderColor: mobileColors.border,
+        gap: 12,
       }}
     >
-      <NativeIcon name={name} size={28} accessibilityLabel={label} />
+      {scanning ? (
+        <ActivityIndicator size="large" color={colors.accent} />
+      ) : (
+        <NativeIcon name={icons.search} size={34} color={colors.secondaryLabel} />
+      )}
+      <View style={{ alignItems: "center", gap: 4 }}>
+        <Text style={{ color: colors.label, fontSize: 18, fontWeight: "700" }}>
+          {scanning ? "Looking for your Mac…" : "No Mac found yet"}
+        </Text>
+        <Text
+          style={{
+            color: colors.secondaryLabel,
+            fontSize: 15,
+            lineHeight: 20,
+            textAlign: "center",
+          }}
+        >
+          {scanning
+            ? "Make sure both devices are on the same Wi-Fi."
+            : "Open on-air on your Mac, then search again."}
+        </Text>
+      </View>
     </View>
   );
 }
 
-function SectionCard({ children }: { children: React.ReactNode }) {
+function LinkButton({
+  label,
+  accessibilityLabel,
+  onPress,
+  disabled = false,
+  tone,
+  testID,
+}: {
+  label: string;
+  accessibilityLabel?: string;
+  onPress: () => void;
+  disabled?: boolean;
+  tone: "accent" | "secondary";
+  testID: string;
+}) {
   return (
-    <View
-      style={{
-        overflow: "hidden",
-        borderRadius: 22,
-        borderCurve: "continuous",
-        backgroundColor: mobileColors.surface,
-        borderWidth: 1,
-        borderColor: mobileColors.border,
-      }}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      testID={testID}
+      style={({ pressed }) => ({
+        minHeight: layout.minTarget,
+        paddingHorizontal: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: disabled ? 0.55 : pressed ? 0.65 : 1,
+      })}
     >
-      {children}
-    </View>
+      <Text
+        style={
+          tone === "accent"
+            ? { color: colors.accent, fontSize: 16, fontWeight: "600" }
+            : { color: colors.secondaryLabel, fontSize: 16 }
+        }
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -115,15 +177,15 @@ export function PairingHome({
   pin: string;
   error?: string | null;
   onScan: () => void;
-  onSelectHost: (host: string) => void;
+  onSelectHost: (hit: DiscoveredHost) => void;
   onChangeHost: (host: string) => void;
   onChangePin: (pin: string) => void;
   onPair: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
-  const compact = width < 370;
-  const wide = width >= 700;
+  const compact = width < layout.compactBreakpoint;
+  const wide = width >= layout.wideBreakpoint;
   const [manual, setManual] = useState(false);
   const pinInputRef = useRef<TextInput>(null);
   const selected = found.find((hit) => hit.host === host.trim()) ?? null;
@@ -131,7 +193,7 @@ export function PairingHome({
   const canPair = targetReady && pin.length === 6 && !pairing;
 
   return (
-    <View style={{ flex: 1, backgroundColor: mobileColors.background }} testID="pairing-screen">
+    <View style={{ flex: 1, backgroundColor: colors.background }} testID="pairing-screen">
       <ScrollView
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
@@ -143,32 +205,30 @@ export function PairingHome({
           paddingHorizontal: compact ? 16 : 20,
           paddingBottom: Math.max(insets.bottom, 20) + 24,
           width: "100%",
-          maxWidth: 920,
+          maxWidth: layout.maxWidth,
           alignSelf: "center",
         }}
       >
         <View style={{ gap: wide ? 28 : 24 }}>
           <View style={{ gap: 18 }}>
             <Text
-              selectable
               accessibilityRole="header"
               testID="remote-title"
-              style={{ color: mobileColors.label, fontSize: 38, fontWeight: "700" }}
+              style={{ color: colors.label, fontSize: 38, fontWeight: "700" }}
             >
               on-air
             </Text>
             <View style={{ maxWidth: 620, gap: 8 }}>
               <Text
-                selectable
                 testID="core-status"
-                style={{ color: mobileColors.accent, fontSize: 15, fontWeight: "700" }}
+                style={{ color: colors.accent, fontSize: 15, fontWeight: "700" }}
               >
                 Pair your Mac
               </Text>
               <Text
-                selectable
+                accessibilityRole="header"
                 style={{
-                  color: mobileColors.label,
+                  color: colors.label,
                   fontSize: wide ? 34 : 30,
                   lineHeight: wide ? 40 : 36,
                   fontWeight: "700",
@@ -176,10 +236,7 @@ export function PairingHome({
               >
                 Connect this device to on-air
               </Text>
-              <Text
-                selectable
-                style={{ color: mobileColors.secondaryLabel, fontSize: 17, lineHeight: 24 }}
-              >
+              <Text style={{ color: colors.secondaryLabel, fontSize: 17, lineHeight: 24 }}>
                 Keep on-air open on your Mac and use the code it shows. This is a one-time setup on
                 this device.
               </Text>
@@ -196,196 +253,75 @@ export function PairingHome({
             }}
           >
             <View style={{ width: wide ? undefined : "100%", flex: wide ? 1 : undefined, gap: 10 }}>
-              <Text selectable style={{ color: mobileColors.secondaryLabel, fontSize: 17 }}>
-                Your Mac
-              </Text>
-              <SectionCard>
+              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Your Mac</Text>
+              <Card rounded="xxl">
                 {found.length > 0 ? (
-                  found.map((hit, index) => {
-                    const isSelected = !manual && selected?.host === hit.host;
-                    return (
-                      <Pressable
-                        key={`${hit.host}:${hit.port}`}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: isSelected }}
-                        onPress={() => {
-                          setManual(false);
-                          onSelectHost(hit.host);
-                        }}
-                        testID={`discovered-${hit.host}`}
-                        style={({ pressed }) => ({
-                          minHeight: 86,
-                          paddingHorizontal: 16,
-                          paddingVertical: 14,
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 14,
-                          borderBottomWidth: index === found.length - 1 ? 0 : 1,
-                          borderBottomColor: mobileColors.separator,
-                          backgroundColor: isSelected
-                            ? "#2a1515"
-                            : pressed
-                              ? mobileColors.surfacePressed
-                              : "transparent",
-                        })}
-                      >
-                        <IconTile name={icons.computer} label="Mac" />
-                        <View style={{ flex: 1, gap: 3 }}>
-                          <Text
-                            selectable
-                            numberOfLines={1}
-                            style={{ color: mobileColors.label, fontSize: 18, fontWeight: "700" }}
-                          >
-                            {hit.name ?? "on-air on Mac"}
-                          </Text>
-                          <Text
-                            selectable
-                            numberOfLines={1}
-                            style={{ color: mobileColors.secondaryLabel, fontSize: 15 }}
-                          >
-                            {isSelected ? "Ready for your code" : "Nearby"}
-                          </Text>
-                        </View>
-                        <NativeIcon
-                          name={icons.check}
-                          size={24}
-                          color={isSelected ? mobileColors.accent : mobileColors.tertiaryLabel}
-                          accessibilityLabel={isSelected ? "Selected" : "Choose this Mac"}
-                        />
-                      </Pressable>
-                    );
-                  })
+                  found.map((hit, index) => (
+                    <DiscoveredRow
+                      key={`${hit.host}:${hit.port}`}
+                      hit={hit}
+                      selected={!manual && selected?.host === hit.host}
+                      last={index === found.length - 1}
+                      onPress={() => {
+                        setManual(false);
+                        onSelectHost(hit);
+                      }}
+                    />
+                  ))
                 ) : (
-                  <View
-                    style={{
-                      minHeight: 148,
-                      paddingHorizontal: 22,
-                      paddingVertical: 22,
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 12,
-                    }}
-                  >
-                    {scanning ? (
-                      <ActivityIndicator size="large" color={mobileColors.accent} />
-                    ) : (
-                      <NativeIcon
-                        name={icons.search}
-                        size={34}
-                        color={mobileColors.secondaryLabel}
-                        accessibilityLabel="Mac not found"
-                      />
-                    )}
-                    <View style={{ alignItems: "center", gap: 4 }}>
-                      <Text
-                        selectable
-                        style={{ color: mobileColors.label, fontSize: 18, fontWeight: "700" }}
-                      >
-                        {scanning ? "Looking for your Mac…" : "No Mac found yet"}
-                      </Text>
-                      <Text
-                        selectable
-                        style={{
-                          color: mobileColors.secondaryLabel,
-                          fontSize: 15,
-                          lineHeight: 20,
-                          textAlign: "center",
-                        }}
-                      >
-                        {scanning
-                          ? "Make sure both devices are on the same Wi-Fi."
-                          : "Open on-air on your Mac, then search again."}
-                      </Text>
-                    </View>
-                  </View>
+                  <EmptyDiscovery scanning={scanning} />
                 )}
-              </SectionCard>
+              </Card>
 
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Search for Macs again"
+                <LinkButton
+                  label={scanning ? "Searching…" : "Search again"}
+                  accessibilityLabel={scanning ? "Searching for Macs" : "Search for Macs again"}
                   disabled={scanning}
                   onPress={onScan}
+                  tone="accent"
                   testID="scan-button"
-                  style={({ pressed }) => ({
-                    minHeight: 44,
-                    paddingHorizontal: 12,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: scanning ? 0.55 : pressed ? 0.65 : 1,
-                  })}
-                >
-                  <Text
-                    selectable
-                    style={{ color: mobileColors.accent, fontSize: 16, fontWeight: "600" }}
-                  >
-                    {scanning ? "Searching…" : "Search again"}
-                  </Text>
-                </Pressable>
-                <View style={{ width: 1, height: 18, backgroundColor: mobileColors.separator }} />
-                <Pressable
-                  accessibilityRole="button"
+                />
+                <View style={{ width: 1, height: 18, backgroundColor: colors.separator }} />
+                <LinkButton
+                  label={manual ? "Hide manual setup" : "Set up manually"}
                   onPress={() => setManual((current) => !current)}
+                  tone="secondary"
                   testID="manual-setup-button"
-                  style={({ pressed }) => ({
-                    minHeight: 44,
-                    paddingHorizontal: 12,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    opacity: pressed ? 0.65 : 1,
-                  })}
-                >
-                  <Text selectable style={{ color: mobileColors.secondaryLabel, fontSize: 16 }}>
-                    {manual ? "Hide manual setup" : "Set up manually"}
-                  </Text>
-                </Pressable>
+                />
               </View>
 
               {manual ? (
-                <View
-                  testID="manual-setup"
-                  style={{
-                    padding: 16,
-                    gap: 8,
-                    borderRadius: 18,
-                    borderCurve: "continuous",
-                    backgroundColor: mobileColors.surface,
-                    borderWidth: 1,
-                    borderColor: mobileColors.border,
-                  }}
-                >
-                  <Text
-                    selectable
-                    style={{ color: mobileColors.label, fontSize: 15, fontWeight: "600" }}
-                  >
+                <Card testID="manual-setup" rounded="lg" style={{ padding: 16, gap: 8 }}>
+                  <Text style={{ color: colors.label, fontSize: 15, fontWeight: "600" }}>
                     Mac network address
                   </Text>
                   <TextInput
                     value={host}
                     onChangeText={onChangeHost}
                     placeholder="192.168.1.20"
-                    placeholderTextColor={mobileColors.tertiaryLabel}
+                    placeholderTextColor={colors.tertiaryLabel}
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="url"
                     returnKeyType="next"
-                    blurOnSubmit={false}
+                    submitBehavior="submit"
                     onSubmitEditing={() => pinInputRef.current?.focus()}
+                    accessibilityLabel="Mac network address"
                     testID="host-input"
                     style={{
                       minHeight: 50,
                       paddingHorizontal: 14,
-                      color: mobileColors.label,
+                      color: colors.label,
                       fontSize: 17,
-                      borderRadius: 14,
+                      borderRadius: radius.md,
                       borderCurve: "continuous",
-                      backgroundColor: mobileColors.iconSurface,
+                      backgroundColor: colors.iconSurface,
                       borderWidth: 1,
-                      borderColor: mobileColors.border,
+                      borderColor: colors.border,
                     }}
                   />
-                </View>
+                </Card>
               ) : null}
             </View>
 
@@ -393,105 +329,92 @@ export function PairingHome({
               <View
                 style={{ width: wide ? undefined : "100%", flex: wide ? 1 : undefined, gap: 10 }}
               >
-                <Text selectable style={{ color: mobileColors.secondaryLabel, fontSize: 17 }}>
-                  Pairing code
-                </Text>
-                <SectionCard>
-                  <View style={{ padding: 18, gap: 18 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
-                      <IconTile name={icons.lock} label="Secure pairing" />
-                      <View style={{ flex: 1, gap: 3 }}>
-                        <Text
-                          selectable
-                          style={{ color: mobileColors.label, fontSize: 18, fontWeight: "700" }}
-                        >
-                          Enter the code on your Mac
-                        </Text>
-                        <Text
-                          selectable
-                          style={{
-                            color: mobileColors.secondaryLabel,
-                            fontSize: 15,
-                            lineHeight: 20,
-                          }}
-                        >
-                          We'll remember this Mac after you connect.
-                        </Text>
-                      </View>
-                    </View>
-
-                    <TextInput
-                      ref={pinInputRef}
-                      value={pin}
-                      onChangeText={onChangePin}
-                      placeholder="000000"
-                      placeholderTextColor={mobileColors.tertiaryLabel}
-                      keyboardType="number-pad"
-                      inputMode="numeric"
-                      maxLength={6}
-                      returnKeyType="done"
-                      onSubmitEditing={onPair}
-                      editable={!pairing}
-                      accessibilityLabel="Six-digit pairing code"
-                      testID="pin-input"
-                      style={{
-                        minHeight: 66,
-                        paddingHorizontal: 14,
-                        color: mobileColors.label,
-                        fontSize: compact ? 25 : 28,
-                        fontWeight: "600",
-                        letterSpacing: compact ? 8 : 11,
-                        textAlign: "center",
-                        borderRadius: 16,
-                        borderCurve: "continuous",
-                        backgroundColor: mobileColors.iconSurface,
-                        borderWidth: 1,
-                        borderColor: pin.length === 6 ? mobileColors.accent : mobileColors.border,
-                      }}
-                    />
-
-                    {error ? (
-                      <Text
-                        selectable
-                        accessibilityRole="alert"
-                        style={{ color: "#ffb4ab", fontSize: 14, lineHeight: 19 }}
-                      >
-                        {error}
+                <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Pairing code</Text>
+                <Card rounded="xxl" style={{ padding: 18, gap: 18 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+                    <IconTile name={icons.lock} />
+                    <View style={{ flex: 1, gap: 3 }}>
+                      <Text style={{ color: colors.label, fontSize: 18, fontWeight: "700" }}>
+                        Enter the code on your Mac
                       </Text>
-                    ) : null}
-
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={!canPair}
-                      onPress={onPair}
-                      testID="pair-button"
-                      style={({ pressed }) => ({
-                        minHeight: 54,
-                        borderRadius: 17,
-                        borderCurve: "continuous",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        backgroundColor: canPair ? mobileColors.accent : mobileColors.iconSurface,
-                        opacity: pressed ? 0.7 : 1,
-                      })}
-                    >
-                      {pairing ? (
-                        <ActivityIndicator color="#ffffff" />
-                      ) : (
-                        <Text
-                          selectable
-                          style={{
-                            color: canPair ? "#ffffff" : mobileColors.tertiaryLabel,
-                            fontSize: 17,
-                            fontWeight: "700",
-                          }}
-                        >
-                          Connect
-                        </Text>
-                      )}
-                    </Pressable>
+                      <Text style={{ color: colors.secondaryLabel, fontSize: 15, lineHeight: 20 }}>
+                        We'll remember this Mac after you connect.
+                      </Text>
+                    </View>
                   </View>
-                </SectionCard>
+
+                  <TextInput
+                    ref={pinInputRef}
+                    value={pin}
+                    onChangeText={onChangePin}
+                    placeholder="000000"
+                    placeholderTextColor={colors.tertiaryLabel}
+                    keyboardType="number-pad"
+                    inputMode="numeric"
+                    maxLength={6}
+                    returnKeyType="done"
+                    onSubmitEditing={onPair}
+                    editable={!pairing}
+                    accessibilityLabel="Six-digit pairing code"
+                    testID="pin-input"
+                    style={{
+                      minHeight: 66,
+                      paddingHorizontal: 14,
+                      color: colors.label,
+                      fontSize: compact ? 25 : 28,
+                      fontWeight: "600",
+                      letterSpacing: compact ? 8 : 11,
+                      textAlign: "center",
+                      borderRadius: 16,
+                      borderCurve: "continuous",
+                      backgroundColor: colors.iconSurface,
+                      borderWidth: 1,
+                      borderColor: pin.length === 6 ? colors.accent : colors.border,
+                    }}
+                  />
+
+                  {error ? (
+                    <Text
+                      accessibilityRole="alert"
+                      testID="pairing-error"
+                      style={{ color: colors.onError, fontSize: 14, lineHeight: 19 }}
+                    >
+                      {error}
+                    </Text>
+                  ) : null}
+
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Connect"
+                    accessibilityState={{ disabled: !canPair, busy: pairing }}
+                    disabled={!canPair}
+                    onPress={onPair}
+                    testID="pair-button"
+                    style={({ pressed }) => ({
+                      minHeight: 54,
+                      borderRadius: radius.lg,
+                      borderCurve: "continuous",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: canPair ? colors.accent : colors.iconSurface,
+                      opacity: pressed ? 0.7 : 1,
+                    })}
+                  >
+                    {pairing ? (
+                      <ActivityIndicator color={colors.onAccent} />
+                    ) : (
+                      <Text
+                        style={{
+                          color: canPair ? colors.onAccent : colors.tertiaryLabel,
+                          fontSize: 17,
+                          fontWeight: "700",
+                        }}
+                      >
+                        Connect
+                      </Text>
+                    )}
+                  </Pressable>
+                </Card>
               </View>
             ) : null}
           </View>

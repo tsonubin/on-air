@@ -10,7 +10,7 @@ export default function AudioFormatScreen() {
     inputRates,
     outputRates,
     configuringRate,
-    serviceAvailable,
+    view,
     applyRate,
   } = useRemoteSession();
   const rows = [
@@ -40,7 +40,7 @@ export default function AudioFormatScreen() {
               selectedValue={row.value}
               onValueChange={(v) => void applyRate(row.kind, Number(v))}
               appearance="menu"
-              enabled={serviceAvailable && !configuringRate}
+              enabled={view.controlsEnabled && !configuringRate}
               testID={row.testID}
             >
               {row.rates.map((hz) => (

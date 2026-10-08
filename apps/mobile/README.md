@@ -3,15 +3,16 @@
 LAN remote for the desktop mixer. Lives in this pnpm/turbo monorepo next to
 `apps/desktop` and talks to `packages/core` over HTTP + WebSocket.
 
-## Features (parity with the Tauri UI)
+## Features
 
-- Discover a running desktop on the LAN (`_on-air._tcp` / port 47990 scan)
-- PIN pair (the code shown on the desktop)
-- Native SwiftUI and Material 3 controls from Expo UI, with automatic light/dark appearance
-- Securely restore the last paired desktop after an app restart
-- Source + destination lists, stereo-pair badge, AirPlay/Bluetooth pairing sheet
-- Volume slider and arrow controls, 5-band EQ, input/output sample rates
-- Live refresh + WebSocket (`/api/ws?token=`)
+- Find a running desktop by scanning the phone's local /24 for the desktop on
+  port 47990, or type the address (`host` or `host:port`) under "Set up manually"
+- PIN pair with the six-digit code the desktop shows
+- Native SwiftUI and Material 3 controls from Expo UI, in a dark-only appearance
+- Securely restore the last paired desktop (host, port and token) after an app restart
+- Source and speaker sheets, stereo-pair badge, AirPlay PIN and Bluetooth pairing sheet
+- Native volume slider, 5-band EQ, input/output sample rates, audio CD transport
+- Live updates over the WebSocket (`/api/ws?token=`), with a slow HTTP poll as a fallback
 
 ## Sound and connection
 
@@ -23,15 +24,17 @@ the screen open and preserves pairing during temporary network failures.
 The desktop saves pairing-token hashes in `paired-remotes.json` beside its settings.
 Update both apps and pair once with the updated desktop; older desktop versions
 stored tokens only in memory. Subsequent desktop restarts retain that pairing.
-The phone reconnects its live events automatically, with periodic HTTP refresh as
-a fallback. A paused service is distinguished from an unreachable desktop.
+The phone reconnects its live events automatically and applies event payloads
+directly, with a slow HTTP poll as a fallback. A paused service is distinguished
+from an unreachable desktop. If this phone cannot write the pairing to its
+keychain, the remote still connects for this session and says so.
 If the desktop's LAN address changes, use Forget desktop and pair at the new address.
 
 Autostart and the macOS AirPlay route picker stay desktop-only.
 
 ## Run with the desktop
 
-From the repo root, with the Tauri app (or `cargo run -p on-air-core --example serve`) already listening on `:47990`:
+From the repo root, with the Tauri app (or `cargo run -p on-air-core`) already listening on `:47990`:
 
 ```bash
 pnpm install
@@ -42,7 +45,7 @@ Then open Expo Go on a phone on the same Wi-Fi, or press `i` / `a` for
 simulators. Enter the PIN from the desktop ONAIR chrome.
 
 ```bash
-pnpm test:mobile          # control-client + Expo UI unit tests
+pnpm test:mobile          # control-client tests + mobile hook and app tests (Jest)
 pnpm test:mobile:e2e      # companion + Expo Go LAN discovery/pairing against mock core
 ```
 

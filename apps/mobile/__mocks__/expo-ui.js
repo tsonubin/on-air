@@ -9,10 +9,15 @@ function mock(name) {
 const Icon = mock("ExpoIcon");
 Icon.select = ({ ios }) => ios;
 
+// Interactive mocks drop their handlers when disabled, like the native views do.
 module.exports = {
   BottomSheet: mock("ExpoBottomSheet"),
   Button: function Button(props) {
-    return React.createElement("ExpoButton", props, props.label ?? props.children);
+    return React.createElement(
+      "ExpoButton",
+      { ...props, onPress: props.disabled ? undefined : props.onPress },
+      props.label ?? props.children,
+    );
   },
   Collapsible: function Collapsible(props) {
     return React.createElement("ExpoCollapsible", props, props.isOpen ? props.children : null);
@@ -28,12 +33,24 @@ module.exports = {
   ListItem: Object.assign(mock("ExpoListItem"), {
     Trailing: mock("ExpoListTrailing"),
   }),
-  Picker: Object.assign(mock("ExpoPicker"), {
-    Item: mock("ExpoPickerItem"),
-  }),
+  Picker: Object.assign(
+    function Picker(props) {
+      return React.createElement(
+        "ExpoPicker",
+        { ...props, onValueChange: props.enabled === false ? undefined : props.onValueChange },
+        props.children,
+      );
+    },
+    { Item: mock("ExpoPickerItem") },
+  ),
   RNHostView: mock("ExpoRNHostView"),
   Row: mock("ExpoRow"),
-  Slider: mock("ExpoSlider"),
+  Slider: function Slider(props) {
+    return React.createElement("ExpoSlider", {
+      ...props,
+      onValueChange: props.disabled ? undefined : props.onValueChange,
+    });
+  },
   Spacer: mock("ExpoSpacer"),
   ScrollView: mock("ExpoScrollView"),
   Text: mock("ExpoText"),

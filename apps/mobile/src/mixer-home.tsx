@@ -1,124 +1,27 @@
-import { Host, Icon, type IconName } from "@expo/ui";
+import { Host, type IconName } from "@expo/ui";
 import type { CdStatus } from "@on-air/api-types";
 import type React from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeFader } from "./native-fader";
+import { colors, layout, radius } from "./theme";
+import { Card } from "./ui/card";
+import { IconTile } from "./ui/icon-tile";
+import { icons } from "./ui/icons";
+import { NativeIcon } from "./ui/native-icon";
+import { Notice } from "./ui/notice";
 
-const icons = {
-  monitor: Icon.select({
-    ios: "display",
-    android: import("@expo/material-symbols/monitor.xml"),
-  }),
-  speaker: Icon.select({
-    ios: "hifispeaker.fill",
-    android: import("@expo/material-symbols/speaker.xml"),
-  }),
-  chevron: Icon.select({
-    ios: "chevron.right",
-    android: import("@expo/material-symbols/chevron_right.xml"),
-  }),
-  tune: Icon.select({
-    ios: "slider.horizontal.3",
-    android: import("@expo/material-symbols/tune.xml"),
-  }),
-  more: Icon.select({
-    ios: "ellipsis",
-    android: import("@expo/material-symbols/more_horiz.xml"),
-  }),
-  volume: Icon.select({
-    ios: "speaker.wave.2.fill",
-    android: import("@expo/material-symbols/volume_up.xml"),
-  }),
-  live: Icon.select({
-    ios: "record.circle",
-    android: import("@expo/material-symbols/radio_button_checked.xml"),
-  }),
-  route: Icon.select({
-    ios: "arrow.down",
-    android: import("@expo/material-symbols/south.xml"),
-  }),
-  prev: Icon.select({
-    ios: "backward.end.fill",
-    android: import("@expo/material-symbols/skip_previous.xml"),
-  }),
-  play: Icon.select({
-    ios: "play.fill",
-    android: import("@expo/material-symbols/play_arrow.xml"),
-  }),
-  pause: Icon.select({
-    ios: "pause.fill",
-    android: import("@expo/material-symbols/pause.xml"),
-  }),
-  next: Icon.select({
-    ios: "forward.end.fill",
-    android: import("@expo/material-symbols/skip_next.xml"),
-  }),
-} satisfies Record<string, IconName>;
-
-export const mobileColors = {
-  background: "#000000",
-  surface: "#171719",
-  surfacePressed: "#202023",
-  iconSurface: "#232326",
-  border: "#343438",
-  separator: "#2b2b2f",
-  label: "#f5f5f7",
-  secondaryLabel: "#a1a1a7",
-  tertiaryLabel: "#727278",
-  accent: "#ff453a",
-  disabled: "#5b5b61",
-} as const;
-
-function NativeIcon({
-  name,
-  size = 24,
-  color = mobileColors.label,
-  accessibilityLabel,
-}: {
-  name: IconName;
-  size?: number;
-  color?: string;
-  accessibilityLabel?: string;
-}) {
-  return (
-    <Host
-      matchContents
-      ignoreSafeArea="all"
-      colorScheme="dark"
-      seedColor={mobileColors.accent}
-      style={{ width: size, height: size }}
-    >
-      <Icon name={name} size={size} color={color} accessibilityLabel={accessibilityLabel} />
-    </Host>
-  );
-}
-
-function RoundIcon({ name, label }: { name: IconName; label: string }) {
-  return (
-    <View
-      accessibilityElementsHidden
-      style={{
-        width: 58,
-        height: 58,
-        borderRadius: 17,
-        borderCurve: "continuous",
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: mobileColors.iconSurface,
-        borderWidth: 1,
-        borderColor: mobileColors.border,
-      }}
-    >
-      <NativeIcon name={name} size={30} accessibilityLabel={label} />
-    </View>
-  );
-}
+const ROW_PADDING = 18;
+const TILE = 58;
+const ARROW = 24;
+const ROW_GAP = 16;
 
 function RouteRow({
   icon,
   title,
   subtitle,
+  accessibilityLabel,
+  accessibilityHint,
   onPress,
   testID,
   dense = false,
@@ -126,6 +29,8 @@ function RouteRow({
   icon: IconName;
   title: string;
   subtitle: string;
+  accessibilityLabel: string;
+  accessibilityHint: string;
   onPress: () => void;
   testID: string;
   dense?: boolean;
@@ -133,54 +38,77 @@ function RouteRow({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Change ${title}`}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
       onPress={onPress}
       testID={testID}
       style={({ pressed }) => ({
         minHeight: dense ? 82 : 98,
-        paddingHorizontal: 18,
+        paddingHorizontal: ROW_PADDING,
         flexDirection: "row",
         alignItems: "center",
-        gap: 16,
-        backgroundColor: pressed ? mobileColors.surfacePressed : "transparent",
+        gap: ROW_GAP,
+        backgroundColor: pressed ? colors.surfacePressed : "transparent",
       })}
     >
-      <RoundIcon name={icon} label={title} />
+      <IconTile name={icon} size="lg" />
       <View style={{ flex: 1, gap: 3 }}>
-        <Text
-          selectable
-          numberOfLines={1}
-          style={{ color: mobileColors.label, fontSize: 20, fontWeight: "700" }}
-        >
+        <Text numberOfLines={1} style={{ color: colors.label, fontSize: 20, fontWeight: "700" }}>
           {title}
         </Text>
-        <Text
-          selectable
-          numberOfLines={1}
-          style={{ color: mobileColors.secondaryLabel, fontSize: 16 }}
-        >
+        <Text numberOfLines={1} style={{ color: colors.secondaryLabel, fontSize: 16 }}>
           {subtitle}
         </Text>
       </View>
-      <NativeIcon
-        name={icons.chevron}
-        size={19}
-        color={mobileColors.secondaryLabel}
-        accessibilityLabel="Change"
-      />
+      <NativeIcon name={icons.chevron} size={19} color={colors.secondaryLabel} />
     </Pressable>
   );
 }
 
-function Header({
-  live,
-  statusText,
-  onMore,
-}: {
-  live: boolean;
-  statusText: string;
-  onMore: () => void;
-}) {
+/** The separator between the two route rows, with the arrow centred under the source tile. */
+function RouteDivider() {
+  const arrowInset = ROW_PADDING + TILE / 2 - ARROW / 2;
+  return (
+    <View
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        height: ARROW,
+        marginVertical: -ARROW / 2,
+        zIndex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+      }}
+    >
+      <View
+        style={{
+          marginLeft: arrowInset,
+          width: ARROW,
+          height: ARROW,
+          borderRadius: ARROW / 2,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: colors.surface,
+        }}
+      >
+        <NativeIcon name={icons.route} size={16} color={colors.accent} />
+      </View>
+      <View
+        style={{
+          flex: 1,
+          height: 1,
+          marginLeft: ROW_PADDING + TILE + ROW_GAP - arrowInset - ARROW,
+          backgroundColor: colors.separator,
+        }}
+      />
+    </View>
+  );
+}
+
+type HeaderStatus = { text: string; announcement: string; live: boolean };
+
+function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <View
@@ -188,13 +116,13 @@ function Header({
         paddingTop: insets.top + 10,
         paddingBottom: 14,
         borderBottomWidth: 1,
-        borderBottomColor: mobileColors.separator,
+        borderBottomColor: colors.separator,
       }}
     >
       <View
         style={{
           width: "100%",
-          maxWidth: 960,
+          maxWidth: layout.maxWidth,
           alignSelf: "center",
           paddingHorizontal: 20,
           flexDirection: "row",
@@ -202,43 +130,34 @@ function Header({
         }}
       >
         <Text
-          selectable
           accessibilityRole="header"
-          style={{
-            flex: 1,
-            color: mobileColors.label,
-            fontSize: 38,
-            fontWeight: "700",
-          }}
+          style={{ flex: 1, color: colors.label, fontSize: 38, fontWeight: "700" }}
         >
           on-air
         </Text>
         <View
-          accessibilityLabel={live ? "Audio is live" : "Audio is ready"}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 7,
-            paddingHorizontal: 14,
-          }}
+          accessible
+          accessibilityRole="text"
+          accessibilityLabel={status.announcement}
+          testID="status-pill"
+          style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14 }}
         >
           <View
             style={{
               width: 9,
               height: 9,
               borderRadius: 5,
-              backgroundColor: live ? mobileColors.accent : mobileColors.tertiaryLabel,
+              backgroundColor: status.live ? colors.accent : colors.tertiaryLabel,
             }}
           />
           <Text
-            selectable
             style={{
-              color: live ? mobileColors.accent : mobileColors.secondaryLabel,
+              color: status.live ? colors.accent : colors.secondaryLabel,
               fontSize: 17,
               fontWeight: "600",
             }}
           >
-            {statusText}
+            {status.text}
           </Text>
         </View>
         <Pressable
@@ -253,12 +172,12 @@ function Header({
             borderRadius: 23,
             alignItems: "center",
             justifyContent: "center",
-            backgroundColor: pressed ? mobileColors.surfacePressed : mobileColors.surface,
+            backgroundColor: pressed ? colors.surfacePressed : colors.surface,
             borderWidth: 1,
-            borderColor: mobileColors.border,
+            borderColor: colors.border,
           })}
         >
-          <NativeIcon name={icons.more} size={23} accessibilityLabel="More options" />
+          <NativeIcon name={icons.more} size={23} />
         </Pressable>
       </View>
     </View>
@@ -267,6 +186,38 @@ function Header({
 
 function padTrack(n: number): string {
   return String(n).padStart(2, "0");
+}
+
+function TransportButton({
+  icon,
+  size,
+  label,
+  onPress,
+  testID,
+}: {
+  icon: IconName;
+  size: number;
+  label: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      testID={testID}
+      hitSlop={8}
+      style={{
+        width: 46,
+        height: 46,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <NativeIcon name={icon} size={size} />
+    </Pressable>
+  );
 }
 
 function CdDeck({
@@ -282,72 +233,46 @@ function CdDeck({
 }) {
   const label = status.title || status.album || "Audio CD";
   return (
-    <View
-      testID="cd-transport"
-      style={{
-        paddingHorizontal: 18,
-        paddingVertical: 14,
-        gap: 12,
-        backgroundColor: mobileColors.surface,
-        borderRadius: 20,
-        borderCurve: "continuous",
-        borderWidth: 1,
-        borderColor: mobileColors.border,
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Text
-          selectable
-          testID="cd-track"
-          style={{ color: mobileColors.accent, fontSize: 16, fontWeight: "700" }}
-        >
+    <Card testID="cd-transport" style={{ paddingHorizontal: 18, paddingVertical: 14, gap: 12 }}>
+      <View
+        accessible
+        accessibilityLabel={`Track ${status.track} of ${status.track_count}, ${label}`}
+        style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+      >
+        <Text testID="cd-track" style={{ color: colors.accent, fontSize: 16, fontWeight: "700" }}>
           {padTrack(status.track)}/{padTrack(status.track_count)}
         </Text>
         <Text
-          selectable
           numberOfLines={1}
-          style={{ flex: 1, color: mobileColors.label, fontSize: 16, fontWeight: "600" }}
+          style={{ flex: 1, color: colors.label, fontSize: 16, fontWeight: "600" }}
         >
           {label}
         </Text>
       </View>
       <View style={{ flexDirection: "row", justifyContent: "center", gap: 22 }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Previous track"
+        <TransportButton
+          icon={icons.prev}
+          size={28}
+          label="Previous track"
           onPress={onPrev}
           testID="cd-prev"
-          hitSlop={8}
-          style={{ width: 46, height: 46, alignItems: "center", justifyContent: "center" }}
-        >
-          <NativeIcon name={icons.prev} size={28} accessibilityLabel="Previous track" />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={status.playing ? "Pause" : "Play"}
+        />
+        <TransportButton
+          icon={status.playing ? icons.pause : icons.play}
+          size={32}
+          label={status.playing ? "Pause" : "Play"}
           onPress={onPlayPause}
           testID="cd-play"
-          hitSlop={8}
-          style={{ width: 46, height: 46, alignItems: "center", justifyContent: "center" }}
-        >
-          <NativeIcon
-            name={status.playing ? icons.pause : icons.play}
-            size={32}
-            accessibilityLabel={status.playing ? "Pause" : "Play"}
-          />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Next track"
+        />
+        <TransportButton
+          icon={icons.next}
+          size={28}
+          label="Next track"
           onPress={onNext}
           testID="cd-next"
-          hitSlop={8}
-          style={{ width: 46, height: 46, alignItems: "center", justifyContent: "center" }}
-        >
-          <NativeIcon name={icons.next} size={28} accessibilityLabel="Next track" />
-        </Pressable>
+        />
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -355,8 +280,7 @@ export function MixerHome({
   activeInput,
   activeOutput,
   volume,
-  live,
-  statusText,
+  status,
   error,
   volumeDisabled,
   soundDisabled,
@@ -374,8 +298,7 @@ export function MixerHome({
   activeInput: string;
   activeOutput: string;
   volume: number;
-  live: boolean;
-  statusText: string;
+  status: HeaderStatus;
   error?: string | null;
   volumeDisabled: boolean;
   soundDisabled: boolean;
@@ -392,15 +315,16 @@ export function MixerHome({
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
-  const compact = width < 370;
-  const wide = width >= 700;
+  const compact = width < layout.compactBreakpoint;
+  const wide = width >= layout.wideBreakpoint;
   const shortWide = wide && height < 600;
   const source = activeInput || "Choose a source";
   const output = activeOutput || "Choose a speaker";
+  const outputSubtitle = activeOutput ? "Selected speaker" : "No speaker selected";
 
   return (
-    <View style={{ flex: 1, backgroundColor: mobileColors.background }} testID="mixer-screen">
-      <Header live={live} statusText={statusText} onMore={onOpenMore} />
+    <View style={{ flex: 1, backgroundColor: colors.background }} testID="mixer-screen">
+      <Header status={status} onMore={onOpenMore} />
       <ScrollView
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
@@ -411,31 +335,11 @@ export function MixerHome({
           paddingBottom: Math.max(insets.bottom, 18) + 12,
           gap: compact ? 18 : 22,
           width: "100%",
-          maxWidth: 960,
+          maxWidth: layout.maxWidth,
           alignSelf: "center",
         }}
       >
-        {error ? (
-          <View
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              borderRadius: 14,
-              borderCurve: "continuous",
-              backgroundColor: "#2b1213",
-              borderWidth: 1,
-              borderColor: "#68201f",
-            }}
-          >
-            <Text
-              selectable
-              accessibilityRole="alert"
-              style={{ color: "#ffb4ab", fontSize: 15, lineHeight: 20 }}
-            >
-              {error}
-            </Text>
-          </View>
-        ) : null}
+        {error ? <Notice message={error} testID="mixer-error" /> : null}
         <View
           testID={
             shortWide ? "mixer-landscape-layout" : wide ? "mixer-wide-layout" : "mixer-phone-layout"
@@ -455,60 +359,30 @@ export function MixerHome({
             }}
           >
             <View style={{ gap: 10 }}>
-              <Text selectable style={{ color: mobileColors.secondaryLabel, fontSize: 17 }}>
-                Now streaming
-              </Text>
-              <View
-                style={{
-                  overflow: "hidden",
-                  backgroundColor: mobileColors.surface,
-                  borderRadius: 20,
-                  borderCurve: "continuous",
-                  borderWidth: 1,
-                  borderColor: mobileColors.border,
-                }}
-              >
+              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Now streaming</Text>
+              <Card>
                 <RouteRow
                   icon={icons.monitor}
                   title={source}
                   subtitle="This Mac"
+                  accessibilityLabel={`Source: ${source}`}
+                  accessibilityHint="Choose what the desktop captures"
                   onPress={onChangeInput}
                   testID="source-row"
                   dense={shortWide}
                 />
-                <View
-                  style={{ height: 1, backgroundColor: mobileColors.separator, marginLeft: 92 }}
-                />
-                <View
-                  pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    left: 39,
-                    top: shortWide ? 71 : 87,
-                    width: 24,
-                    height: 24,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: 12,
-                    backgroundColor: mobileColors.surface,
-                  }}
-                >
-                  <NativeIcon
-                    name={icons.route}
-                    size={16}
-                    color={mobileColors.accent}
-                    accessibilityLabel="Routes to"
-                  />
-                </View>
+                <RouteDivider />
                 <RouteRow
                   icon={icons.speaker}
                   title={output}
-                  subtitle={activeOutput ? "Selected speaker" : "No speaker selected"}
+                  subtitle={outputSubtitle}
+                  accessibilityLabel={`Speaker: ${output}`}
+                  accessibilityHint="Choose where the audio plays"
                   onPress={onChangeOutput}
                   testID="output-row"
                   dense={shortWide}
                 />
-              </View>
+              </Card>
             </View>
 
             {cd?.present ? (
@@ -521,6 +395,8 @@ export function MixerHome({
             ) : null}
 
             <View
+              accessible
+              accessibilityLabel={`${status.live ? "Audio is live" : "Ready to stream"}. ${source} to ${output}`}
               style={{
                 minHeight: shortWide ? 72 : wide ? 112 : 86,
                 paddingHorizontal: compact ? 8 : 18,
@@ -533,20 +409,15 @@ export function MixerHome({
               <NativeIcon
                 name={icons.live}
                 size={shortWide ? 52 : compact ? 58 : 68}
-                color={live ? mobileColors.accent : mobileColors.tertiaryLabel}
-                accessibilityLabel={live ? "Live" : "Ready"}
+                color={status.live ? colors.accent : colors.tertiaryLabel}
               />
               <View style={{ flexShrink: 1, gap: 5 }}>
-                <Text
-                  selectable
-                  style={{ color: mobileColors.label, fontSize: 21, fontWeight: "700" }}
-                >
-                  {live ? "Audio is live" : "Ready to stream"}
+                <Text style={{ color: colors.label, fontSize: 21, fontWeight: "700" }}>
+                  {status.live ? "Audio is live" : "Ready to stream"}
                 </Text>
                 <Text
-                  selectable
                   numberOfLines={2}
-                  style={{ color: mobileColors.secondaryLabel, fontSize: 16, lineHeight: 21 }}
+                  style={{ color: colors.secondaryLabel, fontSize: 16, lineHeight: 21 }}
                 >
                   {`${source} → ${output}`}
                 </Text>
@@ -562,33 +433,20 @@ export function MixerHome({
             }}
           >
             {wide ? (
-              <Text selectable style={{ color: mobileColors.secondaryLabel, fontSize: 17 }}>
-                Playback
-              </Text>
+              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Playback</Text>
             ) : null}
-            <View
-              style={{
-                paddingHorizontal: 18,
-                paddingVertical: 16,
-                gap: 8,
-                backgroundColor: mobileColors.surface,
-                borderRadius: 20,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: mobileColors.border,
-              }}
+            <Card
+              style={{ paddingHorizontal: 18, paddingVertical: 16, gap: 8, overflow: "visible" }}
             >
-              <View style={{ paddingLeft: 40, flexDirection: "row", alignItems: "center" }}>
-                <Text
-                  selectable
-                  style={{ flex: 1, color: mobileColors.label, fontSize: 16, fontWeight: "600" }}
-                >
+              <View
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                style={{ paddingLeft: 40, flexDirection: "row", alignItems: "center" }}
+              >
+                <Text style={{ flex: 1, color: colors.label, fontSize: 16, fontWeight: "600" }}>
                   Volume
                 </Text>
-                <Text
-                  selectable
-                  style={{ color: mobileColors.label, fontSize: 16, fontWeight: "600" }}
-                >
+                <Text style={{ color: colors.label, fontSize: 16, fontWeight: "600" }}>
                   {Math.round(volume)}
                 </Text>
               </View>
@@ -596,17 +454,17 @@ export function MixerHome({
                 <NativeIcon
                   name={icons.volume}
                   size={28}
-                  color={volumeDisabled ? mobileColors.disabled : mobileColors.label}
-                  accessibilityLabel="Volume"
+                  color={volumeDisabled ? colors.disabled : colors.label}
                 />
                 <Host
                   colorScheme="dark"
-                  seedColor={mobileColors.accent}
+                  seedColor={colors.accent}
                   ignoreSafeArea="all"
                   style={{ flex: 1, height: 42 }}
                 >
                   <NativeFader
                     label="Volume"
+                    accessibilityLabel="Volume"
                     value={volume}
                     min={0}
                     max={100}
@@ -617,11 +475,12 @@ export function MixerHome({
                   />
                 </Host>
               </View>
-            </View>
+            </Card>
 
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Open sound settings"
+              accessibilityLabel="Sound settings"
+              accessibilityState={{ disabled: soundDisabled }}
               onPress={onOpenSound}
               disabled={soundDisabled}
               testID="sound-settings-button"
@@ -631,28 +490,22 @@ export function MixerHome({
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 16,
-                borderRadius: 20,
+                borderRadius: radius.xl,
                 borderCurve: "continuous",
                 borderWidth: 1,
-                borderColor: mobileColors.border,
-                backgroundColor: pressed ? mobileColors.surfacePressed : mobileColors.surface,
+                borderColor: colors.border,
+                backgroundColor: pressed ? colors.surfacePressed : colors.surface,
                 opacity: soundDisabled ? 0.5 : 1,
               })}
             >
-              <NativeIcon name={icons.tune} size={28} accessibilityLabel="Sound settings" />
-              <Text selectable style={{ flex: 1, color: mobileColors.label, fontSize: 18 }}>
-                Sound settings
-              </Text>
-              <NativeIcon
-                name={icons.chevron}
-                size={19}
-                color={mobileColors.secondaryLabel}
-                accessibilityLabel="Open"
-              />
+              <NativeIcon name={icons.tune} size={28} />
+              <Text style={{ flex: 1, color: colors.label, fontSize: 18 }}>Sound settings</Text>
+              <NativeIcon name={icons.chevron} size={19} color={colors.secondaryLabel} />
             </Pressable>
 
             <Pressable
               accessibilityRole="button"
+              accessibilityLabel="Disconnect remote"
               onPress={onDisconnect}
               testID="disconnect-button"
               style={({ pressed }) => ({
@@ -662,10 +515,7 @@ export function MixerHome({
                 opacity: pressed ? 0.65 : 1,
               })}
             >
-              <Text
-                selectable
-                style={{ color: mobileColors.accent, fontSize: 17, fontWeight: "500" }}
-              >
+              <Text style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}>
                 Disconnect remote
               </Text>
             </Pressable>
