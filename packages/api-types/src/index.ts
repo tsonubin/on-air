@@ -1,8 +1,108 @@
+// Hand-maintained mirror of the serde structs in packages/core. Field
+// optionality follows serde exactly: a `#[serde(skip_serializing_if =
+// "Option::is_none")]` field is optional (`?`) and never `null`; a plain
+// `Option<T>` is `T | null`; everything else is required.
+//
+// Source of truth, by section:
+//   packages/core/src/lib.rs            StatusResponse
+//   packages/core/src/api/*.rs          request and response bodies
+//   packages/core/src/state.rs          ActiveOutput
+//   packages/core/src/cd/mod.rs         CdStatus, CdTrackInfo
+//   packages/core/src/pipeline/capture.rs  InputBackend
+//   packages/core/src/sender/airplay.rs    AirPlayMode
+
+// ---------------------------------------------------------------------------
+// Enumerations
+// ---------------------------------------------------------------------------
+
+/** Output transports the core can cast to (`session.rs`). */
+export type Transport = "sonos" | "airplay" | "bluetooth";
+
+/** How many speakers an output represents (`session.rs`, `airplay_mdns.rs`). */
+export type OutputKind = "solo" | "pair";
+
+/** Loopback capture backend chosen at compile time (`capture::loopback_backend`). */
+export type InputBackend =
+  | "pipewire-monitor"
+  | "coreaudio-screencapturekit"
+  | "wasapi-loopback"
+  | "cpal-default";
+
+/** AirPlay integration strategy (`airplay::platform_mode`). */
+export type AirPlayMode = "avroute-picker" | "owntone";
+
+export type CdAction = "play" | "pause" | "next" | "prev" | "seek" | "goto" | "eject";
+
+// ---------------------------------------------------------------------------
+// Error envelope
+// ---------------------------------------------------------------------------
+
+/**
+ * Error codes the core puts in `ApiErrorBody.code` (`packages/core/src/api/error.rs`).
+ * The Rust side chooses snake_case names; the list below is the set known at
+ * the time of writing, with the HTTP status each one rides on. The trailing
+ * `(string & {})` keeps the union open on purpose: a newer core may send codes
+ * this client has never seen, and callers must fall back to a generic message
+ * rather than crash. Map `code` to copy; never match on the human-readable
+ * `error` text.
+ */
+export type ApiErrorCode =
+  | "invalid_request" // 400
+  | "invalid_pin" // 401 from /api/pairing/verify
+  | "not_paired" // 401
+  | "forbidden" // 403
+  | "not_found" // 404
+  | "no_active_output" // 404
+  | "method_not_allowed" // 405
+  | "conflict" // 409: exclusivity / switching conflict
+  | "not_ready" // 409: the chosen device or source is not ready (unpaired, disconnected, no disc)
+  | "stream_busy" // 409
+  | "pin_lockout" // 429
+  | "transport_unreachable" // 502
+  | "service_paused" // 503
+  | "internal" // 500
+  | (string & {});
+
+/** Body of every non-2xx response from the core (`Content-Type: application/json`). */
+export interface ApiErrorBody {
+  /** Human-readable message for logs; not stable, do not match on it. */
+  error: string;
+  code: ApiErrorCode;
+}
+
+// ---------------------------------------------------------------------------
+// Status and pairing
+// ---------------------------------------------------------------------------
+
 export interface StatusResponse {
   status: string;
   version: string;
   service_enabled: boolean;
+  /**
+   * LAN addresses the core is reachable on, so the desktop can show what the
+   * phone must type. Optional on the TypeScript side because cores older than
+   * the quality overhaul omit it.
+   */
+  lan_addresses?: string[];
+  /** Reserved: a friendly service name. Not emitted by current cores. */
+  name?: string;
 }
+
+export interface PinResponse {
+  pin: string;
+}
+
+export interface VerifyRequest {
+  pin: string;
+}
+
+export interface VerifyResponse {
+  token: string;
+}
+
+// ---------------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------------
 
 export interface InputsResponse {
   inputs: string[];
@@ -10,17 +110,25 @@ export interface InputsResponse {
 
 export interface ActiveInputResponse {
   name: string | null;
-  backend: string;
+  backend: InputBackend;
 }
+
+export interface ActivateInputRequest {
+  name: string;
+}
+
+// ---------------------------------------------------------------------------
+// Outputs
+// ---------------------------------------------------------------------------
 
 export interface OutputInfo {
   id: string;
   name: string;
-  transport: "sonos" | "airplay" | "bluetooth" | string;
-  kind?: "solo" | "pair" | "group" | string;
-  member_count?: number;
-  needs_pair?: boolean;
-  paired?: boolean;
+  transport: Transport;
+  kind: OutputKind;
+  member_count: number;
+  needs_pair: boolean;
+  paired: boolean;
 }
 
 export interface OutputsResponse {
@@ -28,37 +136,84 @@ export interface OutputsResponse {
 }
 
 export interface ActiveOutput {
-  transport: string;
+  transport: Transport;
   device_id: string;
   device_name: string;
 }
 
-export interface VolumeResponse {
+/** Lifecycle of the exclusive output (`session::output::OutputPhase`). */
+export type OutputPhase = "starting" | "live" | "failed";
+
+/** The active output as `GET /api/outputs/active` reports it. */
+export interface ActiveOutputView extends ActiveOutput {
+  /** Optional because cores older than the output-session refactor omit it. */
+  state?: OutputPhase;
+}
+
+/** `GET /api/outputs/active`. */
+export interface ActiveOutputResponse {
+  active: ActiveOutputView | null;
+}
+
+export interface ActivateOutputRequest {
+  transport: Transport;
+  device_id: string;
+}
+
+/** `volume` is a `u8` on the Rust side: send an integer in 0..=100. */
+export interface SetVolumeRequest {
   volume: number;
 }
 
+export interface OutputVolumeResponse {
+  volume: number;
+}
+
+// ---------------------------------------------------------------------------
+// EQ and sample rate
+// ---------------------------------------------------------------------------
+
+export type EqGains = [number, number, number, number, number];
+
 export interface EqResponse {
-  gains_db: [number, number, number, number, number];
+  gains_db: EqGains;
+}
+
+export interface SetEqRequest {
+  gains_db: EqGains;
 }
 
 export interface SampleRateSide {
   sample_rate_hz: number;
   supported_hz: number[];
-  transport?: string;
+  transport?: Transport;
 }
 
 export interface SampleRateResponse {
+  /** Pipeline / input rate. Kept for older clients. */
   sample_rate_hz: number;
   input: SampleRateSide;
   output: SampleRateSide;
 }
 
-export interface PinResponse {
-  pin: string;
+/** `sample_rate_hz` is the legacy spelling of `input_hz`; `input_hz` wins when both are set. */
+export interface SetSampleRateRequest {
+  sample_rate_hz?: number;
+  input_hz?: number;
+  output_hz?: number;
 }
 
-export interface VerifyResponse {
-  token: string;
+// ---------------------------------------------------------------------------
+// AirPlay and Bluetooth
+// ---------------------------------------------------------------------------
+
+export interface AirPlayModeResponse {
+  mode: AirPlayMode;
+}
+
+export interface AirPlayPairRequest {
+  device_id: string;
+  pin: string;
 }
 
 export interface BluetoothDeviceInfo {
@@ -68,13 +223,22 @@ export interface BluetoothDeviceInfo {
   connected: boolean;
 }
 
-export interface AirPlayModeResponse {
-  mode: "avroute-picker" | "owntone" | string;
+export interface BluetoothListResponse {
+  devices: BluetoothDeviceInfo[];
 }
+
+/** Body for `POST /api/bluetooth/pair` and `POST /api/bluetooth/connect`. */
+export interface BluetoothIdRequest {
+  id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Audio CD
+// ---------------------------------------------------------------------------
 
 export interface CdTrackInfo {
   number: number;
-  title?: string | null;
+  title?: string;
   duration_ms: number;
 }
 
@@ -83,20 +247,44 @@ export interface CdStatus {
   playing: boolean;
   track: number;
   track_count: number;
-  title?: string | null;
-  album?: string | null;
+  title?: string;
+  album?: string;
   position_ms: number;
   duration_ms: number;
-  tracks?: CdTrackInfo[];
+  tracks: CdTrackInfo[];
 }
 
-export type CdAction = "play" | "pause" | "next" | "prev" | "seek" | "goto" | "eject";
+/** `seek` needs `position_ms`, `goto` needs `track`; other actions take neither. */
+export interface CdControlRequest {
+  action: CdAction;
+  position_ms?: number;
+  track?: number;
+}
+
+export interface CdSimulateTrack {
+  title?: string;
+  duration_ms?: number;
+}
+
+/** `POST /api/mock/cd`; only routed when the core runs in mock mode. */
+export interface CdSimulateRequest {
+  present: boolean;
+  album?: string;
+  tracks?: CdSimulateTrack[];
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket events (`api/ws.rs`, `#[serde(tag = "type")]`)
+// ---------------------------------------------------------------------------
 
 export type WsEvent =
-  | { type: "OutputStateChanged"; transport: string; device_name: string; active: boolean }
+  /** Sent every 10 s as a text frame so browsers and React Native see liveness. Ignore it. */
+  | { type: "Heartbeat" }
+  | { type: "OutputStateChanged"; transport: Transport; device_name: string; active: boolean }
+  | { type: "InputStateChanged"; name: string | null; active: boolean; error?: string }
   | { type: "LevelMeter"; rms: number; peak: number }
-  | { type: "DeviceJoined"; transport: string; id: string; name: string }
-  | { type: "DeviceLeft"; transport: string; id: string }
+  | { type: "DeviceJoined"; transport: Transport; id: string; name: string }
+  | { type: "DeviceLeft"; transport: Transport; id: string }
   | { type: "ServiceStateChanged"; enabled: boolean }
   | {
       type: "CdStateChanged";
@@ -104,11 +292,17 @@ export type WsEvent =
       playing: boolean;
       track: number;
       track_count: number;
-      title?: string | null;
-      album?: string | null;
-      position_ms?: number;
-      duration_ms?: number;
+      title?: string;
+      album?: string;
+      position_ms: number;
+      duration_ms: number;
     };
+
+export type WsEventType = WsEvent["type"];
+
+// ---------------------------------------------------------------------------
+// Constants and helpers
+// ---------------------------------------------------------------------------
 
 export const AUDIO_CD_INPUT = "Audio CD";
 
@@ -122,12 +316,34 @@ export interface DiscoveredHost {
 // Keep in sync with DEFAULT_PORT in packages/core/src/lib.rs
 export const DEFAULT_PORT = 47990;
 
-/** DNS-SD type advertised by a running desktop/core (`mdns.rs`). */
+/**
+ * DNS-SD service type advertised by a running desktop/core.
+ *
+ * This is the bare `<service>.<proto>` form. Platform APIs differ in what
+ * suffix they want: the Rust `mdns-sd` crate needs the fully qualified
+ * `_on-air._tcp.local.` (see `packages/core/src/mdns.rs`), while Apple's
+ * `NSBonjourServices` plist entry takes `_on-air._tcp` with no domain. Derive
+ * those spellings from this constant instead of re-typing the string.
+ */
 export const MDNS_SERVICE_TYPE = "_on-air._tcp";
+
+/** `MDNS_SERVICE_TYPE` with the `.local.` domain the mdns-sd crate expects. */
+export const MDNS_SERVICE_TYPE_FQDN = `${MDNS_SERVICE_TYPE}.local.`;
 
 export const API_BASE = `http://127.0.0.1:${DEFAULT_PORT}`;
 
+/**
+ * Build an `http://host:port` base from user input. Strips a leading scheme
+ * and trailing slash, and brackets bare IPv6 literals (`fe80::1` becomes
+ * `[fe80::1]`) so the result is a valid URL authority.
+ */
 export function apiBase(host: string, port: number = DEFAULT_PORT): string {
-  const trimmed = host.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  let trimmed = host
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+  // A bare IPv6 literal contains more than one colon and no brackets.
+  const isBareIpv6 = !trimmed.startsWith("[") && (trimmed.match(/:/g)?.length ?? 0) >= 2;
+  if (isBareIpv6) trimmed = `[${trimmed}]`;
   return `http://${trimmed}:${port}`;
 }

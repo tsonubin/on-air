@@ -1,5 +1,6 @@
 module.exports = {
   testEnvironment: "node",
+  testMatch: ["<rootDir>/__tests__/**/*.test.{ts,tsx}"],
   setupFiles: ["<rootDir>/jest.setup.js"],
   transform: {
     "^.+\\.(js|jsx|ts|tsx)$": ["babel-jest", { configFile: "./babel.config.js" }],
@@ -21,6 +22,5 @@ module.exports = {
     "^@expo/material-symbols/.*\\.xml$": "<rootDir>/__mocks__/material-symbol.js",
     "^expo-status-bar$": "<rootDir>/__mocks__/expo-status-bar.js",
     "^react-native-safe-area-context$": "<rootDir>/__mocks__/safe-area-context.js",
-    "^expo$": "<rootDir>/__mocks__/expo.js",
   },
 };

@@ -4,11 +4,6 @@ use cpal::{
     StreamConfig, I24, U24,
 };
 use ringbuf::{traits::Producer, HeapProd};
-use std::io::Read;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::thread::JoinHandle;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputDeviceInfo {
@@ -83,16 +78,136 @@ pub fn is_pulse_monitor_name(name: &str) -> bool {
     name.contains(".monitor")
 }
 
-fn pulse_monitor_source_names() -> Vec<String> {
-    let output = match Command::new("timeout")
-        .args(["2", "pactl", "list", "sources", "short"])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return Vec::new(),
-    };
-    parse_pactl_monitor_sources(&String::from_utf8_lossy(&output.stdout))
+/// Linux only: PulseAudio/PipeWire monitor sources via `pactl`, and
+/// capture through `parec`. Other platforms never spawn these binaries.
+#[cfg(target_os = "linux")]
+mod pulse {
+    use super::parse_pactl_monitor_sources;
+    use ringbuf::{traits::Producer, HeapProd};
+    use std::io::Read;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::thread::JoinHandle;
+
+    pub fn pulse_monitor_source_names() -> Vec<String> {
+        let output = match Command::new("timeout")
+            .args(["2", "pactl", "list", "sources", "short"])
+            .output()
+        {
+            Ok(o) if o.status.success() => o,
+            _ => return Vec::new(),
+        };
+        parse_pactl_monitor_sources(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    pub struct PulseMonitorCapture {
+        stop: Arc<AtomicBool>,
+        child: Option<Child>,
+        reader: Option<JoinHandle<()>>,
+    }
+
+    impl PulseMonitorCapture {
+        pub fn stop(mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(mut child) = self.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            if let Some(reader) = self.reader.take() {
+                let _ = reader.join();
+            }
+        }
+    }
+
+    /// Capture a Pulse/PipeWire monitor source (`*.monitor`) via `parec`.
+    pub fn start_pulse_monitor(
+        source: &str,
+        mut producer: HeapProd<f32>,
+        preferred_rate_hz: Option<u32>,
+    ) -> Result<(PulseMonitorCapture, u32), String> {
+        let rate = preferred_rate_hz.unwrap_or(48000);
+        let mut child = Command::new("parec")
+            .args([
+                "--device",
+                source,
+                "--file-format=raw",
+                "--format=float32le",
+                "--rate",
+                &rate.to_string(),
+                "--channels=1",
+                "--latency-msec=50",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("parec: {e}"))?;
+        let mut stdout = child.stdout.take().ok_or_else(|| {
+            let _ = child.kill();
+            let _ = child.wait();
+            "parec stdout missing".to_string()
+        })?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = stop.clone();
+        let reader = std::thread::spawn(move || {
+            // Keep up to three bytes between reads because pipe reads are not
+            // guaranteed to end on an f32 sample boundary.
+            let mut buf = [0u8; 4099];
+            let mut pending = 0;
+            while !stop_thread.load(Ordering::Relaxed) {
+                match stdout.read(&mut buf[pending..]) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        let total = pending + n;
+                        let complete_bytes = total - (total % 4);
+                        let (samples, _) = buf[..complete_bytes].as_chunks::<4>();
+                        producer
+                            .push_iter(samples.iter().map(|sample| f32::from_le_bytes(*sample)));
+                        pending = total - complete_bytes;
+                        buf.copy_within(complete_bytes..total, 0);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok((
+            PulseMonitorCapture {
+                stop,
+                child: Some(child),
+                reader: Some(reader),
+            },
+            rate,
+        ))
+    }
 }
+
+/// No-op stand-ins so the rest of the pipeline compiles unchanged where
+/// PulseAudio does not exist.
+#[cfg(not(target_os = "linux"))]
+mod pulse {
+    use ringbuf::HeapProd;
+
+    pub fn pulse_monitor_source_names() -> Vec<String> {
+        Vec::new()
+    }
+
+    pub struct PulseMonitorCapture;
+
+    impl PulseMonitorCapture {
+        pub fn stop(self) {}
+    }
+
+    pub fn start_pulse_monitor(
+        _source: &str,
+        _producer: HeapProd<f32>,
+        _preferred_rate_hz: Option<u32>,
+    ) -> Result<(PulseMonitorCapture, u32), String> {
+        Err("Pulse monitor capture is only available on Linux".to_string())
+    }
+}
+
+use pulse::pulse_monitor_source_names;
+pub use pulse::{start_pulse_monitor, PulseMonitorCapture};
 
 /// Prefer the analog-output monitor over DSP/effect monitors.
 pub fn preferred_pulse_monitor() -> Option<String> {
@@ -102,84 +217,6 @@ pub fn preferred_pulse_monitor() -> Option<String> {
         .find(|n| n.contains("analog") && n.ends_with(".monitor"))
         .cloned()
         .or_else(|| names.into_iter().next())
-}
-
-pub struct PulseMonitorCapture {
-    stop: Arc<AtomicBool>,
-    child: Option<Child>,
-    reader: Option<JoinHandle<()>>,
-}
-
-impl PulseMonitorCapture {
-    pub fn stop(mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
-    }
-}
-
-/// Capture a Pulse/PipeWire monitor source (`*.monitor`) via `parec`.
-pub fn start_pulse_monitor(
-    source: &str,
-    mut producer: HeapProd<f32>,
-    preferred_rate_hz: Option<u32>,
-) -> Result<(PulseMonitorCapture, u32), String> {
-    let rate = preferred_rate_hz.unwrap_or(48000);
-    let mut child = Command::new("parec")
-        .args([
-            "--device",
-            source,
-            "--file-format=raw",
-            "--format=float32le",
-            "--rate",
-            &rate.to_string(),
-            "--channels=1",
-            "--latency-msec=50",
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("parec: {e}"))?;
-    let mut stdout = child.stdout.take().ok_or_else(|| {
-        let _ = child.kill();
-        let _ = child.wait();
-        "parec stdout missing".to_string()
-    })?;
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_thread = stop.clone();
-    let reader = std::thread::spawn(move || {
-        // Keep up to three bytes between reads because pipe reads are not
-        // guaranteed to end on an f32 sample boundary.
-        let mut buf = [0u8; 4099];
-        let mut pending = 0;
-        while !stop_thread.load(Ordering::Relaxed) {
-            match stdout.read(&mut buf[pending..]) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let total = pending + n;
-                    let complete_bytes = total - (total % 4);
-                    let (samples, _) = buf[..complete_bytes].as_chunks::<4>();
-                    producer.push_iter(samples.iter().map(|sample| f32::from_le_bytes(*sample)));
-                    pending = total - complete_bytes;
-                    buf.copy_within(complete_bytes..total, 0);
-                }
-                Err(_) => break,
-            }
-        }
-    });
-    Ok((
-        PulseMonitorCapture {
-            stop,
-            child: Some(child),
-            reader: Some(reader),
-        },
-        rate,
-    ))
 }
 
 pub fn find_preferred_loopback(host: &Host) -> Result<Option<Device>, cpal::Error> {
@@ -204,26 +241,12 @@ pub fn supported_input_rate_ranges(device: &Device) -> Vec<(u32, u32)> {
     }
 }
 
-pub fn supported_input_rates_for_name(name: &str) -> Vec<(u32, u32)> {
-    let host = cpal::default_host();
-    find_input_device(&host, name)
-        .ok()
-        .flatten()
-        .map(|device| supported_input_rate_ranges(&device))
-        .unwrap_or_default()
-}
-
-/// Opens the device's default input config and starts pushing captured
-/// samples into `producer`, downmixing to mono. Returns the running
-/// `Stream` — dropping it stops capture (cpal's Drop impl joins its
-/// worker thread, so drop it via `spawn_blocking` from async code).
-pub fn start_capture(device: &Device, producer: HeapProd<f32>) -> Result<Stream, cpal::Error> {
-    start_capture_at(device, producer, None).map(|(stream, _rate)| stream)
-}
-
-/// Like [`start_capture`], but tries `preferred_rate_hz` first so the user-
-/// selected input rate can be the native capture rate (no extra resample).
-/// Returns the actual capture sample rate the stream is running at.
+/// Opens an input config on `device` and starts pushing captured samples
+/// into `producer`, downmixing to mono. `preferred_rate_hz` is tried first
+/// so the user-selected input rate can be the native capture rate (no extra
+/// resample). Returns the running `Stream` (dropping it stops capture; cpal's
+/// Drop joins its worker thread, so drop it via `spawn_blocking` from async
+/// code) and the actual capture sample rate.
 pub fn start_capture_at(
     device: &Device,
     producer: HeapProd<f32>,

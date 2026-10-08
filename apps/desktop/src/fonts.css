@@ -1,0 +1,39 @@
+/*
+ * Vendored OFL fonts (see assets/fonts/OFL.txt). Latin subsets of the Google
+ * Fonts builds; IBM Plex Sans is the variable build and covers both weights.
+ */
+@font-face {
+  font-family: "Anton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/Anton-Regular-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/IBMPlexMono-Regular-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/IBMPlexMono-Medium-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("./assets/fonts/IBMPlexSans-Variable-latin.woff2") format("woff2");
+}
+@font-face {
+  font-family: "DSEG14 Classic Mini";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/DSEG14ClassicMini-Regular.woff2") format("woff2");
+}

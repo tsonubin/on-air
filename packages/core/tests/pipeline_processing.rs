@@ -1,7 +1,8 @@
 use bytes::Bytes;
 use on_air_core::pipeline::{new_ring_buffer, spawn_processing_task};
+use parking_lot::Mutex;
 use ringbuf::traits::Producer;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 

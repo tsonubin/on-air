@@ -11,6 +11,21 @@ test("isLanUnicast accepts RFC1918 and rejects loopback and public IPs", () => {
   assert.equal(isLanUnicast("169.254.1.1"), false);
 });
 
+test("isLanUnicast bounds every octet to 0-255 and rejects malformed input", () => {
+  assert.equal(isLanUnicast("10.0.0.256"), false);
+  assert.equal(isLanUnicast("10.256.0.1"), false);
+  assert.equal(isLanUnicast("192.168.1.999"), false);
+  assert.equal(isLanUnicast("10.0.0.-1"), false);
+  assert.equal(isLanUnicast("10.0.0"), false);
+  assert.equal(isLanUnicast("10.0.0.1.2"), false);
+  assert.equal(isLanUnicast("10.0.0.x"), false);
+  assert.equal(isLanUnicast("10.0..1"), false);
+  assert.equal(isLanUnicast("10.0.0.1e0"), false);
+  assert.equal(isLanUnicast("10.0.0.255"), true);
+  assert.equal(isLanUnicast("172.31.255.255"), true);
+  assert.equal(isLanUnicast("172.32.0.1"), false);
+});
+
 test("subnetHosts expands a /24 from the local IPv4", () => {
   const hosts = subnetHosts("192.168.5.101");
   assert.equal(hosts.length, 254);
@@ -29,6 +44,22 @@ test("probeOnAir returns a host when /api/status is ok", async () => {
   };
   const hit = await probeOnAir("192.168.5.14", 47990, 400, fetchImpl);
   assert.deepEqual(hit, { host: "192.168.5.14", port: 47990, version: "0.1.0", name: "on-air" });
+});
+
+test("probeOnAir prefers a name from the status payload over the default", async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response(JSON.stringify({ status: "ok", version: "0.2.0", name: "Studio Mac" }), {
+      status: 200,
+    });
+  const hit = await probeOnAir("192.168.5.14", 47990, 400, fetchImpl);
+  assert.equal(hit?.name, "Studio Mac");
+  assert.equal(hit?.version, "0.2.0");
+});
+
+test("probeOnAir rejects a non-ok status payload", async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response(JSON.stringify({ status: "paused" }), { status: 200 });
+  assert.equal(await probeOnAir("192.168.5.14", 47990, 400, fetchImpl), null);
 });
 
 test("probeOnAir tolerates Expo Go development overhead on a reachable LAN service", async () => {

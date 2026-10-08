@@ -1,879 +1,584 @@
-import {
-  BottomSheet,
-  Button,
-  Column,
-  FieldGroup,
-  Host,
-  Picker,
-  Row,
-  Spacer,
-  Text,
-  TextInput,
-  useNativeState,
-} from "@expo/ui";
-import { environment, presentationBackground, tint } from "@expo/ui/swift-ui/modifiers";
 import type {
-  ActiveOutput,
+  ActiveOutputView,
+  AirPlayMode,
+  CdAction,
   CdStatus,
   DiscoveredHost,
+  EqGains,
   OutputInfo,
-  StatusResponse,
-  WsEvent,
+  OutputPhase,
 } from "@on-air/api-types";
-import { DEFAULT_PORT } from "@on-air/api-types";
-import { router } from "expo-router";
-import { StatusBar } from "expo-status-bar";
-import type React from "react";
-import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Platform, View } from "react-native";
-import { subscribeToDesktop } from "@/connection-events";
 import {
   activateInput,
   activateOutput,
-  apiBase,
   controlCd,
-  discoverOnAir,
   fetchStatus,
-  getActiveInput,
-  getActiveOutput,
-  getAirplayMode,
-  getCd,
-  getEq,
-  getSampleRate,
-  getVolume,
   HttpError,
-  listInputs,
-  listOutputs,
   openBluetoothSettings,
   pairAirplay,
   pairBluetooth,
-  prettyInput,
   setEq,
   setSampleRate,
   setVolume,
   verifyPin,
-  wsUrl,
-} from "@/controlClient";
-import { MixerHome, mobileColors } from "@/mixer-home";
-import { PairingHome } from "@/pairing-home";
-import { clearPairing, loadPairing, savePairing } from "@/pairing-store";
-import { theme } from "@/theme";
+} from "@on-air/control-client";
+import type { ReactNode } from "react";
+import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState, type AppStateStatus } from "react-native";
+import { formatDesktopTarget, targetBase } from "@/desktop-target";
+import { friendlyError, isUnauthorized } from "@/errors";
+import { useDesktopConnection } from "@/hooks/useDesktopConnection";
+import { useDiscovery } from "@/hooks/useDiscovery";
+import { useLatestWriteQueue } from "@/hooks/useLatestWriteQueue";
+import { usePairingStore } from "@/hooks/usePairingStore";
+import { prettyInput, uniqueByLabel } from "@/pretty-input";
+import { deriveUiState, describeUiState, type UiState, type UiView } from "@/ui-state";
 
-// BottomSheet creates its own native Host, so the app Host's theme does not cross it.
-const sheetPresentation =
-  Platform.OS === "ios"
-    ? [
-        environment({ key: "colorScheme", value: "dark" }),
-        presentationBackground(mobileColors.surface),
-        tint(mobileColors.accent),
-      ]
-    : undefined;
-type PairTarget = { transport: string; id: string; name: string };
-type QueuedControl<T> = {
-  base: string;
-  token: string;
-  connection: number;
-  value: T;
-};
+export const PIN_LENGTH = 6;
+export const DEVICE_PIN_LENGTH = 8;
+/** Bluetooth speakers appear a moment after the desktop's settings pane pairs them. */
+const BLUETOOTH_FOLLOW_UP_MS = 2_500;
 
-function normalizeDesktopHost(value: string): string {
-  return value
-    .trim()
-    .replace(/^https?:\/\//i, "")
-    .replace(/\/.*$/, "")
-    .replace(/:\d+$/, "");
+/** Keeps the digits of what was typed or pasted, up to `max`. */
+export function digitsOnly(value: string, max: number): string {
+  return value.replace(/\D/g, "").slice(0, max);
 }
 
-function friendlyError(error: unknown, action = "complete that action"): string {
-  if (error instanceof HttpError) {
-    if (error.status === 401) return "Pairing expired or the code was not accepted. Pair again.";
-    if (error.status === 429) return "Too many pairing attempts. Wait a moment and try again.";
-    if (error.status === 503)
-      return "The desktop service is paused. Turn it on from the tray menu.";
-    if (error.status === 404) return "That device is no longer available. Refresh and try again.";
-  }
-  return `Could not ${action}. Check that both devices are on the same Wi-Fi and try again.`;
+/** Phase of the active output; desktops that predate the field only report live outputs. */
+export function outputPhase(active: Pick<ActiveOutputView, "state">): OutputPhase {
+  return active.state ?? "live";
 }
 
-async function localIpv4(): Promise<string | undefined> {
-  try {
-    const Network = await import("expo-network");
-    return await Network.getIpAddressAsync();
-  } catch {
-    return undefined;
-  }
+/** iOS reports `inactive` during transitions and `unknown` before the first event. */
+export function isForeground(state: AppStateStatus | null | undefined): boolean {
+  return state !== "background";
 }
 
-function useRemoteController() {
-  const [refreshing, setRefreshing] = useState(false);
-  const [connectionState, setConnectionState] = useState<
-    "connecting" | "connected" | "reconnecting"
-  >("connecting");
-  const [hydrated, setHydrated] = useState(false);
-  const [host, setHost] = useState("127.0.0.1");
-  const [pin, setPin] = useState("");
-  const [token, setToken] = useState<string | null>(null);
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [found, setFound] = useState<DiscoveredHost[]>([]);
-  const [scanning, setScanning] = useState(false);
-  const [inputs, setInputs] = useState<string[]>([]);
-  const [outputs, setOutputs] = useState<OutputInfo[]>([]);
-  const [activeInput, setActiveInput] = useState("");
-  const [activeOutput, setActiveOutput] = useState<ActiveOutput | null>(null);
-  const [volume, setVolumeValue] = useState(50);
-  const [gains, setGains] = useState<[number, number, number, number, number]>([0, 0, 0, 0, 0]);
-  const [sampleRate, setInRate] = useState(44_100);
-  const [outputSampleRate, setOutRate] = useState(44_100);
-  const [inputRates, setInputRates] = useState<number[]>([44_100, 48_000]);
-  const [outputRates, setOutputRates] = useState<number[]>([44_100, 48_000]);
-  const [airplayMode, setAirplayMode] = useState("");
-  const [cd, setCd] = useState<CdStatus>({
-    present: false,
-    playing: false,
-    track: 0,
-    track_count: 0,
-    position_ms: 0,
-    duration_ms: 0,
-  });
-  const [error, setError] = useState<string | null>(null);
-  const [pairTarget, setPairTarget] = useState<PairTarget | null>(null);
-  const [pairPin, setPairPin] = useState("");
-  const [pairing, setPairing] = useState(false);
-  const [devicePairing, setDevicePairing] = useState(false);
-  const [configuringRate, setConfiguringRate] = useState(false);
-  const [busyTarget, setBusyTarget] = useState<string | null>(null);
-  const [sourceOpen, setSourceOpen] = useState(false);
-  const [outputOpen, setOutputOpen] = useState(false);
-  const [appActive, setAppActive] = useState(AppState.currentState === "active");
-  const devicePinInput = useNativeState("");
-  const didInitialScan = useRef(false);
-  const scanInFlight = useRef(false);
-  const scanRevision = useRef(0);
-  const connectionRevision = useRef(0);
-  const refreshInFlight = useRef<Promise<void> | null>(null);
-  const refreshQueued = useRef(false);
-  const gainsRef = useRef(gains);
-  const volumePending = useRef<QueuedControl<number> | null>(null);
-  const volumeSending = useRef(false);
-  const eqPending = useRef<QueuedControl<typeof gains> | null>(null);
-  const eqSending = useRef(false);
-  gainsRef.current = gains;
-
-  const invalidateConnection = useCallback(() => {
-    connectionRevision.current += 1;
-    refreshInFlight.current = null;
-    setRefreshing(false);
-    setConnectionState("connecting");
-    refreshQueued.current = false;
-    volumePending.current = null;
-    eqPending.current = null;
-  }, []);
-
-  const setDesktopHost = useCallback((value: string) => {
-    scanRevision.current += 1;
-    setHost(value);
-  }, []);
-  const normalizedHost = normalizeDesktopHost(host);
-  const base = apiBase(normalizedHost || "127.0.0.1", DEFAULT_PORT);
-
-  useEffect(() => {
-    let mounted = true;
-    void loadPairing().then((saved) => {
-      if (!mounted) return;
-      if (saved) {
-        invalidateConnection();
-        setDesktopHost(saved.host);
-        setToken(saved.token);
-      }
-      setHydrated(true);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [invalidateConnection, setDesktopHost]);
-
-  const scan = useCallback(async () => {
-    if (scanInFlight.current) return;
-    const revision = scanRevision.current + 1;
-    scanRevision.current = revision;
-    scanInFlight.current = true;
-    setScanning(true);
-    setError(null);
-    try {
-      const localIp = await localIpv4();
-      const hits = await discoverOnAir({
-        localIp,
-        extraHosts: normalizedHost && normalizedHost !== "127.0.0.1" ? [normalizedHost] : [],
-      });
-      if (scanRevision.current !== revision) return;
-      setFound(hits);
-      if (hits[0] && (normalizedHost === "127.0.0.1" || !normalizedHost)) {
-        setDesktopHost(hits[0].host);
-      }
-      // The first-run screen owns the empty discovery state. Keep the error slot
-      // reserved for a failed pairing attempt so manual setup never opens with a
-      // stale red scan warning.
-      if (hits.length === 0) setError(null);
-    } catch {
-      if (scanRevision.current === revision) {
-        setFound([]);
-        setError(null);
-      }
-    } finally {
-      scanInFlight.current = false;
-      setScanning(false);
-    }
-  }, [normalizedHost, setDesktopHost]);
-
-  const refresh = useCallback((): Promise<void> => {
-    if (!token) return Promise.resolve();
-    if (refreshInFlight.current) {
-      refreshQueued.current = true;
-      return refreshInFlight.current;
-    }
-    setRefreshing(true);
-    const run = (async () => {
-      const connection = connectionRevision.current;
-      do {
-        refreshQueued.current = false;
-        try {
-          const results = await Promise.allSettled([
-            fetchStatus(base),
-            listInputs(base, token),
-            listOutputs(base, token),
-            getActiveInput(base, token),
-            getActiveOutput(base, token),
-            getEq(base, token),
-            getSampleRate(base, token),
-            getVolume(base, token),
-            getAirplayMode(base, token),
-            getCd(base, token),
-          ]);
-          if (connectionRevision.current !== connection) {
-            refreshQueued.current = false;
-            return;
-          }
-          // Authentication loss wins over timeouts from any other request.
-          const unauthorized = results.find(
-            (result) =>
-              result.status === "rejected" &&
-              result.reason instanceof HttpError &&
-              result.reason.status === 401,
-          );
-          if (unauthorized?.status === "rejected") throw unauthorized.reason;
-          const [st, ins, outs, actIn, actOut, eq, sr, savedVolume, ap, disc] = results;
-          const paused = st.status === "fulfilled" && st.value.service_enabled === false;
-          const reachable =
-            paused || results.slice(1, 8).some((result) => result.status === "fulfilled");
-          setConnectionState(reachable ? "connected" : "reconnecting");
-          if (st.status === "fulfilled") setStatus(st.value);
-          if (ins.status === "fulfilled") setInputs(ins.value);
-          if (outs.status === "fulfilled") setOutputs(outs.value);
-          if (actIn.status === "fulfilled") setActiveInput(actIn.value.name ?? "");
-          if (actOut.status === "fulfilled") setActiveOutput(actOut.value);
-          if (eq.status === "fulfilled") setGains(eq.value);
-          if (sr.status === "fulfilled") {
-            setInRate(sr.value.input.sample_rate_hz);
-            setOutRate(sr.value.output.sample_rate_hz);
-            if (sr.value.input.supported_hz.length) setInputRates(sr.value.input.supported_hz);
-            if (sr.value.output.supported_hz.length) setOutputRates(sr.value.output.supported_hz);
-          }
-          if (savedVolume.status === "fulfilled") setVolumeValue(savedVolume.value);
-          if (ap.status === "fulfilled") setAirplayMode(ap.value);
-          if (disc.status === "fulfilled") setCd(disc.value);
-          const failure = results.slice(0, 8).find((result) => result.status === "rejected");
-          if (paused) {
-            setError(null);
-          } else if (failure) {
-            setError(
-              reachable
-                ? "Desktop connected. Some controls could not refresh. Try again."
-                : "Reconnecting to your desktop… Your pairing is saved. Check that both devices are on the same Wi-Fi.",
-            );
-          } else {
-            setError(null);
-          }
-        } catch (refreshError) {
-          if (connectionRevision.current !== connection) return;
-          if (refreshError instanceof HttpError && refreshError.status === 401) {
-            invalidateConnection();
-            setToken(null);
-            setStatus(null);
-            void clearPairing().catch(() => {});
-          } else setConnectionState("reconnecting");
-          setError(friendlyError(refreshError, "refresh the mixer"));
-          refreshQueued.current = false;
-        }
-      } while (refreshQueued.current);
-    })();
-    refreshInFlight.current = run;
-    void run.finally(() => {
-      if (refreshInFlight.current === run) {
-        refreshInFlight.current = null;
-        setRefreshing(false);
-      }
-    });
-    return run;
-  }, [base, invalidateConnection, token]);
-
-  useEffect(() => {
-    if (!hydrated || token || didInitialScan.current) return;
-    didInitialScan.current = true;
-    void scan();
-  }, [hydrated, scan, token]);
-
+function useAppActive(): boolean {
+  const [active, setActive] = useState(() => isForeground(AppState.currentState));
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (next) => {
-      setAppActive(next === "active");
+      setActive(isForeground(next));
     });
     return () => subscription.remove();
   }, []);
+  return active;
+}
 
+export type DevicePairTarget = { transport: OutputInfo["transport"]; id: string; name: string };
+
+export type RemoteState = {
+  uiState: UiState;
+  view: UiView;
+  /** One message for the current screen: the last failed action, else the last refresh. */
+  error: string | null;
+  /** Non-fatal notice (for example, the pairing could not be saved to the keychain). */
+  warning: string | null;
+  paired: boolean;
+  /** The paired desktop as `host` or `host:port`. */
+  pairedHost: string;
+  // First-run pairing
+  found: DiscoveredHost[];
+  scanning: boolean;
+  hostInput: string;
+  pin: string;
+  pairing: boolean;
+  // Mixer
+  inputs: string[];
+  activeInput: string;
+  activeInputLabel: string;
+  outputs: OutputInfo[];
+  activeOutput: ActiveOutputView | null;
+  volume: number;
+  gains: EqGains;
+  sampleRate: number;
+  outputSampleRate: number;
+  inputRates: number[];
+  outputRates: number[];
+  airplayMode: AirPlayMode | null;
+  cd: CdStatus;
+  /** `input:<name>` or `<transport>:<id>` while that switch is in flight. */
+  busyTarget: string | null;
+  configuringRate: boolean;
+  devicePairing: boolean;
+  refreshing: boolean;
+};
+
+export type RemoteActions = {
+  scan(): void;
+  changeHost(text: string): void;
+  selectHost(hit: DiscoveredHost): void;
+  changePin(text: string): void;
+  pair(): Promise<void>;
+  disconnect(): void;
+  refresh(): Promise<void>;
+  /** Resolves `true` once the desktop switched source. */
+  pickInput(name: string): Promise<boolean>;
+  /** Resolves `true` once the speaker is live. */
+  activate(output: OutputInfo): Promise<boolean>;
+  /** Pairs (AirPlay PIN or Bluetooth confirm), then activates. */
+  pairDevice(target: DevicePairTarget, pin: string): Promise<boolean>;
+  openBluetoothSettings(): Promise<void>;
+  applyRate(kind: "input" | "output", hz: number): Promise<void>;
+  applyVolume(value: number): void;
+  applyEq(gains: EqGains): void;
+  changeBand(index: number, value: number): void;
+  controlCd(action: Extract<CdAction, "play" | "pause" | "next" | "prev">): Promise<void>;
+};
+
+export type RemoteSession = RemoteState & RemoteActions;
+
+const RemoteContext = createContext<RemoteSession | null>(null);
+
+export function RemoteProvider({ children }: { children: ReactNode }) {
+  const appActive = useAppActive();
+  const store = usePairingStore({ appActive });
+  const discovery = useDiscovery({ enabled: store.hydrated && !store.pairing });
+  const [pin, setPin] = useState("");
+  const [pairing, setPairing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyTarget, setBusyTarget] = useState<string | null>(null);
+  const [configuringRate, setConfiguringRate] = useState(false);
+  const [devicePairing, setDevicePairing] = useState(false);
+
+  const saved = store.pairing;
+  const base = saved ? targetBase(saved) : null;
+  const token = saved?.token ?? null;
+  const credentials = useRef<{ base: string; token: string } | null>(null);
+  credentials.current = base && token ? { base, token } : null;
+
+  const { selectHost: discoverySelect } = discovery;
+  const { clear: clearPairing } = store;
+  const onUnauthorized = useCallback(
+    (message: string) => {
+      const lost = store.pairing;
+      clearPairing();
+      // Keep the desktop selected so re-pairing only needs the new code.
+      if (lost) discoverySelect({ host: lost.host, port: lost.port });
+      setActionError(message);
+    },
+    [clearPairing, discoverySelect, store.pairing],
+  );
+
+  const connection = useDesktopConnection({
+    base,
+    token,
+    active: appActive,
+    onUnauthorized,
+    onNotice: setActionError,
+  });
+  const { patch, refreshNow, scheduleRefresh } = connection;
+
+  /** Shows the failure; a 401 from any call ends the pairing. */
+  const fail = useCallback(
+    (error: unknown, action: string) => {
+      const message = friendlyError(error, action);
+      if (isUnauthorized(error)) onUnauthorized(message);
+      else setActionError(message);
+    },
+    [onUnauthorized],
+  );
+
+  const gainsRef = useRef(connection.gains);
+  gainsRef.current = connection.gains;
+  const volumeRef = useRef(connection.volume);
+  volumeRef.current = connection.volume;
+
+  // On a final failure (nothing newer queued) the optimistic patch goes back
+  // to the value the desktop holds; without one, read it back instead.
+  const volumeQueue = useLatestWriteQueue<number>(
+    async (value) => {
+      const creds = credentials.current;
+      if (creds) await setVolume(creds.base, value, creds.token);
+    },
+    (error, _value, committed) => {
+      if (committed === undefined) scheduleRefresh("control", ["volume"]);
+      else patch({ volume: committed });
+      fail(error, "change the volume");
+    },
+  );
+  const eqQueue = useLatestWriteQueue<EqGains>(
+    async (value) => {
+      const creds = credentials.current;
+      if (creds) await setEq(creds.base, value, creds.token);
+    },
+    (error, _value, committed) => {
+      if (committed === undefined) {
+        scheduleRefresh("control", ["eq"]);
+      } else {
+        gainsRef.current = committed;
+        patch({ gains: committed });
+      }
+      fail(error, "change the equalizer");
+    },
+  );
+  const { reset: resetVolume } = volumeQueue;
+  const { reset: resetEq } = eqQueue;
+
+  // A different pairing (or none) must never receive writes queued for the old one.
+  const followUp = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs on purpose whenever the pairing (base, token) changes.
   useEffect(() => {
-    if (!token || !appActive) return;
-    void refresh();
-    const id = setInterval(() => void refresh(), 15_000);
-    let eventRefresh: ReturnType<typeof setTimeout> | undefined;
-    const stopEvents = subscribeToDesktop(wsUrl(base, token), {
-      onConnected: () => {
-        void refresh();
-      },
-      onInterrupted: () => {
-        void refresh();
-      },
-      onMessage: (data) => {
-        try {
-          const message = JSON.parse(data) as WsEvent;
-          if (message.type === "ServiceStateChanged") {
-            setStatus((current) =>
-              current ? { ...current, service_enabled: message.enabled } : current,
-            );
-          } else if (message.type !== "LevelMeter") {
-            if (eventRefresh) clearTimeout(eventRefresh);
-            eventRefresh = setTimeout(() => void refresh(), 300);
-          }
-        } catch {
-          /* Polling remains the recovery path for malformed events. */
-        }
-      },
-    });
+    resetVolume();
+    resetEq();
+    setBusyTarget(null);
     return () => {
-      clearInterval(id);
-      if (eventRefresh) clearTimeout(eventRefresh);
-      stopEvents();
+      if (followUp.current) clearTimeout(followUp.current);
+      followUp.current = null;
     };
-  }, [token, base, refresh, appActive]);
+  }, [base, token, resetVolume, resetEq]);
 
-  const pair = async () => {
-    const desktopHost = normalizeDesktopHost(host);
-    const normalizedPin = pin.replace(/\D/g, "").slice(0, 6);
-    if (pairing || normalizedPin.length !== 6 || !desktopHost) {
-      setError("Enter the desktop LAN address and its six-digit pairing code.");
+  const { scan: discoveryScan, changeHost: discoveryChangeHost, reset: resetDiscovery } = discovery;
+  const scan = useCallback(() => void discoveryScan(), [discoveryScan]);
+  const changePin = useCallback((text: string) => setPin(digitsOnly(text, PIN_LENGTH)), []);
+
+  const pairingRef = useRef(false);
+  const target = discovery.target;
+  const pinRef = useRef(pin);
+  pinRef.current = pin;
+  const { save } = store;
+  const pair = useCallback(async () => {
+    const code = digitsOnly(pinRef.current, PIN_LENGTH);
+    if (pairingRef.current) return;
+    if (code.length !== PIN_LENGTH || !target) {
+      setActionError("Enter the desktop LAN address and its six-digit pairing code.");
       return;
     }
-    scanRevision.current += 1;
+    pairingRef.current = true;
     setPairing(true);
-    setError(null);
-    setDesktopHost(desktopHost);
+    setActionError(null);
     try {
-      const pairingBase = apiBase(desktopHost, DEFAULT_PORT);
-      const nextStatus = await fetchStatus(pairingBase);
-      if (nextStatus.service_enabled === false) throw new HttpError("/api/status", 503);
-      const nextToken = await verifyPin(pairingBase, normalizedPin);
-      await savePairing({ host: desktopHost, token: nextToken });
-      invalidateConnection();
-      setStatus(nextStatus);
-      setToken(nextToken);
-    } catch (pairError) {
-      setError(friendlyError(pairError, "pair with the desktop"));
+      const pairingBase = targetBase(target);
+      const status = await fetchStatus(pairingBase);
+      if (status.service_enabled === false) {
+        throw new HttpError("/api/status", 503, "", "service_paused");
+      }
+      const nextToken = await verifyPin(pairingBase, code);
+      // In memory first: a keychain failure must not throw away a consumed PIN.
+      save({ host: target.host, port: target.port, token: nextToken });
+      setPin("");
+    } catch (error) {
+      setActionError(friendlyError(error, "pair with the desktop"));
     } finally {
+      pairingRef.current = false;
       setPairing(false);
     }
-  };
+  }, [save, target]);
 
-  const uniqueInputs = useMemo(() => {
-    const seen = new Set<string>();
-    return inputs.filter((name) => {
-      const label = prettyInput(name);
-      if (seen.has(label)) return false;
-      seen.add(label);
-      return true;
-    });
-  }, [inputs]);
+  const disconnect = useCallback(() => {
+    clearPairing();
+    resetDiscovery();
+    setPin("");
+    setActionError(null);
+  }, [clearPairing, resetDiscovery]);
 
-  const pickInput = async (name: string) => {
-    if (!token || busyTarget || !name) return;
-    setBusyTarget(`input:${name}`);
-    setError(null);
-    try {
-      await activateInput(base, name, token);
-      await refresh();
-      setSourceOpen(false);
-    } catch (inputError) {
-      setError(friendlyError(inputError, "change the source"));
-    } finally {
-      setBusyTarget(null);
-    }
-  };
+  const refresh = useCallback(async () => {
+    setActionError(null);
+    await refreshNow();
+  }, [refreshNow]);
 
-  const activate = async (output: OutputInfo) => {
-    if (!token || busyTarget) return;
-    setBusyTarget(`${output.transport}:${output.id}`);
-    setError(null);
-    try {
-      await activateOutput(base, output.transport, output.id, token);
-      await refresh();
-      setOutputOpen(false);
-    } finally {
-      setBusyTarget(null);
-    }
-  };
+  const busyRef = useRef<string | null>(null);
+  /** One source or speaker switch at a time. */
+  const claim = useCallback((key: string) => {
+    if (busyRef.current) return false;
+    busyRef.current = key;
+    setBusyTarget(key);
+    return true;
+  }, []);
+  const releaseBusy = useCallback(() => {
+    busyRef.current = null;
+    setBusyTarget(null);
+  }, []);
 
-  const chooseOutput = async (output: OutputInfo) => {
-    if (output.needs_pair && !output.paired) {
-      setOutputOpen(false);
-      setPairPin("");
-      devicePinInput.value = "";
-      setPairTarget({ transport: output.transport, id: output.id, name: output.name });
-      return;
-    }
-    try {
-      await activate(output);
-    } catch (outputError) {
-      setError(friendlyError(outputError, "connect that speaker"));
-    }
-  };
-
-  const submitDevicePair = async () => {
-    if (!pairTarget || !token || devicePairing) return;
-    setDevicePairing(true);
-    setError(null);
-    try {
-      if (pairTarget.transport === "airplay") {
-        await pairAirplay(base, pairTarget.id, pairPin, token);
-      } else if (pairTarget.transport === "bluetooth") {
-        await pairBluetooth(base, pairTarget.id, token);
+  const pickInput = useCallback(
+    async (name: string) => {
+      const creds = credentials.current;
+      if (!creds || !name || !claim(`input:${name}`)) return false;
+      setActionError(null);
+      try {
+        await activateInput(creds.base, name, creds.token);
+        await refreshNow(["activeInput", "sampleRate", "cd"]);
+        return true;
+      } catch (error) {
+        fail(error, "change the source");
+        return false;
+      } finally {
+        releaseBusy();
       }
-      const output = outputs.find(
-        (candidate) =>
-          candidate.transport === pairTarget.transport && candidate.id === pairTarget.id,
-      );
-      setPairTarget(null);
-      if (output) await activate(output);
-    } catch (deviceError) {
-      setError(friendlyError(deviceError, "pair that speaker"));
-    } finally {
-      setDevicePairing(false);
-    }
-  };
+    },
+    [claim, fail, refreshNow, releaseBusy],
+  );
 
-  const applyRate = async (kind: "input" | "output", hz: number) => {
-    if (!token || configuringRate) return;
-    const previous = kind === "input" ? sampleRate : outputSampleRate;
-    setConfiguringRate(true);
-    setError(null);
-    if (kind === "input") setInRate(hz);
-    else setOutRate(hz);
-    try {
-      await setSampleRate(base, kind === "input" ? { input_hz: hz } : { output_hz: hz }, token);
-      await refresh();
-    } catch (rateError) {
-      if (kind === "input") setInRate(previous);
-      else setOutRate(previous);
-      setError(friendlyError(rateError, `change the ${kind} sample rate`));
-    } finally {
-      setConfiguringRate(false);
-    }
-  };
+  const activateNow = useCallback(
+    async (output: OutputInfo) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      await activateOutput(creds.base, output.transport, output.id, creds.token);
+      await refreshNow(["activeOutput", "volume", "sampleRate"]);
+    },
+    [refreshNow],
+  );
 
-  const disconnect = () => {
-    scanRevision.current += 1;
-    invalidateConnection();
-    void clearPairing().catch(() => {});
-    setToken(null);
-    setStatus(null);
-    setInputs([]);
-    setOutputs([]);
-    setActiveInput("");
-    setActiveOutput(null);
-    setCd({
-      present: false,
-      playing: false,
-      track: 0,
-      track_count: 0,
-      position_ms: 0,
-      duration_ms: 0,
-    });
-    setError(null);
-    setSourceOpen(false);
-    setOutputOpen(false);
-    didInitialScan.current = false;
-  };
+  const activate = useCallback(
+    async (output: OutputInfo) => {
+      if (!credentials.current || !claim(`${output.transport}:${output.id}`)) return false;
+      setActionError(null);
+      try {
+        await activateNow(output);
+        return true;
+      } catch (error) {
+        fail(error, "connect that speaker");
+        // A failed start may leave the desktop idle, rolled back or `failed`.
+        scheduleRefresh("control", ["activeOutput"]);
+        return false;
+      } finally {
+        releaseBusy();
+      }
+    },
+    [activateNow, claim, fail, releaseBusy, scheduleRefresh],
+  );
 
-  const drainVolume = async () => {
-    if (volumeSending.current) return;
-    volumeSending.current = true;
-    try {
-      while (volumePending.current) {
-        const pending = volumePending.current;
-        volumePending.current = null;
-        if (pending.connection !== connectionRevision.current) continue;
-        try {
-          await setVolume(pending.base, pending.value, pending.token);
-        } catch (volumeError) {
-          if (pending.connection === connectionRevision.current && volumePending.current === null) {
-            setError(friendlyError(volumeError, "change the volume"));
-          }
+  const outputsRef = useRef(connection.outputs);
+  outputsRef.current = connection.outputs;
+  const devicePairingRef = useRef(false);
+  const pairDevice = useCallback(
+    async (device: DevicePairTarget, devicePin: string) => {
+      const creds = credentials.current;
+      if (!creds || devicePairingRef.current) return false;
+      devicePairingRef.current = true;
+      setDevicePairing(true);
+      setActionError(null);
+      try {
+        if (device.transport === "airplay") {
+          await pairAirplay(
+            creds.base,
+            device.id,
+            digitsOnly(devicePin, DEVICE_PIN_LENGTH),
+            creds.token,
+          );
+        } else if (device.transport === "bluetooth") {
+          await pairBluetooth(creds.base, device.id, creds.token);
         }
+        const output = outputsRef.current.find(
+          (candidate) => candidate.transport === device.transport && candidate.id === device.id,
+        );
+        if (output) await activateNow(output);
+        scheduleRefresh("control", ["outputs"]);
+        return true;
+      } catch (error) {
+        fail(error, "pair that speaker");
+        return false;
+      } finally {
+        devicePairingRef.current = false;
+        setDevicePairing(false);
       }
-    } finally {
-      volumeSending.current = false;
-      if (volumePending.current) void drainVolume();
-    }
-  };
+    },
+    [activateNow, fail, scheduleRefresh],
+  );
 
-  const applyCd = async (action: "play" | "pause" | "next" | "prev") => {
-    if (!token) return;
-    setError(null);
+  const openBluetooth = useCallback(async () => {
+    const creds = credentials.current;
+    if (!creds) return;
+    setActionError(null);
     try {
-      const next = await controlCd(base, action, token);
-      setCd(next);
-      await refresh();
-    } catch (cdError) {
-      setError(friendlyError(cdError, "control the compact disc"));
+      await openBluetoothSettings(creds.base, creds.token);
+      await refreshNow(["outputs"]);
+      if (followUp.current) clearTimeout(followUp.current);
+      followUp.current = setTimeout(() => {
+        followUp.current = null;
+        scheduleRefresh("control", ["outputs"]);
+      }, BLUETOOTH_FOLLOW_UP_MS);
+    } catch (error) {
+      fail(error, "open Bluetooth settings");
     }
-  };
+  }, [fail, refreshNow, scheduleRefresh]);
 
-  const applyVolume = (value: number) => {
-    setVolumeValue(value);
-    if (!token) return;
-    volumePending.current = {
-      base,
-      token,
-      connection: connectionRevision.current,
-      value,
-    };
-    void drainVolume();
-  };
-
-  const drainEq = async () => {
-    if (eqSending.current) return;
-    eqSending.current = true;
-    try {
-      while (eqPending.current) {
-        const pending = eqPending.current;
-        eqPending.current = null;
-        if (pending.connection !== connectionRevision.current) continue;
-        try {
-          await setEq(pending.base, pending.value, pending.token);
-        } catch (eqError) {
-          if (pending.connection === connectionRevision.current && eqPending.current === null) {
-            setError(friendlyError(eqError, "change the equalizer"));
-          }
-        }
+  const ratesRef = useRef({ input: connection.sampleRate, output: connection.outputSampleRate });
+  ratesRef.current = { input: connection.sampleRate, output: connection.outputSampleRate };
+  const configuringRef = useRef(false);
+  const applyRate = useCallback(
+    async (kind: "input" | "output", hz: number) => {
+      const creds = credentials.current;
+      if (!creds || configuringRef.current) return;
+      const previous = ratesRef.current[kind];
+      const key = kind === "input" ? "sampleRate" : "outputSampleRate";
+      configuringRef.current = true;
+      setConfiguringRate(true);
+      setActionError(null);
+      patch({ [key]: hz });
+      try {
+        await setSampleRate(
+          creds.base,
+          kind === "input" ? { input_hz: hz } : { output_hz: hz },
+          creds.token,
+        );
+        await refreshNow(["sampleRate"]);
+      } catch (error) {
+        patch({ [key]: previous });
+        fail(error, `change the ${kind} sample rate`);
+      } finally {
+        configuringRef.current = false;
+        setConfiguringRate(false);
       }
-    } finally {
-      eqSending.current = false;
-      if (eqPending.current) void drainEq();
-    }
-  };
-
-  const applyEq = (next: [number, number, number, number, number]) => {
-    gainsRef.current = next;
-    setGains(next);
-    if (!token) return;
-    eqPending.current = {
-      base,
-      token,
-      connection: connectionRevision.current,
-      value: next,
-    };
-    void drainEq();
-  };
-
-  const serviceAvailable = status?.service_enabled !== false;
-  const live = serviceAvailable && Boolean(activeOutput);
-
-  const pairingScreen = (
-    <PairingHome
-      scanning={scanning}
-      pairing={pairing}
-      found={found}
-      host={host}
-      pin={pin}
-      error={error}
-      onScan={() => void scan()}
-      onSelectHost={setDesktopHost}
-      onChangeHost={setDesktopHost}
-      onChangePin={(value) => setPin(value.replace(/\\D/g, "").slice(0, 6))}
-      onPair={() => void pair()}
-    />
+    },
+    [fail, patch, refreshNow],
   );
 
-  const mixerScreen = (
-    <MixerHome
-      activeInput={activeInput ? prettyInput(activeInput) : ""}
-      activeOutput={activeOutput?.device_name ?? ""}
-      volume={volume}
-      live={live}
-      statusText={
-        connectionState === "reconnecting"
-          ? "Reconnecting"
-          : connectionState === "connecting"
-            ? "Connecting"
-            : live
-              ? "Live"
-              : !serviceAvailable
-                ? "Paused"
-                : "Ready"
-      }
-      error={error}
-      volumeDisabled={!serviceAvailable || connectionState !== "connected" || !activeOutput}
-      soundDisabled={!serviceAvailable}
-      onChangeInput={() => setSourceOpen(true)}
-      onChangeOutput={() => setOutputOpen(true)}
-      onOpenSound={() => router.push("/sound")}
-      onOpenMore={() => router.push("/connection")}
-      onDisconnect={disconnect}
-      onVolumeChange={applyVolume}
-      cd={cd}
-      onCdPlayPause={() => void applyCd(cd.playing ? "pause" : "play")}
-      onCdPrev={() => void applyCd("prev")}
-      onCdNext={() => void applyCd("next")}
-    />
+  const { push: pushVolume } = volumeQueue;
+  const applyVolume = useCallback(
+    (value: number) => {
+      const shown = volumeRef.current;
+      volumeRef.current = value;
+      patch({ volume: value });
+      pushVolume(value, shown);
+    },
+    [patch, pushVolume],
   );
 
-  const home = (
-    <View style={{ flex: 1, backgroundColor: mobileColors.background }}>
-      <StatusBar style="light" />
-      {!hydrated ? (
-        <Host style={{ flex: 1 }} colorScheme="dark">
-          <FieldGroup testID="pairing-restore">
-            <FieldGroup.Section title="on-air remote">
-              <Text>Restoring your desktop connection…</Text>
-            </FieldGroup.Section>
-          </FieldGroup>
-        </Host>
-      ) : token ? (
-        mixerScreen
-      ) : (
-        pairingScreen
-      )}
-      {token && sourceOpen && (
-        <BottomSheet
-          modifiers={sheetPresentation}
-          isPresented
-          onDismiss={() => setSourceOpen(false)}
-          showDragIndicator
-          snapPoints={Platform.OS === "ios" ? [{ height: 280 }] : undefined}
-          testID="source-sheet"
-        >
-          <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
-            <Row alignment="center" spacing={theme.spacing.sm}>
-              <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Choose source</Text>
-              <Spacer />
-              <Button label="Done" variant="text" onPress={() => setSourceOpen(false)} />
-            </Row>
-            <Text>Select the Mac audio capture device to stream.</Text>
-            <Picker
-              selectedValue={activeInput}
-              onValueChange={(name) => void pickInput(String(name))}
-              appearance="menu"
-              enabled={serviceAvailable && busyTarget === null && uniqueInputs.length > 0}
-              testID="source-picker"
-            >
-              <Picker.Item label="Choose a source" value="" />
-              {uniqueInputs.map((name) => (
-                <Picker.Item key={name} label={prettyInput(name)} value={name} />
-              ))}
-            </Picker>
-            {uniqueInputs.length === 0 && <Text>No capture devices are available.</Text>}
-          </Column>
-        </BottomSheet>
-      )}
-      {token && outputOpen && (
-        <BottomSheet
-          modifiers={sheetPresentation}
-          isPresented
-          onDismiss={() => setOutputOpen(false)}
-          showDragIndicator
-          snapPoints={
-            Platform.OS === "ios"
-              ? outputs.length > 5
-                ? ["full"]
-                : [{ height: Math.max(300, 160 + outputs.length * 78) }]
-              : undefined
-          }
-          testID="output-sheet"
-        >
-          <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
-            <Row alignment="center" spacing={theme.spacing.sm}>
-              <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Choose speaker</Text>
-              <Spacer />
-              <Button label="Done" variant="text" onPress={() => setOutputOpen(false)} />
-            </Row>
-            {outputs.length === 0 && <Text>Waiting for speakers on the LAN…</Text>}
-            {airplayMode === "avroute-picker" && (
-              <Text>AirPlay selection is available from the desktop picker on macOS.</Text>
-            )}
-            <Button
-              label="Add Bluetooth speaker"
-              variant="outlined"
-              disabled={!serviceAvailable || !token}
-              onPress={() => {
-                void (async () => {
-                  try {
-                    await openBluetoothSettings(base, token);
-                    await refresh();
-                    setTimeout(() => void refresh(), 2500);
-                  } catch (settingsError) {
-                    setError(friendlyError(settingsError, "open Bluetooth settings"));
-                  }
-                })();
-              }}
-              testID="add-bluetooth"
-            />
-            {outputs.map((output) => {
-              const selected =
-                activeOutput?.transport === output.transport &&
-                activeOutput.device_id === output.id;
-              const desktopOnly =
-                output.transport === "airplay" && airplayMode === "avroute-picker";
-              const working = busyTarget === `${output.transport}:${output.id}`;
-              const pair = (output.member_count ?? 1) >= 2 || output.kind === "pair";
-              const action = desktopOnly
-                ? "Desktop only"
-                : working
-                  ? "Connecting…"
-                  : selected
-                    ? "Connected"
-                    : output.needs_pair && !output.paired
-                      ? "Pair"
-                      : "Connect";
-              return (
-                <Button
-                  key={`${output.transport}-${output.id}`}
-                  variant={selected ? "filled" : "outlined"}
-                  disabled={!serviceAvailable || busyTarget !== null || desktopOnly}
-                  onPress={() => void chooseOutput(output)}
-                  testID={`output-${output.transport}-${output.id}`}
-                >
-                  <Row alignment="center" spacing={theme.spacing.sm}>
-                    <Column spacing={theme.spacing.xs}>
-                      <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
-                      <Text>{`${pair ? "Stereo pair · " : ""}${output.transport}`}</Text>
-                    </Column>
-                    <Spacer />
-                    <Text>{action}</Text>
-                  </Row>
-                </Button>
-              );
-            })}
-          </Column>
-        </BottomSheet>
-      )}
-      {pairTarget && (
-        <BottomSheet
-          modifiers={sheetPresentation}
-          isPresented
-          onDismiss={() => setPairTarget(null)}
-          showDragIndicator
-          snapPoints={
-            Platform.OS === "ios"
-              ? [{ height: pairTarget.transport === "airplay" ? 360 : 300 }]
-              : undefined
-          }
-          testID="pair-sheet"
-        >
-          <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
-            <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>{`Pair ${pairTarget.name}`}</Text>
-            <Text>
-              {pairTarget.transport === "airplay"
-                ? "Enter the code shown by the speaker. If no code appears, leave it blank."
-                : "Confirm pairing on the speaker or in the computer’s Bluetooth settings, then continue."}
-            </Text>
-            {pairTarget.transport === "airplay" && (
-              <TextInput
-                value={devicePinInput}
-                onChangeText={(value) => {
-                  const next = value.replace(/\D/g, "").slice(0, 8);
-                  devicePinInput.value = next;
-                  setPairPin(next);
-                }}
-                placeholder="Speaker code"
-                keyboardType="number-pad"
-                inputMode="numeric"
-                maxLength={8}
-                testID="device-pin-input"
-                style={{
-                  padding: 12,
-                  borderWidth: 1,
-                  borderColor: theme.seedColor,
-                  borderRadius: 12,
-                }}
-              />
-            )}
-            <Row alignment="center" spacing={theme.spacing.sm}>
-              <Button
-                label="Cancel"
-                variant="text"
-                disabled={devicePairing}
-                onPress={() => setPairTarget(null)}
-                testID="device-pair-cancel"
-              />
-              <Spacer />
-              <Button
-                label={devicePairing ? "Pairing…" : "Pair and connect"}
-                disabled={devicePairing}
-                onPress={() => void submitDevicePair()}
-                testID="device-pair-submit"
-              />
-            </Row>
-          </Column>
-        </BottomSheet>
-      )}
-    </View>
+  const { push: pushEq } = eqQueue;
+  const applyEq = useCallback(
+    (gains: EqGains) => {
+      const shown = gainsRef.current;
+      gainsRef.current = gains;
+      patch({ gains });
+      pushEq(gains, shown);
+    },
+    [patch, pushEq],
   );
-  return {
-    home,
-    paired: Boolean(token),
-    host: normalizedHost,
-    error,
-    serviceAvailable: serviceAvailable && connectionState === "connected",
-    servicePaused: !serviceAvailable,
-    refreshing,
-    connectionState,
-    gains,
-    sampleRate,
-    outputSampleRate,
-    inputRates,
-    outputRates,
-    configuringRate,
-    applyEq,
-    applyRate,
-    refresh,
-    disconnect,
-    changeBand: (index: number, value: number) => {
-      const next = [...gainsRef.current] as typeof gains;
+
+  const changeBand = useCallback(
+    (index: number, value: number) => {
+      const next = [...gainsRef.current] as EqGains;
       next[index] = value;
       applyEq(next);
     },
-  };
+    [applyEq],
+  );
+
+  const cdAction = useCallback(
+    async (action: Extract<CdAction, "play" | "pause" | "next" | "prev">) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      setActionError(null);
+      try {
+        patch({ cd: await controlCd(creds.base, action, creds.token) });
+      } catch (error) {
+        fail(error, "control the compact disc");
+      }
+    },
+    [fail, patch],
+  );
+
+  const uiState = deriveUiState({
+    hydrated: store.hydrated,
+    paired: Boolean(saved),
+    phase: connection.phase,
+    output: connection.activeOutput ? outputPhase(connection.activeOutput) : null,
+  });
+  const view = useMemo(() => describeUiState(uiState), [uiState]);
+  const inputs = useMemo(() => uniqueByLabel(connection.inputs), [connection.inputs]);
+  const error = actionError ?? (saved ? connection.error : null);
+  const pairedHost = saved ? formatDesktopTarget(saved) : "";
+
+  const value = useMemo<RemoteSession>(
+    () => ({
+      uiState,
+      view,
+      error,
+      warning: store.warning,
+      paired: Boolean(saved),
+      pairedHost,
+      found: discovery.found,
+      scanning: discovery.scanning,
+      hostInput: discovery.host,
+      pin,
+      pairing,
+      inputs,
+      activeInput: connection.activeInput,
+      activeInputLabel: connection.activeInput ? prettyInput(connection.activeInput) : "",
+      outputs: connection.outputs,
+      activeOutput: connection.activeOutput,
+      volume: connection.volume,
+      gains: connection.gains,
+      sampleRate: connection.sampleRate,
+      outputSampleRate: connection.outputSampleRate,
+      inputRates: connection.inputRates,
+      outputRates: connection.outputRates,
+      airplayMode: connection.airplayMode,
+      cd: connection.cd,
+      busyTarget,
+      configuringRate,
+      devicePairing,
+      refreshing: connection.refreshing,
+      scan,
+      changeHost: discoveryChangeHost,
+      selectHost: discoverySelect,
+      changePin,
+      pair,
+      disconnect,
+      refresh,
+      pickInput,
+      activate,
+      pairDevice,
+      openBluetoothSettings: openBluetooth,
+      applyRate,
+      applyVolume,
+      applyEq,
+      changeBand,
+      controlCd: cdAction,
+    }),
+    [
+      uiState,
+      view,
+      error,
+      store.warning,
+      saved,
+      pairedHost,
+      discovery.found,
+      discovery.scanning,
+      discovery.host,
+      pin,
+      pairing,
+      inputs,
+      connection.activeInput,
+      connection.outputs,
+      connection.activeOutput,
+      connection.volume,
+      connection.gains,
+      connection.sampleRate,
+      connection.outputSampleRate,
+      connection.inputRates,
+      connection.outputRates,
+      connection.airplayMode,
+      connection.cd,
+      busyTarget,
+      configuringRate,
+      devicePairing,
+      connection.refreshing,
+      scan,
+      discoveryChangeHost,
+      discoverySelect,
+      changePin,
+      pair,
+      disconnect,
+      refresh,
+      pickInput,
+      activate,
+      pairDevice,
+      openBluetooth,
+      applyRate,
+      applyVolume,
+      applyEq,
+      changeBand,
+      cdAction,
+    ],
+  );
+
+  return <RemoteContext value={value}>{children}</RemoteContext>;
 }
 
-const RemoteContext = createContext<ReturnType<typeof useRemoteController> | null>(null);
-
-export function RemoteProvider({ children }: { children: React.ReactNode }) {
-  const session = useRemoteController();
-  return <RemoteContext value={session}>{children}</RemoteContext>;
-}
-
-export function useRemoteSession() {
+export function useRemoteSession(): RemoteSession {
   const session = use(RemoteContext);
   if (!session) throw new Error("RemoteProvider is required");
   return session;
-}
-
-export function RemoteHome() {
-  return useRemoteSession().home;
 }

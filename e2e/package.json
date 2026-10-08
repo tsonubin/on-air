@@ -1,0 +1,18 @@
+{
+  "name": "@on-air/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:desktop": "playwright test -c desktop/playwright.config.ts",
+    "test:desktop:api": "playwright test -c desktop/playwright.config.ts --project api",
+    "test:desktop:ui": "playwright test -c desktop/playwright.config.ts --project ui",
+    "test:mobile": "node --experimental-strip-types --test --test-concurrency=1 mobile/companion.e2e.ts mobile/expo-go-pairing.e2e.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@on-air/api-types": "workspace:*",
+    "@playwright/test": "1.62.1",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

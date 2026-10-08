@@ -5,15 +5,15 @@ import { useRemoteSession } from "@/remote-session";
 import { SettingsForm } from "@/settings-form";
 
 const bands = [
-  "Bass · 60 Hz",
-  "Warmth · 250 Hz",
-  "Midrange · 1 kHz",
-  "Presence · 4 kHz",
-  "Air · 12 kHz",
+  { label: "Bass · 60 Hz", spoken: "Bass, 60 hertz" },
+  { label: "Warmth · 250 Hz", spoken: "Warmth, 250 hertz" },
+  { label: "Midrange · 1 kHz", spoken: "Midrange, 1 kilohertz" },
+  { label: "Presence · 4 kHz", spoken: "Presence, 4 kilohertz" },
+  { label: "Air · 12 kHz", spoken: "Air, 12 kilohertz" },
 ];
 
 export default function EqualizerScreen() {
-  const { gains, changeBand, applyEq, serviceAvailable } = useRemoteSession();
+  const { gains, changeBand, applyEq, view } = useRemoteSession();
   const flat = gains.every((g) => g === 0);
   return (
     <>
@@ -21,8 +21,9 @@ export default function EqualizerScreen() {
         <FieldGroup.Section title="Five-band equalizer">
           {gains.map((gain, index) => (
             <NativeFader
-              key={bands[index]}
-              label={bands[index]}
+              key={bands[index].label}
+              label={bands[index].label}
+              accessibilityLabel={bands[index].spoken}
               value={gain}
               min={-12}
               max={12}
@@ -30,7 +31,7 @@ export default function EqualizerScreen() {
               unit="dB"
               signed
               testId={`eq-band-${index}`}
-              disabled={!serviceAvailable}
+              disabled={!view.controlsEnabled}
               onChange={(value) => changeBand(index, value)}
             />
           ))}
@@ -44,7 +45,7 @@ export default function EqualizerScreen() {
       </SettingsForm>
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button
-          disabled={flat || !serviceAvailable}
+          disabled={flat || !view.controlsEnabled}
           onPress={() => applyEq([0, 0, 0, 0, 0])}
         >
           Reset

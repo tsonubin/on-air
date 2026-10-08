@@ -1,31 +1,35 @@
 /**
- * Expo Go-compatible LAN pairing regression loop.
+ * Expo Go-compatible pairing regression loop.
  *
- * This intentionally reaches the mock desktop through a private LAN address,
- * not loopback, and uses only APIs available in Expo Go (HTTP fetch plus the
- * shared TypeScript control client).
+ * Uses only what Expo Go offers (HTTP fetch plus the shared TypeScript
+ * control client). By default the desktop is handed to discovery as an extra
+ * host, the way a typed or remembered address is, so the test does not depend
+ * on the machine's network. Set E2E_LAN_SWEEP=1 on a host with a private IPv4
+ * to also run the real /24 sweep against the mock core bound to 0.0.0.0.
  */
 import assert from "node:assert/strict";
-import { type ChildProcess, spawn } from "node:child_process";
 import { networkInterfaces } from "node:os";
-import path from "node:path";
 import { after, before, test } from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   apiBase,
   discoverOnAir,
+  type FetchLike,
   fetchStatus,
   listInputs,
   verifyPin,
 } from "../../packages/control-client/src/index.ts";
+import { type MockCore, startMockCore } from "../shared/mockCore.ts";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const PORT = Number(process.env.E2E_PORT ?? 47993);
 const PIN = "123456";
+const LAN_SWEEP = process.env.E2E_LAN_SWEEP === "1";
+// A private address the phone could have on a LAN that does not exist here.
+// If discovery swept it, the test would spend tens of seconds timing out.
+const UNREACHABLE_PHONE_IP = "10.255.254.10";
 
-let child: ChildProcess | undefined;
+let core: MockCore | undefined;
 
-function privateLanIpv4(): string {
+function privateLanIpv4(): string | undefined {
   for (const addresses of Object.values(networkInterfaces())) {
     for (const address of addresses ?? []) {
       if (address.family !== "IPv4" || address.internal) continue;
@@ -38,79 +42,55 @@ function privateLanIpv4(): string {
       }
     }
   }
-  throw new Error("no private LAN IPv4 available for Expo Go pairing test");
+  return undefined;
 }
 
-function startMockCore(): Promise<ChildProcess> {
-  return new Promise((resolve, reject) => {
-    const spawned = spawn("cargo", ["run", "--locked", "-p", "on-air-core", "--example", "serve"], {
-      cwd: ROOT,
-      env: { ...process.env, ON_AIR_MOCK: "1", PORT: String(PORT), BIND: "0.0.0.0" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const chunks: Buffer[] = [];
-    let started = false;
-    const timer = setTimeout(() => {
-      spawned.kill();
-      reject(new Error(`mock core did not start:\n${Buffer.concat(chunks).toString()}`));
-    }, 120_000);
-    const onData = (buffer: Buffer) => {
-      chunks.push(buffer);
-      if (!started && buffer.toString().includes("listening")) {
-        started = true;
-        clearTimeout(timer);
-        resolve(spawned);
-      }
-    };
-    spawned.stdout?.on("data", onData);
-    spawned.stderr?.on("data", onData);
-    spawned.on("error", (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    spawned.on("exit", (code) => {
-      if (started) return;
-      clearTimeout(timer);
-      reject(
-        new Error(`mock core exited ${code ?? "by signal"}: ${Buffer.concat(chunks).toString()}`),
-      );
-    });
-  });
+async function pairAndAuthenticate(host: string): Promise<void> {
+  const base = apiBase(host, PORT);
+  const status = await fetchStatus(base);
+  assert.equal(status.status, "ok");
+  const token = await verifyPin(base, PIN);
+  assert.match(token, /^onair-/);
+  const inputs = await listInputs(base, token);
+  assert.ok(inputs.includes("Mock Monitor"));
 }
 
 before(async () => {
-  child = await startMockCore();
+  core = await startMockCore({ port: PORT, bind: LAN_SWEEP ? "0.0.0.0" : "127.0.0.1" });
 });
 
 after(async () => {
-  const running = child;
-  if (!running || running.exitCode !== null) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      running.kill("SIGKILL");
-      resolve();
-    }, 5_000);
-    running.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-    running.kill("SIGTERM");
-  });
+  await core?.stop();
 });
 
-test("Expo Go can discover, manually address, PIN-pair, and authenticate over the LAN", async () => {
-  const host = privateLanIpv4();
-  const base = apiBase(host, PORT);
+test("Expo Go finds a known desktop without sweeping, then PIN-pairs and authenticates", async () => {
+  const probed: string[] = [];
+  const countingFetch: FetchLike = (input, init) => {
+    probed.push(new URL(String(input)).hostname);
+    return fetch(input, init);
+  };
 
+  const discovered = await discoverOnAir({
+    localIp: UNREACHABLE_PHONE_IP,
+    port: PORT,
+    extraHosts: ["127.0.0.1"],
+    fetchImpl: countingFetch,
+  });
+
+  assert.deepEqual(
+    discovered.map((hit) => `${hit.host}:${hit.port}`),
+    [`127.0.0.1:${PORT}`],
+  );
+  assert.deepEqual(probed, ["127.0.0.1"], "a responsive extra host must skip the /24 sweep");
+  await pairAndAuthenticate("127.0.0.1");
+});
+
+test("Expo Go sweeps the phone's /24 and pairs over the LAN", {
+  skip: LAN_SWEEP ? false : "set E2E_LAN_SWEEP=1 on a host with a private IPv4",
+}, async () => {
+  const host = privateLanIpv4();
+  assert.ok(host, "E2E_LAN_SWEEP=1 needs a private LAN IPv4 on this host");
   const discovered = await discoverOnAir({ localIp: host, port: PORT });
   assert.ok(discovered.some((candidate) => candidate.host === host));
-
-  const status = await fetchStatus(base);
-  assert.equal(status.status, "ok");
-
-  const token = await verifyPin(base, PIN);
-  assert.match(token, /^onair-/);
-
-  const inputs = await listInputs(base, token);
-  assert.ok(inputs.includes("Mock Monitor"));
+  await pairAndAuthenticate(host);
 });

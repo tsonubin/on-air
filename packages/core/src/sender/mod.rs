@@ -6,16 +6,61 @@ pub mod airplay_mdns;
 pub mod bluetooth;
 pub mod sonos;
 
-#[derive(Debug)]
-pub struct SenderError(pub String);
-
-impl std::fmt::Display for SenderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
+/// Failure of a transport sender. Variants carry a human message but callers
+/// branch on the variant, never on the text.
+#[derive(Debug, thiserror::Error)]
+pub enum SenderError {
+    /// A volume change or similar request arrived while nothing is playing.
+    #[error("no active output")]
+    NoActiveOutput,
+    /// The requested speaker or OS audio endpoint does not exist.
+    #[error("{0}")]
+    DeviceNotFound(String),
+    /// The sender or device cannot accept the request in its current state
+    /// (not paired, helper not running, already started).
+    #[error("{0}")]
+    NotReady(String),
+    /// The receiver, sidecar or helper process could not be reached.
+    #[error("{0}")]
+    Transport(String),
+    /// The previously live output refused to stop, so exclusivity could not
+    /// be handed over.
+    #[error("could not stop the active output before switching: {0}")]
+    StopFailed(Box<SenderError>),
+    /// Starting failed and the attempt to restore the previous state also
+    /// failed; `rollback` describes what is left behind.
+    #[error("{error}; {rollback}")]
+    RollbackFailed {
+        error: Box<SenderError>,
+        rollback: String,
+    },
+    /// Local failure (OS audio, thread or task error).
+    #[error("{0}")]
+    Internal(String),
 }
 
-impl std::error::Error for SenderError {}
+impl SenderError {
+    pub fn transport(message: impl Into<String>) -> Self {
+        SenderError::Transport(message.into())
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        SenderError::Internal(message.into())
+    }
+
+    pub fn not_ready(message: impl Into<String>) -> Self {
+        SenderError::NotReady(message.into())
+    }
+
+    /// The innermost error that explains a rollback or stop failure.
+    pub fn root(&self) -> &SenderError {
+        match self {
+            SenderError::StopFailed(inner) => inner.root(),
+            SenderError::RollbackFailed { error, .. } => error.root(),
+            other => other,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputFormat {

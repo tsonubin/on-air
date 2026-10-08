@@ -3,20 +3,9 @@ use std::time::Duration;
 
 pub const SOAP_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// SOAP client with the LAN rules from [`crate::net::lan_http_client`].
 pub fn http_client() -> Client {
-    lan_client(SOAP_TIMEOUT)
-}
-
-/// LAN SOAP/HTTP must not follow `HTTP_PROXY` (Mihomo on this host intercepts
-/// 192.168.x UPnP and ZoneGroupTopology).
-pub fn lan_client(timeout: Duration) -> Client {
-    Client::builder()
-        .timeout(timeout)
-        .no_proxy()
-        .pool_max_idle_per_host(0)
-        .tcp_nodelay(true)
-        .build()
-        .expect("reqwest LAN client")
+    crate::net::lan_http_client(SOAP_TIMEOUT)
 }
 
 #[derive(Debug)]
@@ -71,33 +60,6 @@ impl SonosControlClient {
             "SetAVTransportURI",
         )
         .await
-    }
-
-    pub async fn get_transport_state(&self, control_url: &str) -> Result<String, SoapError> {
-        let body = r#"<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-  <s:Body>
-    <u:GetTransportInfo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-      <InstanceID>0</InstanceID>
-    </u:GetTransportInfo>
-  </s:Body>
-</s:Envelope>"#
-            .to_string();
-        let text = self
-            .send_action_text(
-                control_url,
-                "urn:schemas-upnp-org:service:AVTransport:1#GetTransportInfo",
-                body,
-                "GetTransportInfo",
-            )
-            .await?;
-        let state = text
-            .split("<CurrentTransportState>")
-            .nth(1)
-            .and_then(|s| s.split("</CurrentTransportState>").next())
-            .unwrap_or("")
-            .to_string();
-        Ok(state)
     }
 
     pub async fn play(&self, control_url: &str) -> Result<(), SoapError> {
@@ -173,18 +135,6 @@ impl SonosControlClient {
         body: String,
         action_name: &'static str,
     ) -> Result<(), SoapError> {
-        self.send_action_text(control_url, soap_action, body, action_name)
-            .await
-            .map(|_| ())
-    }
-
-    async fn send_action_text(
-        &self,
-        control_url: &str,
-        soap_action: &str,
-        body: String,
-        action_name: &'static str,
-    ) -> Result<String, SoapError> {
         let response = self
             .http
             .post(control_url)
@@ -198,10 +148,10 @@ impl SonosControlClient {
                 message: e.to_string(),
             })?;
         let status = response.status();
-        let text = response.text().await.unwrap_or_default();
         if status.is_success() {
-            Ok(text)
+            Ok(())
         } else {
+            let text = response.text().await.unwrap_or_default();
             Err(SoapError {
                 action: action_name,
                 message: format!("HTTP {status}: {text}"),

@@ -77,8 +77,17 @@ impl GraphicEq {
         })
     }
 
+    /// Non-finite gains are treated as 0 dB: `clamp` passes NaN through and
+    /// a NaN coefficient would turn every band into silence (and defeat the
+    /// `clamped == self.gains_db` short-circuit forever).
     pub fn set_gains_db(&mut self, gains_db: [f32; 5]) {
-        let clamped = gains_db.map(|g| g.clamp(EQ_GAIN_RANGE_DB.0, EQ_GAIN_RANGE_DB.1));
+        let clamped = gains_db.map(|g| {
+            if g.is_finite() {
+                g.clamp(EQ_GAIN_RANGE_DB.0, EQ_GAIN_RANGE_DB.1)
+            } else {
+                0.0
+            }
+        });
         if clamped == self.gains_db {
             return;
         }

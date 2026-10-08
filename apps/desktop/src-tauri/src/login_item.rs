@@ -4,6 +4,14 @@
 //! daemon. The webview in that process never attaches to the window server, so
 //! opening the window from the tray shows an empty UI. Launch `/usr/bin/open`
 //! inside an Aqua session instead; `open` hands the app bundle to LaunchServices.
+//!
+//! Other platforms keep their login item in the OS through
+//! `tauri-plugin-autostart`; [`autostart_plan`] decides when to touch it. The
+//! saved preference (`autostart.json`) is the source of truth everywhere, and
+//! with no saved preference nothing is installed: autostart is opt-in.
+
+// The LaunchAgent half is only called on macOS; the tests cover it everywhere.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::path::{Path, PathBuf};
 
@@ -146,6 +154,9 @@ pub fn startup_plan(
                 },
             },
         },
+        // No saved choice. An agent left by an older install that opens a
+        // bundle counts as that choice and is recorded; nothing else installs
+        // one, so a first launch never adds a login item.
         None => match (plist, bundle) {
             (PlistKind::OpensBundle(installed), Some(bundle)) if installed.as_path() == bundle => {
                 StartupPlan {
@@ -154,28 +165,61 @@ pub fn startup_plan(
                     persist: Some(true),
                 }
             }
-            (PlistKind::OpensBundle(_), None) => StartupPlan {
-                checked: true,
-                action: LoginItemAction::Leave,
-                persist: None,
-            },
-            (_, Some(bundle)) => StartupPlan {
+            // The app moved; keep the user's choice pointed at where it is now.
+            (PlistKind::OpensBundle(_), Some(bundle)) => StartupPlan {
                 checked: true,
                 action: LoginItemAction::Install {
                     bundle: bundle.to_path_buf(),
                 },
                 persist: Some(true),
             },
-            (PlistKind::LegacyBareExe, None) => StartupPlan {
+            (PlistKind::OpensBundle(_), None) => StartupPlan {
+                checked: true,
+                action: LoginItemAction::Leave,
+                persist: Some(true),
+            },
+            (PlistKind::LegacyBareExe, _) => StartupPlan {
                 checked: false,
                 action: LoginItemAction::Remove,
                 persist: None,
             },
-            (PlistKind::Absent, None) => StartupPlan {
+            (PlistKind::Absent, _) => StartupPlan {
                 checked: false,
                 action: LoginItemAction::Leave,
                 persist: None,
             },
+        },
+    }
+}
+
+/// What to do with an OS-managed login item (`tauri-plugin-autostart`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub struct AutostartPlan {
+    pub checked: bool,
+    /// Enable (`Some(true)`) or disable (`Some(false)`) the OS login item;
+    /// `None` leaves it alone.
+    pub apply: Option<bool>,
+    /// Write this preference when it was only implied by the OS state.
+    pub persist: Option<bool>,
+}
+
+/// The OS login item is touched only when the saved preference disagrees
+/// with it. With no saved preference the OS state is reported as is: a first
+/// launch installs nothing, and an entry left by an older build that
+/// enabled autostart by default is kept and recorded as the user's choice.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn autostart_plan(preference: Option<bool>, os_enabled: bool) -> AutostartPlan {
+    match preference {
+        Some(wanted) => AutostartPlan {
+            checked: wanted,
+            apply: (wanted != os_enabled).then_some(wanted),
+            persist: None,
+        },
+        None => AutostartPlan {
+            checked: os_enabled,
+            apply: None,
+            persist: os_enabled.then_some(true),
         },
     }
 }
@@ -353,16 +397,6 @@ mod tests {
         assert!(installed.checked);
         assert_eq!(installed.action, LoginItemAction::Leave);
 
-        let fresh = startup_plan(None, &PlistKind::Absent, Some(bundle));
-        assert!(fresh.checked);
-        assert_eq!(
-            fresh.action,
-            LoginItemAction::Install {
-                bundle: bundle.into()
-            }
-        );
-        assert_eq!(fresh.persist, Some(true));
-
         let off = startup_plan(
             Some(false),
             &PlistKind::OpensBundle(bundle.into()),
@@ -370,6 +404,97 @@ mod tests {
         );
         assert!(!off.checked);
         assert_eq!(off.action, LoginItemAction::Remove);
+    }
+
+    #[test]
+    fn first_launch_of_a_bundle_installs_nothing() {
+        let bundle = Path::new("/Applications/on-air-desktop.app");
+        let fresh = startup_plan(None, &PlistKind::Absent, Some(bundle));
+        assert_eq!(
+            fresh,
+            StartupPlan {
+                checked: false,
+                action: LoginItemAction::Leave,
+                persist: None,
+            }
+        );
+
+        let legacy = startup_plan(None, &PlistKind::LegacyBareExe, Some(bundle));
+        assert!(!legacy.checked);
+        assert_eq!(legacy.action, LoginItemAction::Remove);
+        assert_eq!(legacy.persist, None);
+
+        let opted_in = startup_plan(Some(true), &PlistKind::Absent, Some(bundle));
+        assert!(opted_in.checked);
+        assert_eq!(
+            opted_in.action,
+            LoginItemAction::Install {
+                bundle: bundle.into()
+            }
+        );
+    }
+
+    #[test]
+    fn an_older_install_keeps_its_login_item_and_records_the_choice() {
+        let bundle = Path::new("/Applications/on-air-desktop.app");
+        let same = startup_plan(None, &PlistKind::OpensBundle(bundle.into()), Some(bundle));
+        assert!(same.checked);
+        assert_eq!(same.action, LoginItemAction::Leave);
+        assert_eq!(same.persist, Some(true));
+
+        let moved = startup_plan(
+            None,
+            &PlistKind::OpensBundle(PathBuf::from("/Users/me/Downloads/on-air-desktop.app")),
+            Some(bundle),
+        );
+        assert!(moved.checked);
+        assert_eq!(
+            moved.action,
+            LoginItemAction::Install {
+                bundle: bundle.into()
+            }
+        );
+        assert_eq!(moved.persist, Some(true));
+
+        let dev = startup_plan(None, &PlistKind::OpensBundle(bundle.into()), None);
+        assert!(dev.checked);
+        assert_eq!(dev.action, LoginItemAction::Leave);
+        assert_eq!(dev.persist, Some(true));
+    }
+
+    #[test]
+    fn os_login_item_is_touched_only_when_the_preference_disagrees() {
+        assert_eq!(
+            autostart_plan(None, false),
+            AutostartPlan {
+                checked: false,
+                apply: None,
+                persist: None,
+            },
+            "first launch: off and nothing installed"
+        );
+        assert_eq!(
+            autostart_plan(None, true),
+            AutostartPlan {
+                checked: true,
+                apply: None,
+                persist: Some(true),
+            },
+            "an entry from an older build is kept and recorded"
+        );
+        assert_eq!(
+            autostart_plan(Some(true), true),
+            AutostartPlan {
+                checked: true,
+                apply: None,
+                persist: None,
+            },
+            "already in step: no enable() call on this launch"
+        );
+        assert_eq!(autostart_plan(Some(true), false).apply, Some(true));
+        assert_eq!(autostart_plan(Some(false), true).apply, Some(false));
+        assert_eq!(autostart_plan(Some(false), false).apply, None);
+        assert!(!autostart_plan(Some(false), true).checked);
     }
 
     #[test]

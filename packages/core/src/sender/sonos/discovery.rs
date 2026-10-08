@@ -404,42 +404,16 @@ fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<SonosDevice> {
     Some(device_from_mdns_fields(uuid, &location, ip))
 }
 
-fn search_mdns_blocking(duration: Duration) -> Vec<SonosDevice> {
-    let Ok(mdns) = mdns_sd::ServiceDaemon::new() else {
-        return Vec::new();
-    };
-    let Ok(rx) = mdns.browse(SONOS_MDNS_TYPE) else {
-        let _ = mdns.shutdown();
-        return Vec::new();
-    };
-    let deadline = Instant::now() + duration;
-    let mut found = HashMap::new();
-    while Instant::now() < deadline {
-        let wait = deadline.saturating_duration_since(Instant::now());
-        match rx.recv_timeout(wait) {
-            Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
-                if let Some(device) = device_from_mdns_info(&info) {
-                    let key = rincon_key(&device.usn);
-                    if found.len() < MAX_DISCOVERED_DEVICES || found.contains_key(&key) {
-                        found.insert(key, device);
-                    }
-                }
-            }
-            Ok(_) => {}
-            Err(_) => break,
-        }
-    }
-    let _ = mdns.shutdown();
-    let mut found: Vec<_> = found.into_values().collect();
-    found.sort_by(|a, b| a.usn.cmp(&b.usn));
-    found
-}
-
 /// Browse `_sonos._tcp` — works on LANs where SSDP multicast is filtered.
 pub async fn search_mdns(duration: Duration) -> Vec<SonosDevice> {
-    tokio::task::spawn_blocking(move || search_mdns_blocking(duration))
-        .await
-        .unwrap_or_default()
+    let mut found =
+        crate::mdns::browse(SONOS_MDNS_TYPE, duration, MAX_DISCOVERED_DEVICES, |info| {
+            let device = device_from_mdns_info(info)?;
+            Some((rincon_key(&device.usn), device))
+        })
+        .await;
+    found.sort_by(|a, b| a.usn.cmp(&b.usn));
+    found
 }
 
 /// Test seam: same protocol, but unicast to an arbitrary address instead of
@@ -469,24 +443,110 @@ pub async fn fetch_friendly_name(client: &reqwest::Client, location: &str) -> Op
     extract_xml_tag_text(&body, "roomName").or_else(|| extract_xml_tag_text(&body, "friendlyName"))
 }
 
-async fn read_limited_text(mut response: reqwest::Response, limit: usize) -> Option<String> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit as u64)
-    {
-        return None;
-    }
-    let mut body = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(limit as u64) as usize,
-    );
-    while let Some(chunk) = response.chunk().await.ok()? {
-        if body.len().saturating_add(chunk.len()) > limit {
-            return None;
-        }
-        body.extend_from_slice(&chunk);
-    }
+async fn read_limited_text(response: reqwest::Response, limit: usize) -> Option<String> {
+    let body = crate::http::read_bounded(response, limit).await.ok()?;
     String::from_utf8(body).ok()
+}
+
+const NAME_LOOKUP_CONCURRENCY: usize = 4;
+const MAX_NAME_LOOKUPS_PER_SCAN: usize = 64;
+
+fn spawn_name_lookup(
+    tasks: &mut tokio::task::JoinSet<SonosDevice>,
+    http: &reqwest::Client,
+    mut device: SonosDevice,
+) {
+    let http = http.clone();
+    tasks.spawn(async move {
+        if let Some(name) = fetch_friendly_name(&http, &device.location).await {
+            device.friendly_name = name;
+        }
+        device
+    });
+}
+
+/// The Sonos finder: every [`DISCOVERY_INTERVAL`], search SSDP and
+/// `_sonos._tcp`, look up room names, apply the zone topology and merge the
+/// result into `registry`, expiring stale ZonePlayers. Joins and departures
+/// are broadcast as `DeviceJoined`/`DeviceLeft`.
+pub fn spawn(
+    registry: std::sync::Arc<tokio::sync::Mutex<DeviceRegistry>>,
+    ws_tx: tokio::sync::broadcast::Sender<crate::events::WsEvent>,
+) -> tokio::task::JoinHandle<()> {
+    use crate::events::WsEvent;
+    use std::collections::HashSet;
+
+    tokio::spawn(async move {
+        let http = crate::net::lan_http_client(Duration::from_secs(2));
+        loop {
+            let before: HashSet<String> = {
+                let registry = registry.lock().await;
+                registry.list().into_iter().map(|d| d.usn).collect()
+            };
+
+            let (ssdp, mdns) = tokio::join!(
+                search_once(Duration::from_secs(2)),
+                search_mdns(Duration::from_secs(2)),
+            );
+            let mut found = ssdp.unwrap_or_default();
+            found.extend(mdns);
+            let mut seen = HashSet::new();
+            let mut pending = found
+                .into_iter()
+                .filter(|device| seen.insert(rincon_key(&device.usn)))
+                .take(MAX_NAME_LOOKUPS_PER_SCAN);
+            let mut name_tasks = tokio::task::JoinSet::new();
+            for device in pending.by_ref().take(NAME_LOOKUP_CONCURRENCY) {
+                spawn_name_lookup(&mut name_tasks, &http, device);
+            }
+            let mut named = Vec::new();
+            while let Some(result) = name_tasks.join_next().await {
+                if let Ok(device) = result {
+                    named.push(device);
+                }
+                if let Some(device) = pending.next() {
+                    spawn_name_lookup(&mut name_tasks, &http, device);
+                }
+            }
+            named.sort_by(|a, b| a.usn.cmp(&b.usn));
+
+            let topology = named
+                .iter()
+                .map(soap_ip)
+                .find(|ip| ip.is_ipv4())
+                .or_else(|| named.first().map(|d| d.ip));
+            let topology = match topology {
+                Some(ip) => fetch_zone_groups(&http, ip).await,
+                None => None,
+            };
+
+            let now = Instant::now();
+            {
+                let mut registry = registry.lock().await;
+                for device in named {
+                    if !before.contains(&device.usn) {
+                        let _ = ws_tx.send(WsEvent::DeviceJoined {
+                            transport: "sonos".to_string(),
+                            id: device.usn.clone(),
+                            name: device.friendly_name.clone(),
+                        });
+                    }
+                    registry.upsert(device, now);
+                }
+                if let Some(groups) = topology {
+                    registry.apply_zone_groups(&groups);
+                }
+                registry.expire_stale(now, DEVICE_TTL);
+
+                let after: HashSet<String> = registry.list().into_iter().map(|d| d.usn).collect();
+                for left in before.difference(&after) {
+                    let _ = ws_tx.send(WsEvent::DeviceLeft {
+                        transport: "sonos".to_string(),
+                        id: left.clone(),
+                    });
+                }
+            }
+            tokio::time::sleep(DISCOVERY_INTERVAL).await;
+        }
+    })
 }

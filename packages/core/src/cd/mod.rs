@@ -1,12 +1,14 @@
 //! Compact-disc capture: watch for an audio CD, play it into the pipeline.
 
-use crate::api::ws::WsEvent;
+use crate::events::WsEvent;
+use parking_lot::Mutex;
 use ringbuf::HeapProd;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
+pub mod autoplay;
 mod sys;
 
 pub const AUDIO_CD_INPUT: &str = "Audio CD";
@@ -189,9 +191,18 @@ struct CdInner {
     track_index: Mutex<usize>,
     sector_in_track: Mutex<u32>,
     producer: Mutex<Option<HeapProd<f32>>>,
+    /// Incremented on every attach; a detach only applies when it carries
+    /// the generation it was issued for, so a stale capture handle's cleanup
+    /// cannot discard a producer attached after it.
+    producer_generation: AtomicU64,
     events: Mutex<Option<broadcast::Sender<WsEvent>>>,
     fingerprint: Mutex<String>,
 }
+
+/// Token returned by [`CdDeck::attach_producer`]; pass it to
+/// [`CdDeck::detach_producer`] so only the matching attachment is removed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProducerGeneration(u64);
 
 #[derive(Clone)]
 pub struct CdDeck {
@@ -206,6 +217,7 @@ impl CdDeck {
             track_index: Mutex::new(0),
             sector_in_track: Mutex::new(0),
             producer: Mutex::new(None),
+            producer_generation: AtomicU64::new(0),
             events: Mutex::new(None),
             fingerprint: Mutex::new(String::new()),
         });
@@ -218,7 +230,7 @@ impl CdDeck {
     }
 
     pub fn set_event_sink(&self, tx: broadcast::Sender<WsEvent>) {
-        *self.inner.events.lock().unwrap() = Some(tx);
+        *self.inner.events.lock() = Some(tx);
     }
 
     pub fn status(&self) -> CdStatus {
@@ -282,19 +294,34 @@ impl CdDeck {
         self.set_medium(None) == CdMediaEvent::Ejected
     }
 
-    pub fn attach_producer(&self, producer: HeapProd<f32>) {
-        *self.inner.producer.lock().unwrap() = Some(producer);
+    pub fn attach_producer(&self, producer: HeapProd<f32>) -> ProducerGeneration {
+        let mut slot = self.inner.producer.lock();
+        let generation = self
+            .inner
+            .producer_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
+        *slot = Some(producer);
+        ProducerGeneration(generation)
     }
 
-    pub fn detach_producer(&self) {
-        *self.inner.producer.lock().unwrap() = None;
+    /// Detach and pause, but only if `generation` is still the live
+    /// attachment. A newer attach wins.
+    pub fn detach_producer(&self, generation: ProducerGeneration) {
+        {
+            let mut slot = self.inner.producer.lock();
+            if self.inner.producer_generation.load(Ordering::Acquire) != generation.0 {
+                return;
+            }
+            *slot = None;
+        }
         if self.inner.playing.swap(false, Ordering::AcqRel) {
             self.inner.emit();
         }
     }
 
     pub fn has_producer(&self) -> bool {
-        self.inner.producer.lock().unwrap().is_some()
+        self.inner.producer.lock().is_some()
     }
 }
 
@@ -306,11 +333,7 @@ impl Default for CdDeck {
 
 impl CdInner {
     fn toc(&self) -> Option<CdToc> {
-        self.medium
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|medium| medium.toc())
+        self.medium.lock().as_ref().map(|medium| medium.toc())
     }
 
     fn status(&self) -> CdStatus {
@@ -334,9 +357,9 @@ impl CdInner {
                 ..CdStatus::empty()
             };
         }
-        let index = (*self.track_index.lock().unwrap()).min(toc.tracks.len() - 1);
+        let index = (*self.track_index.lock()).min(toc.tracks.len() - 1);
         let track = &toc.tracks[index];
-        let sector = *self.sector_in_track.lock().unwrap();
+        let sector = *self.sector_in_track.lock();
         CdStatus {
             present: true,
             playing: self.playing.load(Ordering::Acquire),
@@ -355,23 +378,23 @@ impl CdInner {
             .as_ref()
             .map(|item| item.toc().fingerprint())
             .unwrap_or_default();
-        let mut fingerprint = self.fingerprint.lock().unwrap();
+        let mut fingerprint = self.fingerprint.lock();
         if *fingerprint == next_fp {
             if medium.is_some() {
-                *self.medium.lock().unwrap() = medium;
+                *self.medium.lock() = medium;
             }
             return CdMediaEvent::Unchanged;
         }
         let had = !fingerprint.is_empty();
         *fingerprint = next_fp;
         drop(fingerprint);
-        *self.medium.lock().unwrap() = medium;
-        *self.track_index.lock().unwrap() = 0;
-        *self.sector_in_track.lock().unwrap() = 0;
+        *self.medium.lock() = medium;
+        *self.track_index.lock() = 0;
+        *self.sector_in_track.lock() = 0;
         self.playing.store(false, Ordering::Release);
-        if had && self.medium.lock().unwrap().is_none() {
+        if had && self.medium.lock().is_none() {
             CdMediaEvent::Ejected
-        } else if self.medium.lock().unwrap().is_some() {
+        } else if self.medium.lock().is_some() {
             CdMediaEvent::Inserted
         } else {
             CdMediaEvent::Ejected
@@ -385,12 +408,12 @@ impl CdInner {
         if toc.tracks.is_empty() {
             return false;
         }
-        let mut index = self.track_index.lock().unwrap();
+        let mut index = self.track_index.lock();
         if *index + 1 >= toc.tracks.len() {
             return false;
         }
         *index += 1;
-        *self.sector_in_track.lock().unwrap() = 0;
+        *self.sector_in_track.lock() = 0;
         true
     }
 
@@ -401,9 +424,9 @@ impl CdInner {
         if toc.tracks.is_empty() {
             return false;
         }
-        let index = (*self.track_index.lock().unwrap()).min(toc.tracks.len() - 1);
+        let index = (*self.track_index.lock()).min(toc.tracks.len() - 1);
         let length = toc.tracks[index].length_sectors;
-        *self.sector_in_track.lock().unwrap() = ms_to_sectors(position_ms).min(length);
+        *self.sector_in_track.lock() = ms_to_sectors(position_ms).min(length);
         true
     }
 
@@ -414,8 +437,8 @@ impl CdInner {
         let Some(index) = toc.tracks.iter().position(|track| track.number == number) else {
             return false;
         };
-        *self.track_index.lock().unwrap() = index;
-        *self.sector_in_track.lock().unwrap() = 0;
+        *self.track_index.lock() = index;
+        *self.sector_in_track.lock() = 0;
         true
     }
 
@@ -426,12 +449,12 @@ impl CdInner {
         if toc.tracks.is_empty() {
             return false;
         }
-        let position_ms = sectors_to_ms(*self.sector_in_track.lock().unwrap());
-        let mut index = self.track_index.lock().unwrap();
+        let position_ms = sectors_to_ms(*self.sector_in_track.lock());
+        let mut index = self.track_index.lock();
         if position_ms < PREVGAP_RESTART_MS && *index > 0 {
             *index -= 1;
         }
-        *self.sector_in_track.lock().unwrap() = 0;
+        *self.sector_in_track.lock() = 0;
         true
     }
 
@@ -443,7 +466,7 @@ impl CdInner {
     }
 
     fn emit(&self) {
-        let Some(tx) = self.events.lock().unwrap().clone() else {
+        let Some(tx) = self.events.lock().clone() else {
             return;
         };
         let status = self.status();
@@ -463,7 +486,7 @@ impl CdInner {
 fn playback_loop(weak: Weak<CdInner>) {
     while let Some(inner) = weak.upgrade() {
         let playing = inner.playing.load(Ordering::Acquire);
-        let medium = inner.medium.lock().unwrap().clone();
+        let medium = inner.medium.lock().clone();
         let Some(medium) = medium else {
             drop(inner);
             std::thread::sleep(Duration::from_millis(80));
@@ -480,9 +503,9 @@ fn playback_loop(weak: Weak<CdInner>) {
             std::thread::sleep(Duration::from_millis(40));
             continue;
         }
-        let index = (*inner.track_index.lock().unwrap()).min(toc.tracks.len() - 1);
+        let index = (*inner.track_index.lock()).min(toc.tracks.len() - 1);
         let track = &toc.tracks[index];
-        let sector = *inner.sector_in_track.lock().unwrap();
+        let sector = *inner.sector_in_track.lock();
         if sector >= track.length_sectors {
             inner.finish_track();
             continue;
@@ -502,19 +525,19 @@ fn playback_loop(weak: Weak<CdInner>) {
         let read_sectors = (bytes.len() / BYTES_PER_SECTOR) as u32;
         if let Some(inner) = weak.upgrade() {
             if inner.playing.load(Ordering::Acquire) {
-                let same_track = *inner.track_index.lock().unwrap() == index
-                    && *inner.sector_in_track.lock().unwrap() == sector;
+                let same_track =
+                    *inner.track_index.lock() == index && *inner.sector_in_track.lock() == sector;
                 if same_track {
-                    let attached = inner.producer.lock().unwrap().as_mut().is_some();
+                    let attached = inner.producer.lock().as_mut().is_some();
                     if attached {
-                        if let Some(producer) = inner.producer.lock().unwrap().as_mut() {
+                        if let Some(producer) = inner.producer.lock().as_mut() {
                             use ringbuf::traits::Producer;
                             for chunk in bytes.chunks(BYTES_PER_SECTOR) {
                                 let mono = downmix_sector(chunk);
                                 let _ = producer.push_slice(&mono);
                             }
                         }
-                        *inner.sector_in_track.lock().unwrap() = sector + read_sectors;
+                        *inner.sector_in_track.lock() = sector + read_sectors;
                         let next_sector = sector + read_sectors;
                         if next_sector % SECTORS_PER_SECOND < read_sectors {
                             inner.emit();
@@ -649,10 +672,29 @@ mod tests {
         deck.seek_ms(2_000);
         deck.play();
         assert!(deck.status().playing);
-        deck.detach_producer();
+        let (producer, _consumer) = crate::pipeline::new_ring_buffer(1024);
+        let generation = deck.attach_producer(producer);
+        deck.detach_producer(generation);
         let status = deck.status();
         assert!(!status.playing);
         assert_eq!(status.position_ms, 2_000);
+        assert!(!deck.has_producer());
+    }
+
+    #[test]
+    fn a_stale_detach_does_not_remove_a_newer_producer() {
+        let deck = deck_with(&["A"], 10_000);
+        let (first, _c1) = crate::pipeline::new_ring_buffer(1024);
+        let (second, _c2) = crate::pipeline::new_ring_buffer(1024);
+        let old = deck.attach_producer(first);
+        let _new = deck.attach_producer(second);
+        deck.play();
+        deck.detach_producer(old);
+        assert!(deck.has_producer(), "newer attachment must survive");
+        assert!(
+            deck.status().playing,
+            "stale detach must not pause playback"
+        );
     }
 
     #[test]

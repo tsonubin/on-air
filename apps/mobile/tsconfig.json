@@ -1,10 +1,11 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": ["../../tsconfig.base.json", "expo/tsconfig.base"],
   "compilerOptions": {
-    "strict": true,
-    "paths": { "@/*": ["./src/*"] },
-    "allowImportingTsExtensions": true
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["jest"]
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["**/node_modules", "**/__tests__", "**/__mocks__"]
+  "exclude": ["**/node_modules"]
 }

@@ -1,20 +1,21 @@
 import { Button, FieldGroup, Text } from "@expo/ui";
+import { textSelection } from "@expo/ui/swift-ui/modifiers";
+import { Platform } from "react-native";
 import { useRemoteSession } from "@/remote-session";
 import { SettingsForm } from "@/settings-form";
 
 export default function ConnectionScreen() {
-  const { host, connectionState, refreshing, refresh, disconnect } = useRemoteSession();
+  const { pairedHost, view, refreshing, refresh, disconnect } = useRemoteSession();
   return (
     <SettingsForm testID="connection-screen">
       <FieldGroup.Section title="Paired desktop">
-        <Text testID="paired-token">{host}</Text>
-        <Text>
-          {connectionState === "connected"
-            ? "Connected to desktop"
-            : connectionState === "connecting"
-              ? "Connecting…"
-              : "Reconnecting…"}
+        <Text
+          testID="paired-host"
+          modifiers={Platform.OS === "ios" ? [textSelection(true)] : undefined}
+        >
+          {pairedHost}
         </Text>
+        <Text>{view.connectionText}</Text>
         <FieldGroup.SectionFooter>
           <Text>Your PIN pairing is saved on this phone. Keep both devices on the same Wi-Fi.</Text>
         </FieldGroup.SectionFooter>

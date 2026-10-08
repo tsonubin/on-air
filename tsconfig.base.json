@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    // Shared by every TypeScript package in the workspace. Packages add their
+    // own target, lib, module resolution, jsx and ambient `types`.
+    //
+    // Next strictness step: `noUncheckedIndexedAccess` and
+    // `exactOptionalPropertyTypes`. Both report errors in current app code,
+    // so they stay off until those call sites are fixed.
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true
+  }
+}

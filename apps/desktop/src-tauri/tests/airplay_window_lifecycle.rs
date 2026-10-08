@@ -1,3 +1,12 @@
+//! AppKit regression for the AirPlay route-picker window: open, close and
+//! reopen must reuse one Rust-owned `NSWindow`, and AppKit must not release
+//! it on close.
+//!
+//! This is a `harness = false` test so it can own the main thread. It only
+//! exercises anything on macOS; elsewhere it prints "skipped: macOS only" and
+//! exits 0, so a green run on Linux or Windows does not mean the lifecycle
+//! was checked.
+
 #[cfg(target_os = "macos")]
 mod macos_airplay {
     include!("../src/macos_airplay.rs");
@@ -45,4 +54,6 @@ fn main() {
         macos_airplay::assert_window_lifecycle();
         println!("AirPlay open / close / reopen / release passed");
     });
+    #[cfg(not(target_os = "macos"))]
+    println!("skipped: macOS only (airplay_window_lifecycle needs AppKit)");
 }

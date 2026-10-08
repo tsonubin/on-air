@@ -9,9 +9,10 @@ pub use pcm::{
 
 use crate::sender::{AudioSender, OutputFormat, SenderError};
 use bytes::Bytes;
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 
@@ -48,27 +49,27 @@ impl MockBluetoothAdapter {
 
 impl BluetoothAdapter for MockBluetoothAdapter {
     fn list(&self) -> Vec<BluetoothDevice> {
-        self.devices.lock().unwrap().clone()
+        self.devices.lock().clone()
     }
 
     fn pair(&self, id: &str) -> Result<(), SenderError> {
-        let mut devices = self.devices.lock().unwrap();
+        let mut devices = self.devices.lock();
         let device = devices
             .iter_mut()
             .find(|d| d.id == id)
-            .ok_or_else(|| SenderError("bluetooth device not found".into()))?;
+            .ok_or_else(|| SenderError::DeviceNotFound("bluetooth device not found".into()))?;
         device.paired = true;
         Ok(())
     }
 
     fn connect(&self, id: &str) -> Result<BluetoothEndpoint, SenderError> {
-        let mut devices = self.devices.lock().unwrap();
+        let mut devices = self.devices.lock();
         let device = devices
             .iter_mut()
             .find(|d| d.id == id)
-            .ok_or_else(|| SenderError("bluetooth device not found".into()))?;
+            .ok_or_else(|| SenderError::DeviceNotFound("bluetooth device not found".into()))?;
         if !device.paired {
-            return Err(SenderError("bluetooth device not paired".into()));
+            return Err(SenderError::not_ready("bluetooth device not paired"));
         }
         let endpoint = device
             .audio_endpoint
@@ -81,7 +82,7 @@ impl BluetoothAdapter for MockBluetoothAdapter {
     }
 
     fn disconnect(&self, id: &str) -> Result<(), SenderError> {
-        let mut devices = self.devices.lock().unwrap();
+        let mut devices = self.devices.lock();
         if let Some(device) = devices.iter_mut().find(|d| d.id == id) {
             device.connected = false;
         }
@@ -269,8 +270,8 @@ impl BluetoothSender {
 impl AudioSender for BluetoothSender {
     async fn start(&mut self) -> Result<(), SenderError> {
         if self.live.is_some() || self.connection_attempted {
-            return Err(SenderError(
-                "bluetooth sender must be stopped before starting".into(),
+            return Err(SenderError::not_ready(
+                "bluetooth sender must be stopped before starting",
             ));
         }
         self.connection_attempted = true;
@@ -283,7 +284,7 @@ impl AudioSender for BluetoothSender {
             output.open(&endpoint, config.pipeline_hz, config.output_hz)
         })
         .await
-        .map_err(|e| SenderError(format!("Bluetooth preparation task failed: {e}")))??;
+        .map_err(|e| SenderError::internal(format!("Bluetooth preparation task failed: {e}")))??;
         self.live = Some(LivePlayback {
             opened,
             stop: Arc::new(AtomicBool::new(false)),
@@ -343,12 +344,16 @@ impl AudioSender for BluetoothSender {
             // Cancel I/O before joining; closing must not acquire a write lock.
             tokio::task::spawn_blocking(move || sink.close())
                 .await
-                .map_err(|e| SenderError(format!("Bluetooth close task failed: {e}")))??;
+                .map_err(|e| {
+                    SenderError::internal(format!("Bluetooth close task failed: {e}"))
+                })??;
             if let Some(writer) = live.writer.take() {
                 tokio::task::spawn_blocking(move || writer.join())
                     .await
-                    .map_err(|e| SenderError(format!("Bluetooth writer task failed: {e}")))?
-                    .map_err(|_| SenderError("Bluetooth writer thread panicked".into()))?;
+                    .map_err(|e| {
+                        SenderError::internal(format!("Bluetooth writer task failed: {e}"))
+                    })?
+                    .map_err(|_| SenderError::internal("Bluetooth writer thread panicked"))?;
             }
         }
         self.live = None;
@@ -373,7 +378,9 @@ impl AudioSender for BluetoothSender {
             let sink = live.opened.sink.clone();
             tokio::task::spawn_blocking(move || sink.set_volume(volume))
                 .await
-                .map_err(|e| SenderError(format!("Bluetooth volume task failed: {e}")))??;
+                .map_err(|e| {
+                    SenderError::internal(format!("Bluetooth volume task failed: {e}"))
+                })??;
         }
         self.config.volume = volume;
         Ok(())

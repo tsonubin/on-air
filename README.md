@@ -10,18 +10,25 @@ are exclusive — switching outputs tears down the current sender first.
 
 This is a **pnpm + turbo + Cargo workspace**. Desktop is Tauri/React
 (`apps/desktop`); the iOS/Android remote is Expo (`apps/mobile`); they share
-`packages/api-types` and `packages/control-client`. With the desktop open:
+`packages/api-types` and `packages/control-client`. End-to-end suites live in
+`e2e/` (see [e2e/RUNNERS.md](e2e/RUNNERS.md)). None of the checks below need the
+desktop app running; the e2e suites start a mock core themselves.
 
 ```bash
-pnpm test
-pnpm check              # Biome format, lint, and import checks
-pnpm typecheck
-pnpm --filter mobile start    # Expo remote; scan LAN or enter the desktop IP
+pnpm install
+pnpm check              # Biome format, lint and import order (CI runs pnpm check:ci)
+pnpm typecheck          # every TypeScript package, tests and e2e included
+pnpm test               # control client, desktop (Vitest), mobile (Jest), core
+cargo clippy --locked --workspace --all-targets -- -D warnings
+cargo test --locked --workspace
+pnpm test:mobile:e2e    # phone client against the mock core
+pnpm test:desktop:e2e   # Playwright: HTTP golden paths and the desktop UI
+pnpm --filter mobile start    # Expo remote; scans the LAN or takes the desktop IP
 ```
 
 Use `pnpm format` to apply Biome formatting across the web, desktop, mobile,
-shared-package, and JavaScript/TypeScript E2E sources. Rust remains covered by
-`cargo fmt` and `cargo clippy`.
+shared-package, and TypeScript E2E sources. Rust is covered by `cargo fmt` and
+`cargo clippy`.
 
 ## Tray service and sleep behavior
 

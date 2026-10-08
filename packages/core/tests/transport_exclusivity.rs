@@ -34,6 +34,7 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
         .route("/api/player/play", put(capture))
         .route("/api/player/stop", put(capture))
         .route("/api/player/volume", put(capture))
+        .route("/api/queue/clear", put(capture))
         .with_state(captured.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let owntone = listener.local_addr().unwrap();

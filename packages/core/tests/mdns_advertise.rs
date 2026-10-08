@@ -1,13 +1,28 @@
-use on_air_core::mdns::{txt_records, INSTANCE_NAME, SERVICE_TYPE};
+use on_air_core::mdns::{hostname, instance_name, txt_records, INSTANCE_NAME, SERVICE_TYPE};
 
 #[test]
-fn advertisement_identity_matches_spec() {
-    assert_eq!(SERVICE_TYPE, "_on-air._tcp.local.");
-    assert_eq!(INSTANCE_NAME, "on-air");
-    let txt = txt_records("0.1.0", 47990);
+fn advertisement_identity_carries_the_machine_hostname() {
+    assert!(SERVICE_TYPE.starts_with("_on-air._tcp."));
+    let txt = txt_records("0.1.0", 47991, "studio-mac");
     assert_eq!(txt.iter().find(|(k, _)| k == "version").unwrap().1, "0.1.0");
-    assert_eq!(txt.iter().find(|(k, _)| k == "port").unwrap().1, "47990");
-    assert!(txt.iter().any(|(k, v)| k == "name" && !v.is_empty()));
+    assert_eq!(txt.iter().find(|(k, _)| k == "port").unwrap().1, "47991");
+    assert_eq!(
+        txt.iter().find(|(k, _)| k == "name").unwrap().1,
+        "studio-mac"
+    );
+    assert_eq!(
+        instance_name("studio-mac"),
+        format!("{INSTANCE_NAME} @ studio-mac")
+    );
+}
+
+#[test]
+fn hostname_is_never_empty_and_has_no_mdns_suffix() {
+    let host = hostname();
+    assert!(!host.is_empty());
+    assert!(!host.ends_with('.'));
+    assert!(!host.ends_with(".local"));
+    assert_ne!(host, "on-air-host.local.");
 }
 
 #[test]

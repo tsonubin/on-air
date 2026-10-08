@@ -1,6 +1,6 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from "@react-navigation/native";
+import { DarkTheme, ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router/stack";
-import { useColorScheme } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RemoteProvider, useRemoteSession } from "@/remote-session";
 
@@ -19,11 +19,12 @@ function Navigation() {
   );
 }
 
+// The app is dark-only (`userInterfaceStyle: "dark"` in app.json).
 export default function RootLayout() {
-  const scheme = useColorScheme();
   return (
     <SafeAreaProvider>
-      <ThemeProvider value={scheme === "dark" ? DarkTheme : DefaultTheme}>
+      <ThemeProvider value={DarkTheme}>
+        <StatusBar style="light" />
         <RemoteProvider>
           <Navigation />
         </RemoteProvider>
