@@ -139,9 +139,18 @@ export interface ActiveOutput {
   device_name: string;
 }
 
+/** Lifecycle of the exclusive output (`session::output::OutputPhase`). */
+export type OutputPhase = "starting" | "live" | "failed";
+
+/** The active output as `GET /api/outputs/active` reports it. */
+export interface ActiveOutputView extends ActiveOutput {
+  /** Optional because cores older than the output-session refactor omit it. */
+  state?: OutputPhase;
+}
+
 /** `GET /api/outputs/active`. */
 export interface ActiveOutputResponse {
-  active: ActiveOutput | null;
+  active: ActiveOutputView | null;
 }
 
 export interface ActivateOutputRequest {
@@ -157,9 +166,6 @@ export interface SetVolumeRequest {
 export interface OutputVolumeResponse {
   volume: number;
 }
-
-/** @deprecated Renamed to {@link OutputVolumeResponse} to match the Rust struct. */
-export type VolumeResponse = OutputVolumeResponse;
 
 // ---------------------------------------------------------------------------
 // EQ and sample rate
@@ -271,6 +277,7 @@ export interface CdSimulateRequest {
 
 export type WsEvent =
   | { type: "OutputStateChanged"; transport: Transport; device_name: string; active: boolean }
+  | { type: "InputStateChanged"; name: string | null; active: boolean; error?: string }
   | { type: "LevelMeter"; rms: number; peak: number }
   | { type: "DeviceJoined"; transport: Transport; id: string; name: string }
   | { type: "DeviceLeft"; transport: Transport; id: string }

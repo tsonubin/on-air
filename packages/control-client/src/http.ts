@@ -2,8 +2,8 @@ import {
   type ActivateInputRequest,
   type ActivateOutputRequest,
   type ActiveInputResponse,
-  type ActiveOutput,
   type ActiveOutputResponse,
+  type ActiveOutputView,
   type AirPlayMode,
   type AirPlayModeResponse,
   type AirPlayPairRequest,
@@ -292,7 +292,7 @@ export async function getActiveOutput(
   base: string,
   token?: string,
   opts?: RequestOptions,
-): Promise<ActiveOutput | null> {
+): Promise<ActiveOutputView | null> {
   const body = await request<ActiveOutputResponse | null>(
     base,
     "/api/outputs/active",
