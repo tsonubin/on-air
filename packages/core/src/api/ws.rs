@@ -4,6 +4,10 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 use serde::Serialize;
+use std::time::Duration;
+
+/// Keep-alive interval; clients treat a 20 s silence as a dead socket.
+pub const PING_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
@@ -53,6 +57,9 @@ pub async fn ws_handler(
 
 async fn handle_socket(mut socket: WebSocket, state: CoreState) {
     let mut rx = state.ws_tx.subscribe();
+    let mut ping =
+        tokio::time::interval_at(tokio::time::Instant::now() + PING_INTERVAL, PING_INTERVAL);
+    ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tokio::select! {
             event = rx.recv() => {
@@ -63,6 +70,11 @@ async fn handle_socket(mut socket: WebSocket, state: CoreState) {
                 };
                 let Ok(text) = serde_json::to_string(&event) else { continue };
                 if socket.send(Message::Text(text)).await.is_err() {
+                    break;
+                }
+            }
+            _ = ping.tick() => {
+                if socket.send(Message::Ping(Vec::new())).await.is_err() {
                     break;
                 }
             }

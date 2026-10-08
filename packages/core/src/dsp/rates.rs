@@ -55,14 +55,6 @@ pub fn snap_rate(preferred_hz: u32, supported: &[u32]) -> u32 {
 }
 
 /// Default output rate for a transport from its supported list.
-pub fn default_output_rate(transport: &str, supported: &[u32]) -> u32 {
-    let prefer = match transport {
-        "bluetooth" => 48_000,
-        _ => 44_100,
-    };
-    snap_rate(prefer, supported)
-}
-
 /// Intersect a device-advertised range list with a transport catalog.
 /// `device_ranges` is `(min_hz, max_hz)` per config; empty means "unknown,
 /// use the catalog as-is".
@@ -95,12 +87,6 @@ mod tests {
         assert_eq!(snap_rate(44_100, &[48_000, 96_000]), 48_000);
         assert_eq!(snap_rate(48_000, &[44_100, 48_000]), 48_000);
         assert_eq!(snap_rate(32_000, &[16_000, 44_100]), 44_100);
-    }
-
-    #[test]
-    fn bluetooth_defaults_to_48k_when_available() {
-        assert_eq!(default_output_rate("bluetooth", BLUETOOTH_RATES_HZ), 48_000);
-        assert_eq!(default_output_rate("sonos", SONOS_RATES_HZ), 44_100);
     }
 
     #[test]

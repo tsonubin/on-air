@@ -404,42 +404,16 @@ fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<SonosDevice> {
     Some(device_from_mdns_fields(uuid, &location, ip))
 }
 
-fn search_mdns_blocking(duration: Duration) -> Vec<SonosDevice> {
-    let Ok(mdns) = mdns_sd::ServiceDaemon::new() else {
-        return Vec::new();
-    };
-    let Ok(rx) = mdns.browse(SONOS_MDNS_TYPE) else {
-        let _ = mdns.shutdown();
-        return Vec::new();
-    };
-    let deadline = Instant::now() + duration;
-    let mut found = HashMap::new();
-    while Instant::now() < deadline {
-        let wait = deadline.saturating_duration_since(Instant::now());
-        match rx.recv_timeout(wait) {
-            Ok(mdns_sd::ServiceEvent::ServiceResolved(info)) => {
-                if let Some(device) = device_from_mdns_info(&info) {
-                    let key = rincon_key(&device.usn);
-                    if found.len() < MAX_DISCOVERED_DEVICES || found.contains_key(&key) {
-                        found.insert(key, device);
-                    }
-                }
-            }
-            Ok(_) => {}
-            Err(_) => break,
-        }
-    }
-    let _ = mdns.shutdown();
-    let mut found: Vec<_> = found.into_values().collect();
-    found.sort_by(|a, b| a.usn.cmp(&b.usn));
-    found
-}
-
 /// Browse `_sonos._tcp` — works on LANs where SSDP multicast is filtered.
 pub async fn search_mdns(duration: Duration) -> Vec<SonosDevice> {
-    tokio::task::spawn_blocking(move || search_mdns_blocking(duration))
-        .await
-        .unwrap_or_default()
+    let mut found =
+        crate::mdns::browse(SONOS_MDNS_TYPE, duration, MAX_DISCOVERED_DEVICES, |info| {
+            let device = device_from_mdns_info(info)?;
+            Some((rincon_key(&device.usn), device))
+        })
+        .await;
+    found.sort_by(|a, b| a.usn.cmp(&b.usn));
+    found
 }
 
 /// Test seam: same protocol, but unicast to an arbitrary address instead of
@@ -469,24 +443,7 @@ pub async fn fetch_friendly_name(client: &reqwest::Client, location: &str) -> Op
     extract_xml_tag_text(&body, "roomName").or_else(|| extract_xml_tag_text(&body, "friendlyName"))
 }
 
-async fn read_limited_text(mut response: reqwest::Response, limit: usize) -> Option<String> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit as u64)
-    {
-        return None;
-    }
-    let mut body = Vec::with_capacity(
-        response
-            .content_length()
-            .unwrap_or_default()
-            .min(limit as u64) as usize,
-    );
-    while let Some(chunk) = response.chunk().await.ok()? {
-        if body.len().saturating_add(chunk.len()) > limit {
-            return None;
-        }
-        body.extend_from_slice(&chunk);
-    }
+async fn read_limited_text(response: reqwest::Response, limit: usize) -> Option<String> {
+    let body = crate::http::read_bounded(response, limit).await.ok()?;
     String::from_utf8(body).ok()
 }

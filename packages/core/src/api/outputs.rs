@@ -1,23 +1,12 @@
+use crate::api::error::{ApiError, JsonBody};
 use crate::auth::Paired;
-use crate::session::{self, ActivateError};
+use crate::session::{self, OutputInfo};
 use crate::state::{ActiveOutput, CoreState};
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
-
-#[derive(Serialize)]
-pub struct OutputInfo {
-    pub id: String,
-    pub name: String,
-    pub transport: &'static str,
-    pub kind: &'static str,
-    pub member_count: u8,
-    pub needs_pair: bool,
-    pub paired: bool,
-}
 
 #[derive(Serialize)]
 pub struct OutputsResponse {
@@ -26,27 +15,22 @@ pub struct OutputsResponse {
 
 pub async fn list_outputs(Paired: Paired, State(state): State<CoreState>) -> Json<OutputsResponse> {
     Json(OutputsResponse {
-        outputs: session::list(&state)
-            .await
-            .into_iter()
-            .map(|o| OutputInfo {
-                id: o.id,
-                name: o.name,
-                transport: o.transport,
-                kind: o.kind,
-                member_count: o.member_count,
-                needs_pair: o.needs_pair,
-                paired: o.paired,
-            })
-            .collect(),
+        outputs: session::list(&state).await,
     })
+}
+
+#[derive(Serialize)]
+pub struct ActiveOutputResponse {
+    pub active: Option<ActiveOutput>,
 }
 
 pub async fn get_active_output(
     Paired: Paired,
     State(state): State<CoreState>,
-) -> Json<Option<ActiveOutput>> {
-    Json(state.active_output.lock().unwrap().clone())
+) -> Json<ActiveOutputResponse> {
+    Json(ActiveOutputResponse {
+        active: state.active_output.lock().clone(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -58,17 +42,23 @@ pub struct ActivateOutputRequest {
 pub async fn activate_output(
     Paired: Paired,
     State(state): State<CoreState>,
-    Json(req): Json<ActivateOutputRequest>,
-) -> Response {
+    JsonBody(req): JsonBody<ActivateOutputRequest>,
+) -> Result<StatusCode, ApiError> {
     let _configuration = state.config_lock.lock().await;
-    match session::activate(&state, &req.transport, &req.device_id).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(ActivateError::NotFound) => {
-            (StatusCode::NOT_FOUND, "output device not found").into_response()
-        }
-        Err(ActivateError::BadRequest(msg)) => (StatusCode::BAD_REQUEST, msg).into_response(),
-        Err(ActivateError::Failed(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-    }
+    session::activate(&state, &req.transport, &req.device_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /api/outputs/active`: stop casting and forget the saved output so
+/// the next launch does not resume it.
+pub async fn deactivate_output(
+    Paired: Paired,
+    State(state): State<CoreState>,
+) -> Result<StatusCode, ApiError> {
+    let _configuration = state.config_lock.lock().await;
+    state.deactivate_sender().await?;
+    state.clear_saved_output();
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize)]
@@ -93,20 +83,11 @@ pub async fn get_output_volume(
 pub async fn set_output_volume(
     Paired: Paired,
     State(state): State<CoreState>,
-    Json(req): Json<SetVolumeRequest>,
-) -> Response {
+    JsonBody(req): JsonBody<SetVolumeRequest>,
+) -> Result<StatusCode, ApiError> {
     if req.volume > 100 {
-        return (StatusCode::BAD_REQUEST, "volume must be between 0 and 100").into_response();
+        return Err(ApiError::validation("volume must be between 0 and 100"));
     }
-    match session::set_volume(&state, req.volume).await {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(ActivateError::Failed(msg)) if msg == "no active output" => {
-            (StatusCode::CONFLICT, "no active output").into_response()
-        }
-        Err(ActivateError::Failed(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
-        Err(ActivateError::NotFound) => {
-            (StatusCode::NOT_FOUND, "output device not found").into_response()
-        }
-        Err(ActivateError::BadRequest(msg)) => (StatusCode::BAD_REQUEST, msg).into_response(),
-    }
+    session::set_volume(&state, req.volume).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

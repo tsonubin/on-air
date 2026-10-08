@@ -1,4 +1,5 @@
 use futures_util::StreamExt;
+use on_air_core::session::new_stream_nonce;
 use on_air_core::state::{ActiveOutput, CoreState};
 use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
@@ -6,11 +7,13 @@ use tokio::net::TcpListener;
 #[tokio::test]
 async fn streams_published_pcm_chunks_with_correct_content_type() {
     let state = CoreState::new();
-    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
         transport: "sonos".into(),
         device_id: "uuid:test".into(),
         device_name: "Test".into(),
     });
+    *state.stream_nonce.lock() = Some(nonce.clone());
     let audio_tx = state.audio_tx.clone();
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -34,7 +37,7 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
         }
     });
 
-    let response = reqwest::get(format!("http://{addr}/stream/audio.wav"))
+    let response = reqwest::get(format!("http://{addr}/stream/{nonce}/audio.wav"))
         .await
         .unwrap();
     assert_eq!(response.headers().get("content-type").unwrap(), "audio/wav");
@@ -65,16 +68,18 @@ async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
     use tower::ServiceExt;
 
     let state = CoreState::new();
-    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
         transport: "sonos".into(),
         device_id: "uuid:test".into(),
         device_name: "Test".into(),
     });
+    *state.stream_nonce.lock() = Some(nonce.clone());
     let audio_tx = state.audio_tx.clone();
     let response = on_air_core::build_router(state)
         .oneshot(
             Request::builder()
-                .uri("/stream/audio.wav")
+                .uri(format!("/stream/{nonce}/audio.wav"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -102,6 +107,7 @@ async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
 #[tokio::test]
 async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
     let state = CoreState::new();
+    let nonce = new_stream_nonce();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = on_air_core::build_router(state);
@@ -109,26 +115,51 @@ async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let response = reqwest::get(format!("http://{addr}/stream/audio.wav"))
+    let response = reqwest::get(format!("http://{addr}/stream/{nonce}/audio.wav"))
         .await
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
-async fn stream_is_unavailable_while_service_is_disabled() {
+async fn stream_with_a_stale_nonce_is_not_found() {
     let state = CoreState::new();
-    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
         transport: "sonos".into(),
         device_id: "uuid:test".into(),
         device_name: "Test".into(),
     });
+    *state.stream_nonce.lock() = Some(nonce);
+    let stale = new_stream_nonce();
+    let response = tower::ServiceExt::oneshot(
+        on_air_core::build_router(state),
+        axum::http::Request::builder()
+            .uri(format!("/stream/{stale}/audio.wav"))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn stream_is_unavailable_while_service_is_disabled() {
+    let state = CoreState::new();
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:test".into(),
+        device_name: "Test".into(),
+    });
+    *state.stream_nonce.lock() = Some(nonce.clone());
     state.service_enabled.store(false, Ordering::Release);
     let app = on_air_core::build_router(state);
     let response = tower::ServiceExt::oneshot(
         app,
         axum::http::Request::builder()
-            .uri("/stream/audio.wav")
+            .uri(format!("/stream/{nonce}/audio.wav"))
             .body(axum::body::Body::empty())
             .unwrap(),
     )
@@ -147,15 +178,17 @@ async fn silent_stream_closes_when_service_is_disabled() {
     use tower::ServiceExt;
 
     let state = CoreState::new();
-    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
         transport: "sonos".into(),
         device_id: "uuid:test".into(),
         device_name: "Test".into(),
     });
+    *state.stream_nonce.lock() = Some(nonce.clone());
     let response = on_air_core::build_router(state.clone())
         .oneshot(
             Request::builder()
-                .uri("/stream/audio.wav")
+                .uri(format!("/stream/{nonce}/audio.wav"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -190,21 +223,23 @@ async fn silent_stream_releases_its_slot_when_output_is_deactivated() {
     use tower::ServiceExt;
 
     let state = CoreState::new();
+    let nonce = new_stream_nonce();
     state
-        .activate_sender_as(
+        .activate_sender_streaming(
             Box::new(NullSender::new("Test", state.mock_log.clone())),
             Some(ActiveOutput {
                 transport: "sonos".into(),
                 device_id: "uuid:test".into(),
                 device_name: "Test".into(),
             }),
+            Some(nonce.clone()),
         )
         .await
         .unwrap();
     let response = on_air_core::build_router(state.clone())
         .oneshot(
             Request::builder()
-                .uri("/stream/audio.wav")
+                .uri(format!("/stream/{nonce}/audio.wav"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -234,11 +269,13 @@ async fn silent_stream_releases_its_slot_when_output_is_deactivated() {
 #[tokio::test]
 async fn stream_is_live_when_airplay_is_the_exclusive_output() {
     let state = CoreState::new();
-    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
         transport: "airplay".into(),
         device_id: "EE:C7:74:A7:D8:56".into(),
         device_name: "卧室".into(),
     });
+    *state.stream_nonce.lock() = Some(nonce.clone());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = on_air_core::build_router(state);
@@ -246,7 +283,7 @@ async fn stream_is_live_when_airplay_is_the_exclusive_output() {
         axum::serve(listener, app).await.unwrap();
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let response = reqwest::get(format!("http://{addr}/stream/audio.wav"))
+    let response = reqwest::get(format!("http://{addr}/stream/{nonce}/audio.wav"))
         .await
         .unwrap();
     assert_eq!(response.status(), reqwest::StatusCode::OK);
@@ -330,20 +367,22 @@ async fn sonos_radio_is_live_before_play_pulls_the_uri() {
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         "Fake",
     );
+    let nonce = new_stream_nonce();
     let sender = SonosSender::new(
         device,
         reqwest::Client::builder().no_proxy().build().unwrap(),
-        format!("http://{core_addr}/stream/audio.wav"),
+        format!("http://{core_addr}/stream/{nonce}/audio.wav"),
     )
     .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone());
     state
-        .activate_sender_as(
+        .activate_sender_streaming(
             Box::new(sender) as Box<dyn AudioSender>,
             Some(ActiveOutput {
                 transport: "sonos".into(),
                 device_id: "uuid:fake".into(),
                 device_name: "Fake".into(),
             }),
+            Some(nonce),
         )
         .await
         .unwrap();
@@ -521,6 +560,7 @@ async fn start_sonos_recovery_harness(
     });
 
     let state = CoreState::new();
+    let nonce = new_stream_nonce();
     let audio_tx = state.audio_tx.clone();
     let core_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let core_addr = core_listener.local_addr().unwrap();
@@ -534,15 +574,16 @@ async fn start_sonos_recovery_harness(
         use axum::http::Request;
         use tower::ServiceExt;
 
-        *state.active_output.lock().unwrap() = Some(ActiveOutput {
+        *state.active_output.lock() = Some(ActiveOutput {
             transport: "sonos".into(),
             device_id: "uuid:recovery-test".into(),
             device_name: "Recovery Test".into(),
         });
+        *state.stream_nonce.lock() = Some(nonce.clone());
         let response = on_air_core::build_router(state.clone())
             .oneshot(
                 Request::builder()
-                    .uri("/stream/audio.wav")
+                    .uri(format!("/stream/{nonce}/audio.wav"))
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -586,17 +627,18 @@ async fn start_sonos_recovery_harness(
     let sender = SonosSender::new(
         device,
         reqwest::Client::builder().no_proxy().build().unwrap(),
-        format!("http://{core_addr}/stream/audio.wav"),
+        format!("http://{core_addr}/stream/{nonce}/audio.wav"),
     )
     .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone());
     state
-        .activate_sender_as(
+        .activate_sender_streaming(
             Box::new(sender) as Box<dyn AudioSender>,
             Some(ActiveOutput {
                 transport: "sonos".into(),
                 device_id: "uuid:recovery-test".into(),
                 device_name: "Recovery Test".into(),
             }),
+            Some(nonce),
         )
         .await
         .unwrap();
@@ -642,7 +684,7 @@ async fn sonos_stream_resumes_after_input_stops_producing_pcm() {
     // A record change can leave capture producing no frames at all. This is
     // deliberately longer than the fake receiver's playback-buffer timeout.
     tokio::time::sleep(std::time::Duration::from_millis(350)).await;
-    assert!(state.active_output.lock().unwrap().is_some());
+    assert!(state.active_output.lock().is_some());
 
     assert!(
         publish_until_seen(&audio_tx, RESUMED_AUDIO, &probe.inner.resumed_audio_seen).await,
@@ -666,7 +708,7 @@ async fn sonos_stream_recovers_when_reader_drops_but_output_remains_active() {
         publish_until_seen(&audio_tx, FIRST_AUDIO, &probe.inner.first_audio_seen).await,
         "fake Sonos never received initial PCM"
     );
-    assert!(state.active_output.lock().unwrap().is_some());
+    assert!(state.active_output.lock().is_some());
 
     assert!(
         publish_until_seen(&audio_tx, RESUMED_AUDIO, &probe.inner.resumed_audio_seen).await,
@@ -697,7 +739,7 @@ async fn sonos_stream_recovers_when_connected_reader_stalls() {
         start_sonos_recovery_harness(FakeSonosFailure::StallFirstPull).await;
     let _stalled_reader = stalled_reader.expect("harness must retain the stalled stream body");
     assert_eq!(state.stream_clients.load(Ordering::Acquire), 1);
-    assert!(state.active_output.lock().unwrap().is_some());
+    assert!(state.active_output.lock().is_some());
 
     assert!(
         publish_until_seen(&audio_tx, RESUMED_AUDIO, &probe.inner.resumed_audio_seen).await,
@@ -730,16 +772,18 @@ async fn sonos_stream_reader_recovers_after_broadcast_lag() {
     use tower::ServiceExt;
 
     let state = CoreState::new();
-    *state.active_output.lock().unwrap() = Some(ActiveOutput {
+    let nonce = new_stream_nonce();
+    *state.active_output.lock() = Some(ActiveOutput {
         transport: "sonos".into(),
         device_id: "uuid:test".into(),
         device_name: "Test".into(),
     });
+    *state.stream_nonce.lock() = Some(nonce.clone());
     let audio_tx = state.audio_tx.clone();
     let response = on_air_core::build_router(state)
         .oneshot(
             Request::builder()
-                .uri("/stream/audio.wav")
+                .uri(format!("/stream/{nonce}/audio.wav"))
                 .body(Body::empty())
                 .unwrap(),
         )

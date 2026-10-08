@@ -1,5 +1,4 @@
 pub mod discovery;
-pub mod net;
 pub mod soap;
 
 use crate::sender::{AudioSender, SenderError};
@@ -118,7 +117,7 @@ async fn begin_playback(
     client
         .set_av_transport_uri(&device.av_transport_control_url(), stream_url)
         .await
-        .map_err(|error| SenderError(error.to_string()))?;
+        .map_err(|error| SenderError::transport(error.to_string()))?;
     // Sonos closes the HTTP connection after each SOAP action
     // (`Connection: close`). A tiny pause also lets SetAVTransportURI
     // settle before Play, which otherwise races on S2.
@@ -126,7 +125,7 @@ async fn begin_playback(
     client
         .play(&device.av_transport_control_url())
         .await
-        .map_err(|error| SenderError(error.to_string()))
+        .map_err(|error| SenderError::transport(error.to_string()))
 }
 
 impl Drop for SonosSender {
@@ -149,7 +148,7 @@ impl AudioSender for SonosSender {
             .client
             .stop(&self.device.av_transport_control_url())
             .await
-            .map_err(|e| SenderError(e.to_string()));
+            .map_err(|e| SenderError::transport(e.to_string()));
         if result.is_err() {
             // CoreState deliberately preserves the active sender when Stop
             // fails. Keep its recovery supervision alive for that rollback.
@@ -162,7 +161,7 @@ impl AudioSender for SonosSender {
         self.client
             .set_volume(&self.device.rendering_control_url(), volume)
             .await
-            .map_err(|e| SenderError(e.to_string()))
+            .map_err(|e| SenderError::transport(e.to_string()))
     }
 
     fn name(&self) -> &str {

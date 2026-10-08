@@ -22,6 +22,20 @@ fn set_gains_db_clamps_to_range() {
 }
 
 #[test]
+fn non_finite_gains_are_treated_as_flat() {
+    let mut eq = GraphicEq::new(44100.0);
+    eq.set_gains_db([f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 3.0, 0.0]);
+    assert_eq!(eq.gains_db(), [0.0, 0.0, 0.0, 3.0, 0.0]);
+
+    let mut samples: Vec<f32> = (0..2000).map(|i| (i as f32 * 0.017).sin() * 0.6).collect();
+    eq.process(&mut samples);
+    assert!(
+        samples.iter().all(|s| s.is_finite()),
+        "a non-finite gain must never poison the audio path"
+    );
+}
+
+#[test]
 fn boosting_a_band_amplifies_its_center_frequency() {
     let sample_rate = 44100.0;
     let band_index = 2; // 1000 Hz

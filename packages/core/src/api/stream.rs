@@ -1,7 +1,8 @@
+use crate::api::error::ApiError;
 use crate::dsp::bridge::RateBridge;
 use crate::state::CoreState;
 use axum::body::Body;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::header;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -22,7 +23,7 @@ impl Drop for StreamClientGuard {
 }
 
 /// Streaming WAV header: 16-bit PCM mono, unknown/very large data size so
-/// Sonos can treat GET /stream/audio.wav as a live HTTP radio source.
+/// Sonos can treat the radio GET as a live HTTP source.
 fn wav_header(sample_rate: u32) -> Bytes {
     let channels = 1u16;
     let bits = 16u16;
@@ -52,35 +53,40 @@ fn silence_chunk(sample_rate: u32) -> Bytes {
     Bytes::from(vec![0; frames.saturating_mul(2)])
 }
 
-pub fn sonos_radio_is_live(state: &CoreState) -> bool {
-    state
+/// True while a Sonos or AirPlay output is live and `nonce` is the path
+/// segment issued for that activation. Bluetooth plays through the OS and
+/// never exposes the radio.
+pub fn radio_stream_is_live(state: &CoreState, nonce: &str) -> bool {
+    let pulls_radio = state
         .active_output
         .lock()
-        .unwrap()
         .as_ref()
-        .is_some_and(|o| o.transport == "sonos" || o.transport == "airplay")
+        .is_some_and(|o| o.transport == "sonos" || o.transport == "airplay");
+    pulls_radio && state.stream_nonce.lock().as_deref() == Some(nonce)
 }
 
-pub async fn stream_audio(State(state): State<CoreState>) -> Response {
+pub async fn stream_audio(
+    State(state): State<CoreState>,
+    Path(nonce): Path<String>,
+) -> Result<Response, ApiError> {
     if !state.service_enabled.load(Ordering::Acquire) {
-        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+        return Err(ApiError::service_paused());
     }
-    if !sonos_radio_is_live(&state) {
-        return StatusCode::NOT_FOUND.into_response();
+    if !radio_stream_is_live(&state, &nonce) {
+        return Err(ApiError::not_found("no live audio stream at this address"));
     }
     if state.stream_clients.fetch_add(1, Ordering::AcqRel) >= MAX_STREAM_CLIENTS {
         state.stream_clients.fetch_sub(1, Ordering::AcqRel);
-        return (
+        return Err(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
+            "stream_busy",
             "too many audio stream clients",
-        )
-            .into_response();
+        ));
     }
     let client_guard = StreamClientGuard(state.clone());
-    let generation = state.stream_generation.load(Ordering::Acquire);
     let rx = state.audio_tx.subscribe();
-    let pipeline_hz = *state.target_sample_rate_hz.lock().unwrap();
-    let output_hz = *state.output_sample_rate_hz.lock().unwrap();
+    let pipeline_hz = *state.target_sample_rate_hz.lock();
+    let output_hz = *state.output_sample_rate_hz.lock();
     let header = wav_header(output_hz);
     let pcm = BroadcastStream::new(rx).filter_map({
         let mut bridge = RateBridge::new(pipeline_hz, output_hz, 1);
@@ -117,21 +123,21 @@ pub async fn stream_audio(State(state): State<CoreState>) -> Response {
             }
         })
         .take_while({
-            let stream_generation = state.stream_generation.clone();
+            let stream_nonce = state.stream_nonce.clone();
             let service_enabled = state.service_enabled.clone();
             move |_| {
                 service_enabled.load(Ordering::Acquire)
-                    && stream_generation.load(Ordering::Acquire) == generation
+                    && stream_nonce.lock().as_deref() == Some(nonce.as_str())
             }
         });
     let body = Body::from_stream(tokio_stream::once(Ok(header)).chain(pcm));
 
-    (
+    Ok((
         [
             (header::CONTENT_TYPE, "audio/wav".to_string()),
             (header::CACHE_CONTROL, "no-cache".to_string()),
         ],
         body,
     )
-        .into_response()
+        .into_response())
 }

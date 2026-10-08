@@ -1,10 +1,11 @@
 use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates};
 use crate::state::ActiveOutput;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(200);
@@ -118,7 +119,7 @@ impl SettingsPersistence {
                             match receiver.recv_timeout(SAVE_DEBOUNCE) {
                                 Ok(SettingsCommand::SavePending) => {}
                                 Ok(SettingsCommand::Flush(newest, completion)) => {
-                                    thread_pending.lock().unwrap().take();
+                                    thread_pending.lock().take();
                                     let result = write_file(&path, &newest);
                                     if let Err(error) = result.as_ref() {
                                         eprintln!("could not save on-air settings: {error}");
@@ -127,7 +128,7 @@ impl SettingsPersistence {
                                     break;
                                 }
                                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                                    if let Some(settings) = thread_pending.lock().unwrap().take() {
+                                    if let Some(settings) = thread_pending.lock().take() {
                                         if let Err(error) = write_file(&path, &settings) {
                                             eprintln!("could not save on-air settings: {error}");
                                         }
@@ -135,7 +136,7 @@ impl SettingsPersistence {
                                     break;
                                 }
                                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                                    if let Some(settings) = thread_pending.lock().unwrap().take() {
+                                    if let Some(settings) = thread_pending.lock().take() {
                                         if let Err(error) = write_file(&path, &settings) {
                                             eprintln!("could not save on-air settings: {error}");
                                         }
@@ -145,7 +146,7 @@ impl SettingsPersistence {
                             }
                         },
                         SettingsCommand::Flush(settings, completion) => {
-                            thread_pending.lock().unwrap().take();
+                            thread_pending.lock().take();
                             let result = write_file(&path, &settings);
                             if let Err(error) = result.as_ref() {
                                 eprintln!("could not save on-air settings: {error}");
@@ -160,7 +161,7 @@ impl SettingsPersistence {
     }
 
     pub(crate) fn queue(&self, settings: SavedSettings) {
-        *self.pending.lock().unwrap() = Some(settings);
+        *self.pending.lock() = Some(settings);
         match self.sender.try_send(SettingsCommand::SavePending) {
             Ok(()) | Err(mpsc::TrySendError::Full(_)) => {}
             Err(mpsc::TrySendError::Disconnected(_)) => {

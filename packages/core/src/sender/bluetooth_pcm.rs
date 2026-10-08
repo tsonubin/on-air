@@ -5,10 +5,11 @@ use crate::dsp::rates::{self, BLUETOOTH_RATES_HZ};
 use crate::sender::{OutputFormat, SenderError};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig, I24, U24};
+use parking_lot::Mutex;
 use ringbuf::traits::{Consumer, Producer, Split};
 use ringbuf::{HeapProd, HeapRb};
 use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BluetoothEndpoint {
@@ -65,7 +66,7 @@ impl Default for RecordingPcmSink {
 
 impl RecordingPcmSink {
     pub fn byte_count(&self) -> usize {
-        self.chunks.lock().unwrap().iter().map(|c| c.len()).sum()
+        self.chunks.lock().iter().map(|c| c.len()).sum()
     }
 }
 
@@ -74,10 +75,7 @@ impl PcmSink for RecordingPcmSink {
         if !pcm.is_empty() {
             let mut scaled = pcm.to_vec();
             scale_l16(&mut scaled, self.volume.load(Ordering::Acquire));
-            self.chunks
-                .lock()
-                .map_err(|_| SenderError("recording PCM sink lock poisoned".into()))?
-                .push(scaled);
+            self.chunks.lock().push(scaled);
         }
         Ok(())
     }
@@ -142,15 +140,19 @@ impl CpalPcmSink {
     fn open(name: &str, pipeline_hz: u32, preferred_hz: u32) -> Result<OpenedPcmSink, SenderError> {
         let device = cpal::default_host()
             .output_devices()
-            .map_err(|e| SenderError(format!("could not list audio outputs: {e}")))?
+            .map_err(|e| SenderError::internal(format!("could not list audio outputs: {e}")))?
             .find(|device| device.to_string() == name)
-            .ok_or_else(|| SenderError(format!("audio output not found: {name}")))?;
-        let default = device
-            .default_output_config()
-            .map_err(|e| SenderError(format!("could not read output configuration: {e}")))?;
+            .ok_or_else(|| {
+                SenderError::DeviceNotFound(format!("audio output not found: {name}"))
+            })?;
+        let default = device.default_output_config().map_err(|e| {
+            SenderError::internal(format!("could not read output configuration: {e}"))
+        })?;
         let configs: Vec<_> = device
             .supported_output_configs()
-            .map_err(|e| SenderError(format!("could not read supported output rates: {e}")))?
+            .map_err(|e| {
+                SenderError::internal(format!("could not read supported output rates: {e}"))
+            })?
             .collect();
         let supported_hz: Vec<_> = BLUETOOTH_RATES_HZ
             .iter()
@@ -162,8 +164,8 @@ impl CpalPcmSink {
             })
             .collect();
         if supported_hz.is_empty() {
-            return Err(SenderError(
-                "Bluetooth output has no supported A2DP sample rate".into(),
+            return Err(SenderError::not_ready(
+                "Bluetooth output has no supported A2DP sample rate",
             ));
         }
         let sample_rate_hz = rates::snap_rate(preferred_hz, &supported_hz);
@@ -180,7 +182,7 @@ impl CpalPcmSink {
                 )
             })
             .ok_or_else(|| {
-                SenderError("Bluetooth output has no supported A2DP sample rate".into())
+                SenderError::not_ready("Bluetooth output has no supported A2DP sample rate")
             })?
             .with_sample_rate(sample_rate_hz);
         let sample_format = supported.sample_format();
@@ -230,14 +232,14 @@ impl CpalPcmSink {
                 build_output_stream::<f64>(&device, config, consumer, volume.clone())?
             }
             other => {
-                return Err(SenderError(format!(
+                return Err(SenderError::internal(format!(
                     "unsupported output sample format: {other:?}"
                 )))
             }
         };
         stream
             .play()
-            .map_err(|e| SenderError(format!("could not start audio output: {e}")))?;
+            .map_err(|e| SenderError::internal(format!("could not start audio output: {e}")))?;
         Ok(OpenedPcmSink {
             sink: Arc::new(Self {
                 producer: Mutex::new(producer),
@@ -255,16 +257,9 @@ impl CpalPcmSink {
 
 impl PcmSink for CpalPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let converted = self
-            .bridge
-            .lock()
-            .map_err(|_| SenderError("sample-rate bridge lock poisoned".into()))?
-            .process_l16_mono(pcm);
+        let converted = self.bridge.lock().process_l16_mono(pcm);
         // Bound latency and memory: a slow device drops new samples.
-        self.producer
-            .lock()
-            .map_err(|_| SenderError("PCM queue lock poisoned".into()))?
-            .push_slice(&converted);
+        self.producer.lock().push_slice(&converted);
         Ok(())
     }
     fn set_volume(&self, volume: u8) -> Result<(), SenderError> {
@@ -273,10 +268,7 @@ impl PcmSink for CpalPcmSink {
     }
     fn close(&self) -> Result<(), SenderError> {
         // Dropping the stream stops callbacks even if another Arc holds this sink.
-        self.stream
-            .lock()
-            .map_err(|_| SenderError("PCM stream lock poisoned".into()))?
-            .take();
+        self.stream.lock().take();
         Ok(())
     }
 }
@@ -303,7 +295,7 @@ where
             |e| eprintln!("bluetooth audio output error: {e}"),
             None,
         )
-        .map_err(|e| SenderError(format!("could not open audio output: {e}")))
+        .map_err(|e| SenderError::internal(format!("could not open audio output: {e}")))
 }
 
 struct PacatPcmSink {
@@ -329,7 +321,7 @@ impl PacatPcmSink {
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
-            .map_err(|e| SenderError(format!("could not start pacat: {e}")))?;
+            .map_err(|e| SenderError::internal(format!("could not start pacat: {e}")))?;
         let stdin = child.stdin.take().expect("piped pacat stdin");
         Ok(Self {
             bridge: Mutex::new(RateBridge::new(pipeline_hz, output_hz, 2)),
@@ -341,18 +333,13 @@ impl PacatPcmSink {
 }
 impl PcmSink for PacatPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let mut bytes = self
-            .bridge
-            .lock()
-            .map_err(|_| SenderError("sample-rate bridge lock poisoned".into()))?
-            .process_l16_mono_to_l16(pcm);
+        let mut bytes = self.bridge.lock().process_l16_mono_to_l16(pcm);
         scale_l16(&mut bytes, self.volume.load(Ordering::Acquire));
         use std::io::Write;
         self.stdin
             .lock()
-            .map_err(|_| SenderError("pacat stdin lock poisoned".into()))?
             .write_all(&bytes)
-            .map_err(|e| SenderError(format!("pacat playback failed: {e}")))
+            .map_err(|e| SenderError::internal(format!("pacat playback failed: {e}")))
     }
     fn set_volume(&self, volume: u8) -> Result<(), SenderError> {
         self.volume.store(volume.min(100), Ordering::Release);
@@ -360,22 +347,19 @@ impl PcmSink for PacatPcmSink {
     }
     fn close(&self) -> Result<(), SenderError> {
         // Never take stdin here: a writer may be blocked while holding it.
-        let mut child = self
-            .child
-            .lock()
-            .map_err(|_| SenderError("pacat process lock poisoned".into()))?;
+        let mut child = self.child.lock();
         if child
             .try_wait()
-            .map_err(|e| SenderError(format!("could not inspect pacat: {e}")))?
+            .map_err(|e| SenderError::internal(format!("could not inspect pacat: {e}")))?
             .is_none()
         {
             child
                 .kill()
-                .map_err(|e| SenderError(format!("could not stop pacat: {e}")))?;
+                .map_err(|e| SenderError::internal(format!("could not stop pacat: {e}")))?;
         }
         child
             .wait()
-            .map_err(|e| SenderError(format!("could not reap pacat: {e}")))?;
+            .map_err(|e| SenderError::internal(format!("could not reap pacat: {e}")))?;
         Ok(())
     }
 }
@@ -421,7 +405,7 @@ mod tests {
         let (entered_tx, entered_rx) = mpsc::channel();
         let writer_sink = sink.clone();
         let writer = std::thread::spawn(move || {
-            let mut stdin = writer_sink.stdin.lock().unwrap();
+            let mut stdin = writer_sink.stdin.lock();
             entered_tx.send(()).unwrap();
             stdin.write_all(&vec![0; 1024 * 1024])
         });
@@ -435,14 +419,14 @@ mod tests {
         // A broken close implementation must fail the test without leaving a
         // blocked thread or a sleeping subprocess in the test runner.
         if closed.is_err() {
-            let _ = sink.child.lock().unwrap().kill();
+            let _ = sink.child.lock().kill();
         }
         assert!(writer.join().unwrap().is_err());
         closer.join().unwrap();
         closed
             .expect("close waited for the writer's stdin lock")
             .unwrap();
-        assert!(sink.child.lock().unwrap().try_wait().unwrap().is_some());
+        assert!(sink.child.lock().try_wait().unwrap().is_some());
         sink.close().unwrap();
     }
 }

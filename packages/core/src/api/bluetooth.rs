@@ -1,3 +1,4 @@
+use crate::api::error::{ApiError, JsonBody};
 use crate::auth::Paired;
 use crate::state::CoreState;
 use axum::extract::State;
@@ -21,12 +22,12 @@ pub struct BluetoothListResponse {
 pub async fn list_devices(
     Paired: Paired,
     State(state): State<CoreState>,
-) -> Result<Json<BluetoothListResponse>, StatusCode> {
+) -> Result<Json<BluetoothListResponse>, ApiError> {
     Ok(Json(BluetoothListResponse {
         devices: state
             .bluetooth_devices()
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(ApiError::internal)?
             .into_iter()
             .map(|d| BluetoothDeviceInfo {
                 id: d.id,
@@ -46,13 +47,12 @@ pub struct BluetoothIdRequest {
 pub async fn pair_device(
     Paired: Paired,
     State(state): State<CoreState>,
-    Json(req): Json<BluetoothIdRequest>,
-) -> Result<StatusCode, StatusCode> {
+    JsonBody(req): JsonBody<BluetoothIdRequest>,
+) -> Result<StatusCode, ApiError> {
     let adapter = state.bluetooth.clone();
-    let paired = tokio::task::spawn_blocking(move || adapter.pair(&req.id))
+    tokio::task::spawn_blocking(move || adapter.pair(&req.id))
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    paired.map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|error| ApiError::internal(error.to_string()))??;
     state.invalidate_bluetooth_cache().await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -60,13 +60,12 @@ pub async fn pair_device(
 pub async fn connect_device(
     Paired: Paired,
     State(state): State<CoreState>,
-    Json(req): Json<BluetoothIdRequest>,
-) -> Result<StatusCode, StatusCode> {
+    JsonBody(req): JsonBody<BluetoothIdRequest>,
+) -> Result<StatusCode, ApiError> {
     let adapter = state.bluetooth.clone();
-    let connected = tokio::task::spawn_blocking(move || adapter.connect(&req.id))
+    tokio::task::spawn_blocking(move || adapter.connect(&req.id))
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    connected.map_err(|_| StatusCode::BAD_REQUEST)?;
+        .map_err(|error| ApiError::internal(error.to_string()))??;
     state.invalidate_bluetooth_cache().await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -74,12 +73,11 @@ pub async fn connect_device(
 pub async fn open_settings(
     Paired: Paired,
     State(state): State<CoreState>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiError> {
     let adapter = state.bluetooth.clone();
-    let opened = tokio::task::spawn_blocking(move || adapter.open_settings())
+    tokio::task::spawn_blocking(move || adapter.open_settings())
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    opened.map_err(|_| StatusCode::BAD_GATEWAY)?;
+        .map_err(|error| ApiError::internal(error.to_string()))??;
     state.invalidate_bluetooth_cache().await;
     Ok(StatusCode::NO_CONTENT)
 }

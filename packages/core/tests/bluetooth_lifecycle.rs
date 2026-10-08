@@ -44,7 +44,7 @@ impl BluetoothAdapter for Adapter {
         assert_eq!(id, "speaker-id");
         self.log.lock().unwrap().push("connect".into());
         if self.missing_endpoint {
-            return Err(SenderError("endpoint not ready".into()));
+            return Err(SenderError::not_ready("endpoint not ready"));
         }
         Ok(BluetoothEndpoint::Native("JBL Bluetooth Speaker".into()))
     }
@@ -81,7 +81,7 @@ impl PcmSink for Sink {
     }
     fn set_volume(&self, volume: u8) -> Result<(), SenderError> {
         if self.reject_volume.load(Ordering::SeqCst) {
-            return Err(SenderError("volume rejected".into()));
+            return Err(SenderError::internal("volume rejected"));
         }
         self.log.lock().unwrap().push(format!("volume:{volume}"));
         self.recording.set_volume(volume)
@@ -123,7 +123,7 @@ impl PcmOutput for Output {
             .unwrap()
             .push(format!("open:{pipeline_hz}:{preferred_hz}"));
         if self.fail.load(Ordering::SeqCst) {
-            return Err(SenderError("open failed".into()));
+            return Err(SenderError::internal("open failed"));
         }
         let sink = Arc::new(Sink {
             log: self.log.clone(),
@@ -187,7 +187,7 @@ impl Fixture {
         tokio::time::timeout(Duration::from_secs(1), sink.written.notified())
             .await
             .unwrap();
-        let chunks = sink.recording.chunks.lock().unwrap();
+        let chunks = sink.recording.chunks.lock();
         i16::from_le_bytes(chunks.last().unwrap()[..2].try_into().unwrap())
     }
 }
@@ -228,7 +228,7 @@ async fn stop_reopens_a_fresh_sink_and_retains_volume() {
     sender.start().await.unwrap();
     assert!(!Arc::ptr_eq(&first, &f.output.latest()));
     assert_eq!(f.sample(20_000).await, 7_400);
-    assert_eq!(first.recording.chunks.lock().unwrap().len(), 1);
+    assert_eq!(first.recording.chunks.lock().len(), 1);
     assert_eq!(f.output.sinks.lock().unwrap().len(), 2);
     sender.stop().await.unwrap();
 }
@@ -290,7 +290,7 @@ impl AudioSender for Replacement {
     async fn start(&mut self) -> Result<(), SenderError> {
         self.log.lock().unwrap().push("replacement:start".into());
         if self.fail {
-            Err(SenderError("replacement failed".into()))
+            Err(SenderError::transport("replacement failed"))
         } else {
             Ok(())
         }
@@ -298,7 +298,7 @@ impl AudioSender for Replacement {
     async fn stop(&mut self) -> Result<(), SenderError> {
         self.log.lock().unwrap().push("replacement:stop".into());
         if self.fail_stop {
-            Err(SenderError("replacement cleanup failed".into()))
+            Err(SenderError::transport("replacement cleanup failed"))
         } else {
             Ok(())
         }
@@ -346,7 +346,7 @@ async fn failed_switch_reopens_bluetooth_with_saved_volume_and_format() {
         ]
     );
     assert_eq!(f.sample(10_000).await, 3_700);
-    assert_eq!(*state.output_sample_rate_hz.lock().unwrap(), 44_100);
+    assert_eq!(*state.output_sample_rate_hz.lock(), 44_100);
     state.deactivate_sender().await.unwrap();
 }
 
@@ -366,7 +366,11 @@ async fn failed_cleanup_retains_new_sender_and_does_not_resume_bluetooth() {
         }))
         .await
         .unwrap_err();
-    assert!(error.0.contains("cleanup after failed start"));
+    assert!(
+        matches!(error, SenderError::RollbackFailed { .. }),
+        "{error}"
+    );
+    assert!(error.to_string().contains("cleanup after failed start"));
     assert_eq!(
         f.output.sinks.lock().unwrap().len(),
         1,
@@ -433,7 +437,7 @@ async fn changing_rates_closes_old_stream_before_opening_the_new_one() {
             "volume:50"
         ]
     );
-    assert_eq!(*state.output_sample_rate_hz.lock().unwrap(), 48_000);
+    assert_eq!(*state.output_sample_rate_hz.lock(), 48_000);
     let format = state
         .active_sender
         .lock()
@@ -484,7 +488,7 @@ fn native_bluetooth_name_does_not_select_pacat() {
         Ok(_) => panic!("nonexistent endpoint opened"),
         Err(error) => error,
     };
-    assert!(error.0.contains("audio output not found"), "{error}");
+    assert!(matches!(error, SenderError::DeviceNotFound(_)), "{error}");
 }
 
 struct GatedOutput {
@@ -634,9 +638,15 @@ async fn failed_bluetooth_rollback_cleans_up_its_connection_attempt() {
         }))
         .await
         .unwrap_err();
-    assert!(error.0.contains("restoring previous output failed"));
+    assert!(
+        matches!(error, SenderError::RollbackFailed { .. }),
+        "{error}"
+    );
+    assert!(error
+        .to_string()
+        .contains("restoring previous output failed"));
     assert!(state.active_sender.lock().await.is_none());
-    assert!(state.active_output.lock().unwrap().is_none());
+    assert!(state.active_output.lock().is_none());
     assert_eq!(f.log.lock().unwrap().last().unwrap(), "disconnect");
     assert!(*f.output.latest().closed.lock().unwrap());
 }

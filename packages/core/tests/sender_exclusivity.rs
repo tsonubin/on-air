@@ -18,7 +18,7 @@ impl AudioSender for FailingStopSender {
 
     async fn stop(&mut self) -> Result<(), SenderError> {
         self.log.lock().await.push(format!("{}:stop", self.name));
-        Err(SenderError("stop failed".into()))
+        Err(SenderError::transport("stop failed"))
     }
 
     async fn set_volume(&mut self, _volume: u8) -> Result<(), SenderError> {
@@ -112,7 +112,7 @@ async fn failed_stop_blocks_activating_the_next_sender_and_preserves_the_active_
 
     let entries = log.lock().await.clone();
     assert_eq!(entries, vec!["A:start", "A:stop"]);
-    assert!(error.0.contains("could not stop"));
+    assert!(matches!(error, SenderError::StopFailed(_)), "{error}");
     assert!(state.active_sender.lock().await.is_some());
 }
 

@@ -131,9 +131,8 @@ async fn start_without_owntone_or_receiver_host_explains_the_sidecar() {
         on_air_core::sender::airplay::AirPlaySender::new("HomePod", "1", "http://127.0.0.1:1");
     let err = sender.start().await.unwrap_err();
     assert!(
-        err.0.contains("OwnTone") || err.0.contains("pyatv"),
-        "unexpected error: {}",
-        err.0
+        err.to_string().contains("OwnTone") || err.to_string().contains("pyatv"),
+        "unexpected error: {err}"
     );
 }
 
@@ -187,7 +186,7 @@ async fn failed_queue_add_deselects_output_and_does_not_start_player() {
     .with_radio("http://127.0.0.1:47990/stream/audio.wav", "127.0.0.1");
 
     let error = sender.start().await.unwrap_err();
-    assert!(error.0.contains("queue add failed"), "{error}");
+    assert!(error.to_string().contains("queue add failed"), "{error}");
     sender.stop().await.unwrap();
 
     assert_eq!(
@@ -215,7 +214,7 @@ async fn failed_play_stops_the_player_and_deselects_the_output() {
     );
 
     let error = sender.start().await.unwrap_err();
-    assert!(error.0.contains("player/play"), "{error}");
+    assert!(error.to_string().contains("player/play"), "{error}");
     assert_eq!(
         *capture.events.lock().unwrap(),
         vec![
@@ -243,7 +242,7 @@ async fn failed_owntone_stop_is_reported_but_still_deselects_the_output() {
 
     sender.start().await.unwrap();
     let error = sender.stop().await.unwrap_err();
-    assert!(error.0.contains("player/stop"), "{error}");
+    assert!(error.to_string().contains("player/stop"), "{error}");
     assert!(capture
         .events
         .lock()

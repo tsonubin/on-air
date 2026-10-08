@@ -175,9 +175,11 @@ mod platform {
             let output = Command::new("bluetoothctl")
                 .args(["--timeout", "30", "pair", &addr])
                 .output()
-                .map_err(|error| SenderError(format!("bluetoothctl pair failed: {error}")))?;
+                .map_err(|error| {
+                    SenderError::transport(format!("bluetoothctl pair failed: {error}"))
+                })?;
             if !output.status.success() {
-                return Err(SenderError(format!(
+                return Err(SenderError::transport(format!(
                     "could not pair {addr}: {}",
                     String::from_utf8_lossy(&output.stderr)
                 )));
@@ -197,9 +199,11 @@ mod platform {
                 let status = Command::new("bluetoothctl")
                     .args(["--timeout", "15", "connect", &addr])
                     .status()
-                    .map_err(|e| SenderError(format!("bluetoothctl connect failed: {e}")))?;
+                    .map_err(|e| {
+                        SenderError::transport(format!("bluetoothctl connect failed: {e}"))
+                    })?;
                 if !status.success() {
-                    return Err(SenderError(format!(
+                    return Err(SenderError::transport(format!(
                         "could not connect Bluetooth device {addr}"
                     )));
                 }
@@ -208,9 +212,11 @@ mod platform {
             let status = Command::new("pactl")
                 .args(["set-sink-mute", &endpoint, "0"])
                 .status()
-                .map_err(|e| SenderError(format!("could not unmute Bluetooth output: {e}")))?;
+                .map_err(|e| {
+                    SenderError::transport(format!("could not unmute Bluetooth output: {e}"))
+                })?;
             if !status.success() {
-                return Err(SenderError("could not unmute Bluetooth output".into()));
+                return Err(SenderError::transport("could not unmute Bluetooth output"));
             }
             Ok(BluetoothEndpoint::Pulse(endpoint))
         })
@@ -231,7 +237,7 @@ mod platform {
             }
             std::thread::sleep(Duration::from_millis(250));
         }
-        Err(SenderError(format!(
+        Err(SenderError::not_ready(format!(
             "bluetooth device {addr} did not appear as an audio sink"
         )))
     }
@@ -248,8 +254,8 @@ mod platform {
                 return Ok(());
             }
         }
-        Err(SenderError(
-            "could not open Bluetooth settings (tried GNOME, Blueman, KDE)".into(),
+        Err(SenderError::internal(
+            "could not open Bluetooth settings (tried GNOME, Blueman, KDE)",
         ))
     }
 }
@@ -288,7 +294,7 @@ mod platform {
         if legacy {
             Ok(())
         } else {
-            Err(SenderError("could not open Bluetooth settings".into()))
+            Err(SenderError::internal("could not open Bluetooth settings"))
         }
     }
 }
@@ -318,11 +324,13 @@ mod platform {
             .args(["/C", "start", "ms-settings:bluetooth"])
             .creation_flags(CREATE_NO_WINDOW)
             .status()
-            .map_err(|error| SenderError(format!("could not open Bluetooth settings: {error}")))?;
+            .map_err(|error| {
+                SenderError::internal(format!("could not open Bluetooth settings: {error}"))
+            })?;
         if status.success() {
             Ok(())
         } else {
-            Err(SenderError("could not open Bluetooth settings".into()))
+            Err(SenderError::internal("could not open Bluetooth settings"))
         }
     }
 }
@@ -336,15 +344,17 @@ mod platform {
     }
 
     pub fn pair(_id: &str) -> Result<(), SenderError> {
-        Err(SenderError("bluetooth pairing is not supported".into()))
+        Err(SenderError::not_ready("bluetooth pairing is not supported"))
     }
 
     pub fn connect(_id: &str) -> Result<BluetoothEndpoint, SenderError> {
-        Err(SenderError("bluetooth connect is not supported".into()))
+        Err(SenderError::not_ready("bluetooth connect is not supported"))
     }
 
     pub fn open_settings() -> Result<(), SenderError> {
-        Err(SenderError("bluetooth settings are not supported".into()))
+        Err(SenderError::not_ready(
+            "bluetooth settings are not supported",
+        ))
     }
 }
 
@@ -448,9 +458,22 @@ mod macos {
         if !get_data(device, &address, &mut buf) {
             return false;
         }
-        let list = unsafe { &*(buf.as_ptr() as *const AudioBufferList) };
-        (0..list.mNumberBuffers).any(|i| {
-            let buffer = unsafe { &*list.mBuffers.as_ptr().add(i as usize) };
+        // `buf` is a Vec<u8> with no alignment guarantee, so never form a
+        // reference to the AudioBufferList inside it: read unaligned copies
+        // of the fields instead.
+        let list = buf.as_ptr() as *const AudioBufferList;
+        // SAFETY: CoreAudio filled `buf` with an AudioBufferList of at least
+        // `size` bytes, and `mNumberBuffers` entries follow the header.
+        let number_buffers =
+            unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*list).mNumberBuffers)) };
+        (0..number_buffers).any(|i| {
+            let buffer = unsafe {
+                std::ptr::read_unaligned(
+                    std::ptr::addr_of!((*list).mBuffers)
+                        .cast::<objc2_core_audio_types::AudioBuffer>()
+                        .add(i as usize),
+                )
+            };
             buffer.mNumberChannels > 0
         })
     }
@@ -512,9 +535,8 @@ mod macos {
             .and_then(|device| device.audio_endpoint)
             .map(BluetoothEndpoint::Native)
             .ok_or_else(|| {
-                SenderError(
-                    "bluetooth speaker is not connected — pair it in Bluetooth settings first"
-                        .into(),
+                SenderError::not_ready(
+                    "bluetooth speaker is not connected — pair it in Bluetooth settings first",
                 )
             })
     }
@@ -607,9 +629,8 @@ mod windows {
             .and_then(|device| device.audio_endpoint)
             .map(BluetoothEndpoint::Native)
             .ok_or_else(|| {
-                SenderError(
-                    "bluetooth speaker is not connected — pair it in Bluetooth settings first"
-                        .into(),
+                SenderError::not_ready(
+                    "bluetooth speaker is not connected — pair it in Bluetooth settings first",
                 )
             })
     }

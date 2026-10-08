@@ -1,10 +1,9 @@
+use crate::api::error::{ApiError, JsonBody};
 use crate::api::inputs;
 use crate::auth::Paired;
 use crate::cd::{eject_drive, probe_audio_cd, CdMediaEvent, CdStatus, GeneratedCd, AUDIO_CD_INPUT};
 use crate::state::CoreState;
 use axum::extract::State;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -16,9 +15,21 @@ pub async fn get_cd(Paired: Paired, State(state): State<CoreState>) -> Json<CdSt
     Json(state.cd.status())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CdAction {
+    Play,
+    Pause,
+    Next,
+    Prev,
+    Seek,
+    Goto,
+    Eject,
+}
+
 #[derive(Deserialize)]
 pub struct CdControlRequest {
-    pub action: String,
+    pub action: CdAction,
     pub position_ms: Option<u64>,
     pub track: Option<u8>,
 }
@@ -26,46 +37,48 @@ pub struct CdControlRequest {
 pub async fn control_cd(
     Paired: Paired,
     State(state): State<CoreState>,
-    Json(req): Json<CdControlRequest>,
-) -> Response {
-    if req.action == "eject" {
+    JsonBody(req): JsonBody<CdControlRequest>,
+) -> Result<Json<CdStatus>, ApiError> {
+    if req.action == CdAction::Eject {
         if !state.mock {
-            let _ = eject_drive();
+            // The eject ioctl blocks while the tray moves; keep it off the
+            // async workers.
+            let _ = tokio::task::spawn_blocking(eject_drive).await;
         }
         let _ = state.cd.eject();
         on_ejected(&state).await;
-        return Json(state.cd.status()).into_response();
+        return Ok(Json(state.cd.status()));
     }
     if !state.cd.status().present {
-        return (StatusCode::CONFLICT, "no audio compact disc").into_response();
+        return Err(ApiError::conflict("no audio compact disc"));
     }
-    match req.action.as_str() {
-        "play" => {
+    match req.action {
+        CdAction::Play => {
             ensure_cd_capture(&state).await;
             state.cd.play();
         }
-        "pause" => state.cd.pause(),
-        "next" => {
+        CdAction::Pause => state.cd.pause(),
+        CdAction::Next => {
             let _ = state.cd.next();
         }
-        "prev" => {
+        CdAction::Prev => {
             let _ = state.cd.prev();
         }
-        "seek" => {
+        CdAction::Seek => {
             let Some(position_ms) = req.position_ms else {
-                return (StatusCode::BAD_REQUEST, "seek needs position_ms").into_response();
+                return Err(ApiError::validation("seek needs position_ms"));
             };
             state.cd.seek_ms(position_ms);
         }
-        "goto" => {
+        CdAction::Goto => {
             let Some(track) = req.track else {
-                return (StatusCode::BAD_REQUEST, "goto needs track").into_response();
+                return Err(ApiError::validation("goto needs track"));
             };
             state.cd.goto_track(track);
         }
-        _ => return (StatusCode::BAD_REQUEST, "unknown cd action").into_response(),
+        CdAction::Eject => unreachable!("handled above"),
     }
-    Json(state.cd.status()).into_response()
+    Ok(Json(state.cd.status()))
 }
 
 #[derive(Deserialize)]
@@ -81,14 +94,15 @@ pub struct CdSimulateRequest {
     pub tracks: Option<Vec<CdSimulateTrack>>,
 }
 
-/// Mock-only: insert or eject a disc so UI and API tests can exercise autoplay.
+/// `POST /api/mock/cd`, routed only in mock mode: insert or eject a disc so
+/// UI and API tests can exercise autoplay.
 pub async fn simulate_cd(
     Paired: Paired,
     State(state): State<CoreState>,
-    Json(req): Json<CdSimulateRequest>,
-) -> Response {
+    JsonBody(req): JsonBody<CdSimulateRequest>,
+) -> Result<Json<CdStatus>, ApiError> {
     if !state.mock {
-        return StatusCode::NOT_FOUND.into_response();
+        return Err(ApiError::not_found("no such route"));
     }
     if req.present {
         let tracks = req.tracks.unwrap_or_else(|| {
@@ -108,7 +122,7 @@ pub async fn simulate_cd(
             ]
         });
         if tracks.is_empty() {
-            return (StatusCode::BAD_REQUEST, "audio cd needs tracks").into_response();
+            return Err(ApiError::validation("audio cd needs tracks"));
         }
         let named: Vec<(String, u64)> = tracks
             .iter()
@@ -130,7 +144,7 @@ pub async fn simulate_cd(
             on_ejected(&state).await;
         }
     }
-    Json(state.cd.status()).into_response()
+    Ok(Json(state.cd.status()))
 }
 
 pub async fn autoplay(state: &CoreState) {
@@ -144,7 +158,7 @@ pub async fn autoplay(state: &CoreState) {
         return;
     }
     let _configuration = state.config_lock.lock().await;
-    if let Err((_, error)) = inputs::activate_input_named(state, AUDIO_CD_INPUT).await {
+    if let Err(error) = inputs::activate_input_named(state, AUDIO_CD_INPUT).await {
         eprintln!("cd autoplay could not take the input: {error}");
         return;
     }
@@ -152,7 +166,7 @@ pub async fn autoplay(state: &CoreState) {
 }
 
 pub async fn on_ejected(state: &CoreState) {
-    let is_cd = state.active_input.lock().unwrap().as_deref() == Some(AUDIO_CD_INPUT);
+    let is_cd = state.active_input.lock().as_deref() == Some(AUDIO_CD_INPUT);
     if !is_cd {
         return;
     }
@@ -161,29 +175,26 @@ pub async fn on_ejected(state: &CoreState) {
     if let Some(old) = guard.take() {
         let _ = tokio::task::spawn_blocking(move || old.stop()).await;
     }
-    *state.active_input.lock().unwrap() = None;
+    *state.active_input.lock() = None;
     state.clear_saved_input();
 }
 
 async fn ensure_cd_capture(state: &CoreState) {
-    let already = state.active_input.lock().unwrap().as_deref() == Some(AUDIO_CD_INPUT);
+    let already = state.active_input.lock().as_deref() == Some(AUDIO_CD_INPUT);
     if already {
         return;
     }
     let _configuration = state.config_lock.lock().await;
-    if let Err((_, error)) = inputs::activate_input_named(state, AUDIO_CD_INPUT).await {
+    if let Err(error) = inputs::activate_input_named(state, AUDIO_CD_INPUT).await {
         eprintln!("cd play could not take the input: {error}");
     }
 }
 
+/// Poll the optical drive. Only started for a non-mock state.
 pub fn spawn_watch(state: CoreState) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut empty_probes = 0u8;
         loop {
-            if state.mock {
-                tokio::time::sleep(WATCH_INTERVAL).await;
-                continue;
-            }
             let found = tokio::task::spawn_blocking(probe_audio_cd)
                 .await
                 .ok()

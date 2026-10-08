@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
           { id: "bt", name: "Studio headphones", transport: "bluetooth", paired: true },
         ],
       },
-      "/api/outputs/active": null,
+      "/api/outputs/active": { active: null },
       "/api/outputs/active/volume": { volume: 50 },
       "/api/eq": { gains_db: [0, 0, 0, 0, 0] },
       "/api/sample-rate": { sample_rate_hz: 44100 },
@@ -93,7 +93,7 @@ test("a pending connection blocks competing selections", async ({ page }) => {
     finish = resolve;
   });
   await page.route("**/api/outputs/active", async (route) => {
-    if (route.request().method() === "GET") return route.fulfill({ json: null });
+    if (route.request().method() === "GET") return route.fulfill({ json: { active: null } });
     await pending;
     await route.fulfill({ status: 204 });
   });

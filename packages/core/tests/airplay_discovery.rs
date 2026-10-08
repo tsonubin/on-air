@@ -1,7 +1,7 @@
+use on_air_core::sender::airplay_mdns::CatalogDevice;
 use on_air_core::sender::airplay_mdns::{
     collapse_pairs, device_from_txt, merge_owntone, skip_airplay_model,
 };
-use on_air_core::state::CatalogDevice;
 use std::net::{IpAddr, Ipv4Addr};
 
 #[test]

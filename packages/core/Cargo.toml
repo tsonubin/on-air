@@ -3,6 +3,13 @@ name = "on-air-core"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "on-air-core"
+path = "src/bin/on-air-core.rs"
+
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
@@ -20,6 +27,11 @@ cpal = "0.18.2"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 mdns-sd = "0.13"
 tower-http = { version = "0.6", features = ["cors"] }
+thiserror = "2"
+parking_lot = "0.12"
+subtle = "2"
+gethostname = "1"
+if-addrs = "0.13"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

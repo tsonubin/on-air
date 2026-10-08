@@ -32,4 +32,4 @@ Processed mono L16 at the input/pipeline rate, published on an in-process bus. S
 
 ## Sonos radio
 
-HTTP WAV body at `/stream/audio.wav`. A Sonos delivery adapter on the pipeline PCM bus. Registered only while Sonos is the exclusive output so speakers can GET it without a pairing token.
+HTTP WAV body at `/stream/<nonce>/audio.wav`, where the 32-hex nonce is minted per activation. A Sonos and AirPlay delivery adapter on the pipeline PCM bus. Served only while that output is live, so speakers can GET it without a pairing token and an old URL stops working on the next switch.

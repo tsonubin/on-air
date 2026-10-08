@@ -2,9 +2,10 @@ use crate::api::ws::WsEvent;
 use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::MonoResampler;
 use bytes::Bytes;
+use parking_lot::Mutex;
 use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 
@@ -72,7 +73,7 @@ pub fn spawn_processing_task(
                 continue;
             }
 
-            eq.set_gains_db(*eq_gains_db.lock().unwrap());
+            eq.set_gains_db(*eq_gains_db.lock());
             eq.process(&mut chunk);
 
             if meter_receivers > 0 {

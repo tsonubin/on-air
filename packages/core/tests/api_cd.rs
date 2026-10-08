@@ -53,7 +53,7 @@ async fn insert_autoplays_track_one_and_lists_cd_input() {
     let (status, body) = send(
         app.clone(),
         post_json(
-            "/api/cd",
+            "/api/mock/cd",
             r#"{"present":true,"album":"Kind of Blue","tracks":[{"title":"So What"},{"title":"Freddie Freeloader"}]}"#,
         ),
     )
@@ -65,10 +65,7 @@ async fn insert_autoplays_track_one_and_lists_cd_input() {
     assert_eq!(body["track_count"], 2);
     assert_eq!(body["title"], "So What");
     assert_eq!(body["album"], "Kind of Blue");
-    assert_eq!(
-        state.active_input.lock().unwrap().as_deref(),
-        Some("Audio CD")
-    );
+    assert_eq!(state.active_input.lock().as_deref(), Some("Audio CD"));
 
     let (status, listed) = send(
         app,
@@ -89,7 +86,7 @@ async fn transport_controls_change_track_and_pause() {
     let _ = send(
         app.clone(),
         post_json(
-            "/api/cd",
+            "/api/mock/cd",
             r#"{"present":true,"tracks":[{"title":"A"},{"title":"B"},{"title":"C"}]}"#,
         ),
     )
@@ -128,8 +125,30 @@ async fn transport_controls_change_track_and_pause() {
 #[tokio::test]
 async fn control_without_disc_conflicts() {
     let (app, _) = mock_app().await;
-    let (status, _) = send(app, post_json("/api/cd/control", r#"{"action":"play"}"#)).await;
+    let (status, body) = send(app, post_json("/api/cd/control", r#"{"action":"play"}"#)).await;
     assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "conflict");
+}
+
+#[tokio::test]
+async fn unknown_cd_action_is_a_400_envelope() {
+    let (app, _) = mock_app().await;
+    let _ = send(
+        app.clone(),
+        post_json(
+            "/api/mock/cd",
+            r#"{"present":true,"tracks":[{"title":"A"}]}"#,
+        ),
+    )
+    .await;
+    let (status, body) = send(
+        app,
+        post_json("/api/cd/control", r#"{"action":"rewind-tape"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "invalid_request");
+    assert!(body["error"].is_string());
 }
 
 #[tokio::test]
@@ -138,7 +157,7 @@ async fn insert_lists_per_track_durations() {
     let (status, body) = send(
         app,
         post_json(
-            "/api/cd",
+            "/api/mock/cd",
             r#"{"present":true,"tracks":[{"title":"A","duration_ms":90000},{"title":"B","duration_ms":120000}]}"#,
         ),
     )
@@ -154,7 +173,7 @@ async fn seek_and_goto_update_status() {
     let _ = send(
         app.clone(),
         post_json(
-            "/api/cd",
+            "/api/mock/cd",
             r#"{"present":true,"tracks":[{"title":"A"},{"title":"B"}]}"#,
         ),
     )
@@ -181,13 +200,16 @@ async fn software_eject_clears_the_deck() {
     let (app, state) = mock_app().await;
     let _ = send(
         app.clone(),
-        post_json("/api/cd", r#"{"present":true,"tracks":[{"title":"A"}]}"#),
+        post_json(
+            "/api/mock/cd",
+            r#"{"present":true,"tracks":[{"title":"A"}]}"#,
+        ),
     )
     .await;
     let (status, body) = send(app, post_json("/api/cd/control", r#"{"action":"eject"}"#)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["present"], false);
-    assert!(state.active_input.lock().unwrap().is_none());
+    assert!(state.active_input.lock().is_none());
 }
 
 #[tokio::test]
@@ -195,18 +217,33 @@ async fn eject_clears_cd_input() {
     let (app, state) = mock_app().await;
     let _ = send(
         app.clone(),
-        post_json("/api/cd", r#"{"present":true,"tracks":[{"title":"A"}]}"#),
+        post_json(
+            "/api/mock/cd",
+            r#"{"present":true,"tracks":[{"title":"A"}]}"#,
+        ),
     )
     .await;
-    let (status, body) = send(app, post_json("/api/cd", r#"{"present":false}"#)).await;
+    let (status, body) = send(app, post_json("/api/mock/cd", r#"{"present":false}"#)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["present"], false);
-    assert!(state.active_input.lock().unwrap().is_none());
+    assert!(state.active_input.lock().is_none());
 }
 
 #[tokio::test]
-async fn simulate_on_live_core_is_not_found() {
+async fn simulator_is_not_routed_on_a_live_core() {
     let app = on_air_core::build_router(CoreState::new());
-    let (status, _) = send(app, post_json("/api/cd", r#"{"present":true}"#)).await;
+    let loopback = std::net::SocketAddr::from(([127, 0, 0, 1], 50000));
+    let (status, body) = send(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri("/api/mock/cd")
+            .header("content-type", "application/json")
+            .extension(axum::extract::ConnectInfo(loopback))
+            .body(Body::from(r#"{"present":true}"#))
+            .unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "not_found");
 }

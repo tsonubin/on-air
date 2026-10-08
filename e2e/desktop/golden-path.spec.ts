@@ -7,7 +7,7 @@ test("API golden path: pick input, activate Sonos, volume, EQ", async () => {
   await runGoldenPath(API);
   const eq = await fetch(`${API}/api/eq`).then((r) => r.json());
   expect(eq.gains_db[0]).toBe(3);
-  const active = await fetch(`${API}/api/outputs/active`).then((r) => r.json());
+  const { active } = await fetch(`${API}/api/outputs/active`).then((r) => r.json());
   expect(active.transport).toBe("sonos");
 });
 
@@ -19,7 +19,7 @@ test("API transport switch Sonos -> AirPlay -> Bluetooth", async () => {
 test("desktop UI plays an inserted audio CD", async ({ page }) => {
   const api = process.env.API_BASE ?? "http://127.0.0.1:47990";
   const ui = process.env.UI_BASE ?? "http://127.0.0.1:1420";
-  const inserted = await fetch(`${api}/api/cd`, {
+  const inserted = await fetch(`${api}/api/mock/cd`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -45,7 +45,7 @@ test("desktop UI plays an inserted audio CD", async ({ page }) => {
   await expect(page.getByTestId("cd-track")).toContainText("02/02");
   await page.getByTestId("cd-play").click();
   await expect(page.getByTestId("cd-play")).toHaveAttribute("aria-label", "Play");
-  await fetch(`${api}/api/cd`, {
+  await fetch(`${api}/api/mock/cd`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ present: false }),

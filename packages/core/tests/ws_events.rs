@@ -12,7 +12,8 @@ async fn ws_forwards_published_events_as_json() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let app = on_air_core::build_router(state);
+    let app = on_air_core::build_router(state)
+        .into_make_service_with_connect_info::<std::net::SocketAddr>();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });

@@ -1,26 +1,31 @@
 use crate::dsp::rates;
+use crate::net::{local_lan_ip, local_lan_ip_toward};
 use crate::sender::airplay::AirPlaySender;
 use crate::sender::bluetooth::{
     BluetoothPlaybackConfig, BluetoothSender, PcmOutput, SystemPcmOutput,
 };
-use crate::sender::sonos::{net::local_lan_ip, SonosSender};
+use crate::sender::sonos::SonosSender;
 use crate::sender::{AudioSender, NullSender, SenderError};
 use crate::state::{ActiveOutput, CoreState};
+use std::fmt::Write as _;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ActivateError {
+    #[error("output device not found")]
     NotFound,
-    BadRequest(&'static str),
-    Failed(String),
+    #[error("unknown transport: {0}")]
+    UnknownTransport(String),
+    #[error("{0}")]
+    Unsupported(&'static str),
+    #[error("could not determine the LAN address for the audio stream: {0}")]
+    NoLanAddress(std::io::Error),
+    #[error("{0}")]
+    Discovery(String),
+    #[error(transparent)]
+    Sender(#[from] SenderError),
 }
 
-impl From<SenderError> for ActivateError {
-    fn from(e: SenderError) -> Self {
-        ActivateError::Failed(e.0)
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct OutputInfo {
     pub id: String,
     pub name: String,
@@ -44,7 +49,7 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
             paired: true,
         });
     }
-    for d in state.airplay_outputs.lock().unwrap().iter() {
+    for d in state.airplay_outputs.lock().iter() {
         outputs.push(OutputInfo {
             id: d.id.clone(),
             name: d.name.clone(),
@@ -70,23 +75,51 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     outputs
 }
 
+/// A fresh 32-hex-character path segment. Sonos and AirPlay receivers pull
+/// `/stream/<nonce>/audio.wav`; the nonce changes on every activation so a
+/// LAN host that saw an old URL cannot keep listening.
+pub fn new_stream_nonce() -> String {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).expect("operating-system randomness for stream nonce");
+    let mut nonce = String::with_capacity(32);
+    for byte in bytes {
+        write!(&mut nonce, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    nonce
+}
+
+pub fn stream_url(lan_ip: std::net::IpAddr, nonce: &str) -> String {
+    format!(
+        "http://{lan_ip}:{}/stream/{nonce}/audio.wav",
+        crate::DEFAULT_PORT
+    )
+}
+
+struct Built {
+    sender: Box<dyn AudioSender>,
+    identity: ActiveOutput,
+    stream_nonce: Option<String>,
+}
+
 pub async fn activate(
     state: &CoreState,
     transport: &str,
     device_id: &str,
 ) -> Result<(), ActivateError> {
-    let (sender, identity) = match transport {
+    let built = match transport {
         "sonos" => build_sonos(state, device_id).await?,
         "airplay" => build_airplay(state, device_id)?,
         "bluetooth" => build_bluetooth(state, device_id).await?,
-        _ => return Err(ActivateError::BadRequest("unknown transport")),
+        _ => return Err(ActivateError::UnknownTransport(transport.to_string())),
     };
-    let result = state.activate_sender_as(sender, Some(identity)).await;
+    let result = state
+        .activate_sender_streaming(built.sender, Some(built.identity), built.stream_nonce)
+        .await;
     if transport == "bluetooth" {
         state.invalidate_bluetooth_cache().await;
     }
-    result.map_err(ActivateError::from)?;
-    let active = state.active_output.lock().unwrap().clone();
+    result?;
+    let active = state.active_output.lock().clone();
     if let Some(active) = active {
         state.remember_output(active);
     }
@@ -101,9 +134,7 @@ pub async fn activate(
 }
 
 pub async fn set_volume(state: &CoreState, volume: u8) -> Result<(), ActivateError> {
-    set_active_sender_volume(state, volume)
-        .await
-        .map_err(ActivateError::from)?;
+    set_active_sender_volume(state, volume).await?;
     state.remember_volume(volume);
     Ok(())
 }
@@ -112,19 +143,16 @@ async fn set_active_sender_volume(state: &CoreState, volume: u8) -> Result<(), S
     let mut guard = state.active_sender.lock().await;
     match guard.as_mut() {
         Some(sender) => sender.set_volume(volume).await,
-        None => Err(SenderError("no active output".into())),
+        None => Err(SenderError::NoActiveOutput),
     }
 }
 
 fn snap_output_rate(state: &CoreState, transport: &str) {
-    let mut current = state.output_sample_rate_hz.lock().unwrap();
+    let mut current = state.output_sample_rate_hz.lock();
     *current = rates::snap_rate(*current, rates::transport_rates(transport));
 }
 
-async fn build_sonos(
-    state: &CoreState,
-    device_id: &str,
-) -> Result<(Box<dyn AudioSender>, ActiveOutput), ActivateError> {
+async fn build_sonos(state: &CoreState, device_id: &str) -> Result<Built, ActivateError> {
     snap_output_rate(state, "sonos");
     let device = {
         let registry = state.outputs.lock().await;
@@ -138,46 +166,41 @@ async fn build_sonos(
         device_id: device_id.to_string(),
         device_name: device.friendly_name.clone(),
     };
+    let nonce = new_stream_nonce();
     if state.mock {
-        return Ok((
-            Box::new(NullSender::new(
+        return Ok(Built {
+            sender: Box::new(NullSender::new(
                 device.friendly_name,
                 state.mock_log.clone(),
             )),
             identity,
-        ));
+            stream_nonce: Some(nonce),
+        });
     }
-    let lan_ip = crate::sender::sonos::net::local_lan_ip_toward(device.ip)
+    let lan_ip = local_lan_ip_toward(device.ip)
         .or_else(|_| local_lan_ip())
-        .map_err(|e| ActivateError::Failed(e.to_string()))?;
-    let stream_url = format!("http://{lan_ip}:{}/stream/audio.wav", crate::DEFAULT_PORT);
-    Ok((
-        Box::new(
-            SonosSender::new(
-                device,
-                crate::sender::sonos::soap::http_client(),
-                stream_url,
-            )
-            .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone()),
+        .map_err(ActivateError::NoLanAddress)?;
+    let url = stream_url(lan_ip, &nonce);
+    Ok(Built {
+        sender: Box::new(
+            SonosSender::new(device, crate::sender::sonos::soap::http_client(), url)
+                .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone()),
         ),
         identity,
-    ))
+        stream_nonce: Some(nonce),
+    })
 }
 
-fn build_airplay(
-    state: &CoreState,
-    device_id: &str,
-) -> Result<(Box<dyn AudioSender>, ActiveOutput), ActivateError> {
+fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateError> {
     snap_output_rate(state, "airplay");
     if crate::sender::airplay::platform_mode() == "avroute-picker" && !state.mock {
-        return Err(ActivateError::BadRequest(
+        return Err(ActivateError::Unsupported(
             "macOS AirPlay is local-picker only",
         ));
     }
     let device = state
         .airplay_outputs
         .lock()
-        .unwrap()
         .iter()
         .find(|d| d.id == device_id)
         .cloned();
@@ -189,37 +212,37 @@ fn build_airplay(
         device_id: device.id.clone(),
         device_name: device.name.clone(),
     };
+    let nonce = new_stream_nonce();
     if state.mock {
-        return Ok((
-            Box::new(NullSender::new(device.name, state.mock_log.clone())),
+        return Ok(Built {
+            sender: Box::new(NullSender::new(device.name, state.mock_log.clone())),
             identity,
-        ));
+            stream_nonce: Some(nonce),
+        });
     }
-    let base = state.owntone_base.lock().unwrap().clone();
+    let base = state.owntone_base.lock().clone();
     let peer: std::net::IpAddr = device
         .address
         .parse()
         .unwrap_or_else(|_| std::net::IpAddr::from([8, 8, 8, 8]));
-    let lan_ip = crate::sender::sonos::net::local_lan_ip_toward(peer)
-        .or_else(|_| crate::sender::sonos::net::local_lan_ip())
-        .map_err(|e| ActivateError::Failed(e.to_string()))?;
-    let stream_url = format!("http://{lan_ip}:{}/stream/audio.wav", crate::DEFAULT_PORT);
-    Ok((
-        Box::new(
-            AirPlaySender::new(device.name, device.id, base).with_radio(stream_url, device.address),
+    let lan_ip = local_lan_ip_toward(peer)
+        .or_else(|_| local_lan_ip())
+        .map_err(ActivateError::NoLanAddress)?;
+    let url = stream_url(lan_ip, &nonce);
+    Ok(Built {
+        sender: Box::new(
+            AirPlaySender::new(device.name, device.id, base).with_radio(url, device.address),
         ),
         identity,
-    ))
+        stream_nonce: Some(nonce),
+    })
 }
 
-async fn build_bluetooth(
-    state: &CoreState,
-    device_id: &str,
-) -> Result<(Box<dyn AudioSender>, ActiveOutput), ActivateError> {
+async fn build_bluetooth(state: &CoreState, device_id: &str) -> Result<Built, ActivateError> {
     let device = state
         .bluetooth_devices()
         .await
-        .map_err(ActivateError::Failed)?
+        .map_err(ActivateError::Discovery)?
         .into_iter()
         .find(|d| d.id == device_id || d.audio_endpoint.as_deref() == Some(device_id));
     let Some(device) = device else {
@@ -236,14 +259,14 @@ async fn build_bluetooth(
         std::sync::Arc::new(SystemPcmOutput)
     };
     let config = BluetoothPlaybackConfig {
-        pipeline_hz: *state.target_sample_rate_hz.lock().unwrap(),
-        output_hz: *state.output_sample_rate_hz.lock().unwrap(),
+        pipeline_hz: *state.target_sample_rate_hz.lock(),
+        output_hz: *state.output_sample_rate_hz.lock(),
         volume: state
             .output_volume
             .load(std::sync::atomic::Ordering::Acquire),
     };
-    Ok((
-        Box::new(BluetoothSender::new(
+    Ok(Built {
+        sender: Box::new(BluetoothSender::new(
             device,
             state.bluetooth.clone(),
             state.audio_tx.clone(),
@@ -251,5 +274,6 @@ async fn build_bluetooth(
             config,
         )),
         identity,
-    ))
+        stream_nonce: None,
+    })
 }

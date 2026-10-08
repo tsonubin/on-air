@@ -11,7 +11,9 @@ pub mod api;
 pub mod auth;
 pub mod cd;
 pub mod dsp;
+pub mod http;
 pub mod mdns;
+pub mod net;
 pub mod pairing;
 pub mod pipeline;
 pub mod sender;
@@ -29,6 +31,9 @@ pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub service_enabled: bool,
+    /// Non-loopback IPv4 addresses of this host, so the desktop can show the
+    /// address a phone must type. Empty when unknown.
+    pub lan_addresses: Vec<String>,
 }
 
 pub fn status() -> StatusResponse {
@@ -40,6 +45,7 @@ pub fn status_with_service(service_enabled: bool) -> StatusResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
         service_enabled,
+        lan_addresses: net::lan_addresses(),
     }
 }
 
@@ -51,10 +57,10 @@ pub fn build_router(state: CoreState) -> Router {
         HeaderValue::from_static("http://tauri.localhost"),
         HeaderValue::from_static("https://tauri.localhost"),
     ];
-    Router::new()
+    let mut router = Router::new()
         .route("/api/status", get(status_handler))
-        .route("/stream/audio.wav", get(api::stream::stream_audio))
-        .route("/api/cd", get(api::cd::get_cd).post(api::cd::simulate_cd))
+        .route("/stream/:nonce/audio.wav", get(api::stream::stream_audio))
+        .route("/api/cd", get(api::cd::get_cd))
         .route("/api/cd/control", post(api::cd::control_cd))
         .route("/api/inputs", get(api::inputs::list_inputs))
         .route(
@@ -64,7 +70,9 @@ pub fn build_router(state: CoreState) -> Router {
         .route("/api/outputs", get(api::outputs::list_outputs))
         .route(
             "/api/outputs/active",
-            post(api::outputs::activate_output).get(api::outputs::get_active_output),
+            post(api::outputs::activate_output)
+                .get(api::outputs::get_active_output)
+                .delete(api::outputs::deactivate_output),
         )
         .route(
             "/api/outputs/active/volume",
@@ -89,11 +97,18 @@ pub fn build_router(state: CoreState) -> Router {
         .route(
             "/api/bluetooth/settings",
             post(api::bluetooth::open_settings),
-        )
+        );
+    if state.mock {
+        // The disc simulator never exists on a production core.
+        router = router.route("/api/mock/cd", post(api::cd::simulate_cd));
+    }
+    router
+        .fallback(api::error::route_not_found)
+        .method_not_allowed_fallback(api::error::method_not_allowed)
         .layer(
             CorsLayer::new()
                 .allow_origin(allowed_origins)
-                .allow_methods([Method::GET, Method::POST, Method::PUT])
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
                 .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]),
         )
         .with_state(state)
@@ -121,11 +136,16 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
 }
 
 pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::io::Result<()> {
-    let _mdns = crate::mdns::spawn_advertisement(DEFAULT_PORT, env!("CARGO_PKG_VERSION"));
+    let port = listener.local_addr()?.port();
     if !state.mock {
-        let _sonos = state.spawn_sonos_discovery();
-        let _airplay = state.spawn_airplay_discovery();
-        let _cd = crate::api::cd::spawn_watch(state.clone());
+        let mut background = state.background.lock();
+        background.set_mdns(crate::mdns::spawn_advertisement(
+            port,
+            env!("CARGO_PKG_VERSION"),
+        ));
+        background.push(state.spawn_sonos_discovery());
+        background.push(state.spawn_airplay_discovery());
+        background.push(crate::api::cd::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
     axum::serve(
@@ -146,4 +166,26 @@ pub async fn serve_with_state_std(
 pub async fn serve_on(addr: SocketAddr) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     serve(listener).await
+}
+
+/// Entry point shared by the `on-air-core` binary and the `serve` example:
+/// `PORT` (default [`DEFAULT_PORT`]), `BIND` (default `0.0.0.0` so a Sonos
+/// on the LAN can pull the radio stream; set `127.0.0.1` to keep the control
+/// plane loopback-only) and `ON_AIR_MOCK=1` for the hardware-free core.
+pub fn run_serve() {
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
+    let host: std::net::IpAddr = std::env::var("BIND")
+        .ok()
+        .and_then(|b| b.parse().ok())
+        .unwrap_or_else(|| std::net::IpAddr::from([0, 0, 0, 0]));
+    let addr = SocketAddr::from((host, port));
+    eprintln!(
+        "on-air-core listening on http://{addr} mock={}",
+        mock_mode_enabled()
+    );
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+    runtime.block_on(serve_on(addr)).expect("serve");
 }

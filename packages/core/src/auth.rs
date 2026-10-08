@@ -1,8 +1,8 @@
+use crate::api::error::ApiError;
 use crate::pairing::PairingState;
 use crate::state::CoreState;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
-use axum::http::StatusCode;
 use std::sync::atomic::Ordering;
 
 fn bearer_token(authorization: Option<&str>) -> Option<&str> {
@@ -26,11 +26,10 @@ fn query_token(query: Option<&str>) -> Option<String> {
     None
 }
 
+/// Routes a speaker or an unpaired phone must reach: status, the PIN
+/// handshake and the radio stream (`/stream/<nonce>/audio.wav`).
 pub fn is_public_path(path: &str) -> bool {
-    matches!(
-        path,
-        "/api/status" | "/api/pairing/verify" | "/stream/audio.wav"
-    )
+    matches!(path, "/api/status" | "/api/pairing/verify") || path.starts_with("/stream/")
 }
 
 /// Desktop loopback is allowed without a token. Remote clients must present a
@@ -40,7 +39,6 @@ pub fn authorize(
     authorization: Option<&str>,
     peer_is_loopback: bool,
     pairing: &PairingState,
-    require_token: bool,
 ) -> bool {
     if is_public_path(path) {
         return true;
@@ -49,9 +47,6 @@ pub fn authorize(
         if pairing.token_valid(token) {
             return true;
         }
-    }
-    if require_token {
-        return false;
     }
     peer_is_loopback
 }
@@ -71,6 +66,9 @@ fn trusted_desktop_origin(origin: Option<&str>) -> bool {
     })
 }
 
+/// Whether the TCP peer is loopback. `allow_missing` decides what to do when
+/// the server was not built with `ConnectInfo` (only the mock core, used by
+/// in-process tests, is allowed to treat that as loopback).
 fn peer_is_loopback(parts: &Parts, allow_missing: bool) -> bool {
     parts
         .extensions
@@ -81,14 +79,14 @@ fn peer_is_loopback(parts: &Parts, allow_missing: bool) -> bool {
 
 #[async_trait::async_trait]
 impl FromRequestParts<CoreState> for Paired {
-    type Rejection = StatusCode;
+    type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &CoreState,
     ) -> Result<Self, Self::Rejection> {
         if !state.service_enabled.load(Ordering::Acquire) {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
+            return Err(ApiError::service_paused());
         }
         let path = parts.uri.path();
         let header = parts
@@ -101,17 +99,18 @@ impl FromRequestParts<CoreState> for Paired {
             .headers
             .get(axum::http::header::ORIGIN)
             .and_then(|v| v.to_str().ok());
-        let connect_loopback = peer_is_loopback(parts, true) && trusted_desktop_origin(origin);
+        let connect_loopback =
+            peer_is_loopback(parts, state.mock) && trusted_desktop_origin(origin);
         let peer_is_loopback = if state.require_auth {
             false
         } else {
             connect_loopback
         };
-        let pairing = state.pairing.lock().unwrap();
-        if authorize(path, authorization, peer_is_loopback, &pairing, false) {
+        let pairing = state.pairing.lock();
+        if authorize(path, authorization, peer_is_loopback, &pairing) {
             Ok(Paired)
         } else {
-            Err(StatusCode::UNAUTHORIZED)
+            Err(ApiError::not_paired())
         }
     }
 }
@@ -122,14 +121,14 @@ pub struct LocalClient;
 
 #[async_trait::async_trait]
 impl FromRequestParts<CoreState> for LocalClient {
-    type Rejection = StatusCode;
+    type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &CoreState,
     ) -> Result<Self, Self::Rejection> {
         if !state.service_enabled.load(Ordering::Acquire) {
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
+            return Err(ApiError::service_paused());
         }
         let origin = parts
             .headers
@@ -138,7 +137,9 @@ impl FromRequestParts<CoreState> for LocalClient {
         if peer_is_loopback(parts, state.mock) && trusted_desktop_origin(origin) {
             Ok(LocalClient)
         } else {
-            Err(StatusCode::FORBIDDEN)
+            Err(ApiError::forbidden(
+                "this endpoint is only available to the desktop app",
+            ))
         }
     }
 }
