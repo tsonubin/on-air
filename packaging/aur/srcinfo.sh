@@ -39,11 +39,12 @@ fi
   [ -n "${options+x}" ] && field options "${options[@]}"
   [ -n "${source+x}" ] && field source "${source[@]}"
   [ -n "${sha256sums+x}" ] && field sha256sums "${sha256sums[@]}"
+  # Indirect expansion rather than namerefs, which macOS's Bash 3.2 lacks.
   for a in "${arch[@]}"; do
-    declare -n s="source_$a" sums="sha256sums_$a"
-    [ -n "${s+x}" ] && field "source_$a" "${s[@]}"
-    [ -n "${sums+x}" ] && field "sha256sums_$a" "${sums[@]}"
-    unset -n s sums
+    for key in "source_$a" "sha256sums_$a"; do
+      ref="$key[@]"
+      [ -n "${!key+x}" ] && field "$key" "${!ref}"
+    done
   done
   printf '\npkgname = %s\n' "$pkgname"
 )

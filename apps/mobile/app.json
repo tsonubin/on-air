@@ -28,6 +28,7 @@
     },
     "android": {
       "package": "app.onair.remote",
+      "versionCode": 2,
       "permissions": ["ACCESS_NETWORK_STATE", "CHANGE_WIFI_MULTICAST_STATE", "INTERNET"]
     },
     "plugins": ["expo-secure-store", "expo-router"],

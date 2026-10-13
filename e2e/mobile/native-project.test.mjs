@@ -33,6 +33,8 @@ test("native identifiers and versions stay aligned with Expo config", () => {
   assert.match(androidApp, new RegExp(`namespace ["']${identifier}["']`));
   assert.match(androidApp, new RegExp(`applicationId ["']${identifier}["']`));
   assert.match(androidApp, new RegExp(`versionName ["']${version.replaceAll(".", "\\.")}["']`));
+  assert.ok(Number.isInteger(appConfig.android.versionCode));
+  assert.match(androidApp, new RegExp(`versionCode ${appConfig.android.versionCode}\\n`));
   assert.match(iosProject, new RegExp(`MARKETING_VERSION = ${version.replaceAll(".", "\\.")};`));
   assert.match(
     iosProject,
