@@ -116,6 +116,9 @@ jobs:
           echo "tag=v${version}" >> "$GITHUB_OUTPUT"
       - name: Build headless core binary
         run: cargo build --locked -p on-air-core --release --bin on-air-core --target ${{ matrix.rust_target }}
+      - name: Build terminal UI
+        if: matrix.os_name == 'linux'
+        run: cargo build --locked -p on-air-tui --release --bin on-air --target ${{ matrix.rust_target }}
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -198,6 +201,15 @@ jobs:
           else
             core_src="target/${rust_target}/release/on-air-core"
             core_dest="dist-extra/on-air-core-serve-${os_name}-${arch_name}"
+          fi
+
+          if [ "$os_name" = linux ]; then
+            tui_src="target/${rust_target}/release/on-air"
+            if [ ! -f "$tui_src" ]; then
+              echo "on-air terminal UI binary not found at $tui_src" >&2
+              exit 1
+            fi
+            cp "$tui_src" "dist-extra/on-air-tui-${os_name}-${arch_name}"
           fi
 
           if [ ! -f "$core_src" ]; then

@@ -50,6 +50,10 @@ nsis_x64=$(try_hash "on-air-desktop_${VERSION}_x64-setup.exe" || true)
 msi_x64=$(try_hash "on-air-desktop_${VERSION}_x64_en-US.msi" || true)
 nsis_arm64=$(try_hash "on-air-desktop_${VERSION}_arm64-setup.exe" || true)
 msi_arm64=$(try_hash "on-air-desktop_${VERSION}_arm64_en-US.msi" || true)
+# The terminal UI binaries are source-built by the Arch recipe; they are
+# checked here only so a missing release asset is reported.
+tui_x86=$(try_hash "on-air-tui-linux-x86_64" || true)
+tui_arm=$(try_hash "on-air-tui-linux-aarch64" || true)
 
 if [ -n "${dmg_arm:-}" ] && [ -n "${dmg_intel:-}" ]; then
   python3 - "$root/Casks/on-air.rb" "$dmg_arm" "$dmg_intel" <<'PY'
