@@ -127,7 +127,13 @@ async fn a_snapshot_loads_every_part_from_the_mock_core() {
     assert_eq!(snap.volume, 50);
     assert!(snap.rates.is_some());
     assert_eq!(snap.cd.as_ref().map(|cd| cd.present), Some(false));
-    assert_eq!(snap.airplay_mode.as_deref(), Some("owntone"));
+    // The core picks the AirPlay strategy per platform.
+    let expected_mode = if cfg!(target_os = "macos") {
+        "avroute-picker"
+    } else {
+        "owntone"
+    };
+    assert_eq!(snap.airplay_mode.as_deref(), Some(expected_mode));
 }
 
 #[tokio::test]

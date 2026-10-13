@@ -94,6 +94,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_session_with_none_of_them_reports_failure() {
         assert!(!spawn_first(&[("on-air-no-such-program", &[])]));
