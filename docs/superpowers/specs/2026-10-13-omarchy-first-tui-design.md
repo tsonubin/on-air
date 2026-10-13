@@ -278,9 +278,11 @@ When the service is off, the three panes render dimmed and only `s`, `a`,
 When the core is unreachable the header says so and the client keeps
 retrying; the last snapshot stays on screen dimmed.
 
-"Say what's wrong in the window": a missing backend (no `pactl`, no
-`bluetoothctl`, no pyatv or OwnTone) or a refused inhibitor is shown as a
-one-line notice under the header, not hidden in a log.
+"Say what's wrong in the window": a refused sleep inhibitor is a one-line
+notice under the header, and every failed action shows the core's mapped
+error copy in the banner, never only in a log. (A missing backend such as
+`pactl` or `bluetoothctl` surfaces the same way, through the core's error
+envelope when an action needs it.)
 
 ### Theme
 
