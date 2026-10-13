@@ -57,6 +57,13 @@ pub async fn activate_output(
     JsonBody(req): JsonBody<ActivateOutputRequest>,
 ) -> Result<StatusCode, ApiError> {
     let _configuration = state.config_lock.lock().await;
+    // The service may have been turned off while this request waited.
+    if !state
+        .service_enabled
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(ApiError::service_paused());
+    }
     session::activate(&state, &req.transport, &req.device_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -173,6 +173,18 @@ fn persistent_state_from_env() -> CoreState {
 }
 
 pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::io::Result<()> {
+    serve_with_state_until(listener, state, std::future::pending()).await
+}
+
+/// Serve until `shutdown` resolves, then stop the audio work, the
+/// background tasks and the sleep inhibitor before returning. This is the
+/// path `systemctl --user stop` takes; without it the laptop speakers could
+/// stay muted. Open connections (a TUI's event socket) are not waited for.
+pub async fn serve_with_state_until(
+    listener: TcpListener,
+    state: CoreState,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> std::io::Result<()> {
     let port = listener.local_addr()?.port();
     state.serve_port.store(port, Ordering::Release);
     if !state.mock {
@@ -187,11 +199,41 @@ pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::i
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
-    axum::serve(
+    let server = axum::serve(
         listener,
-        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
+        build_router(state.clone()).into_make_service_with_connect_info::<SocketAddr>(),
+    );
+    tokio::select! {
+        result = std::future::IntoFuture::into_future(server) => result?,
+        () = shutdown => {}
+    }
+    state.shutdown().await;
+    state.abort_background_tasks();
+    state.keep_awake.set_enabled(false);
+    Ok(())
+}
+
+/// SIGTERM (systemd stop, logout) or Ctrl-C.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = terminate.recv() => {}
+                    _ = tokio::signal::ctrl_c() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 pub async fn serve_with_state_std(
@@ -226,5 +268,15 @@ pub fn run_serve() {
         mock_mode_enabled()
     );
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-    runtime.block_on(serve_on(addr)).expect("serve");
+    runtime
+        .block_on(async {
+            let listener = TcpListener::bind(addr).await?;
+            let state = if mock_mode_enabled() {
+                CoreState::new_mock().await
+            } else {
+                persistent_state_from_env()
+            };
+            serve_with_state_until(listener, state, shutdown_signal()).await
+        })
+        .expect("serve");
 }

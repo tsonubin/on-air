@@ -68,6 +68,12 @@ pub trait Inhibitor: Send {
     /// Lets the machine sleep again. Must return promptly: the caller may be
     /// the tray event thread or the exit path.
     fn release(self: Box<Self>);
+
+    /// Whether the inhibitor still holds. A helper process can start and
+    /// then exit at once, which is how a refused logind lock looks.
+    fn is_alive(&mut self) -> bool {
+        true
+    }
 }
 
 /// Starts inhibitors. The production implementation talks to the OS; tests
@@ -116,6 +122,10 @@ impl InhibitorSpawner for SystemSpawner {
 struct ProcessInhibitor(std::process::Child);
 
 impl Inhibitor for ProcessInhibitor {
+    fn is_alive(&mut self) -> bool {
+        matches!(self.0.try_wait(), Ok(None))
+    }
+
     fn release(self: Box<Self>) {
         let mut child = self.0;
         let _ = child.kill();
@@ -206,7 +216,11 @@ impl KeepAwake {
     /// Whether a platform inhibitor is actually held right now: false when
     /// disabled, when this platform has no method, or when the OS refused it.
     pub fn is_holding(&self) -> bool {
-        self.active.lock().unwrap().is_some()
+        self.active
+            .lock()
+            .unwrap()
+            .as_mut()
+            .is_some_and(|inhibitor| inhibitor.is_alive())
     }
 
     /// Idempotent; releasing never blocks the caller.
@@ -418,6 +432,30 @@ mod tests {
         assert!(keep_awake.is_enabled());
         assert!(!keep_awake.is_holding());
         assert_eq!(spawner.events(), vec![Event::Started(fake_method())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_that_exits_at_once_is_not_holding() {
+        // logind refusing the lock looks like this: systemd-inhibit starts,
+        // prints "Access denied" and exits.
+        let refused = InhibitMethod::Process {
+            program: "false".into(),
+            args: vec![],
+        };
+        let keep_awake = KeepAwake::with_spawner(Some(refused), Box::new(SystemSpawner), true);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(keep_awake.is_enabled());
+        assert!(!keep_awake.is_holding(), "a dead helper holds nothing");
+
+        let alive = InhibitMethod::Process {
+            program: "sleep".into(),
+            args: vec!["30".into()],
+        };
+        let keep_awake = KeepAwake::with_spawner(Some(alive), Box::new(SystemSpawner), true);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(keep_awake.is_holding());
+        keep_awake.set_enabled(false);
     }
 
     #[test]

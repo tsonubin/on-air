@@ -28,7 +28,12 @@ pub async fn set_service(
     JsonBody(body): JsonBody<SetServiceRequest>,
 ) -> Json<ServiceResponse> {
     let transition = state.begin_service_transition(body.enabled);
-    state.finish_service_transition(transition).await;
+    // Detached so a client that disconnects (the TUI quitting right after
+    // `s`, a killed CLI) cannot cancel the shutdown halfway, the same
+    // guarantee `run_detached` gives output switches.
+    let finishing = state.clone();
+    let _ =
+        tokio::spawn(async move { finishing.finish_service_transition(transition).await }).await;
     Json(ServiceResponse {
         enabled: state
             .service_enabled

@@ -115,6 +115,9 @@ pub struct CoreState {
     pub service_enabled: Arc<AtomicBool>,
     /// The platform sleep inhibitor, held exactly while the service is on.
     pub keep_awake: Arc<KeepAwake>,
+    /// Serializes service on/off so the flag, the saved settings, the last
+    /// event clients saw and the inhibitor always agree.
+    service_lock: Arc<StdMutex<()>>,
     saved_settings: Arc<StdMutex<SavedSettings>>,
     settings_persistence: Option<SettingsPersistence>,
     settings_revision: Arc<AtomicU64>,
@@ -234,6 +237,7 @@ impl CoreState {
             output_volume: Arc::new(AtomicU8::new(saved_settings.volume)),
             service_enabled: Arc::new(AtomicBool::new(saved_settings.service_enabled)),
             keep_awake: Arc::new(KeepAwake::system(saved_settings.service_enabled)),
+            service_lock: Arc::new(StdMutex::new(())),
             saved_settings: Arc::new(StdMutex::new(saved_settings)),
             settings_persistence,
             settings_revision: Arc::new(AtomicU64::new(0)),
@@ -469,10 +473,11 @@ impl CoreState {
     }
 
     /// The synchronous half of a service change: claim the flag, persist it,
-    /// tell WebSocket clients, then hold or release the sleep inhibitor.
-    /// Claiming is one atomic step so two concurrent requests for the same
-    /// state cannot both run the side effects.
+    /// tell WebSocket clients, then hold or release the sleep inhibitor. The
+    /// whole step runs under one lock so concurrent on and off requests
+    /// apply in a single order.
     pub fn begin_service_transition(&self, enabled: bool) -> ServiceTransition {
+        let _serial = self.service_lock.lock();
         if self
             .service_enabled
             .compare_exchange(!enabled, enabled, Ordering::AcqRel, Ordering::Acquire)
@@ -491,7 +496,13 @@ impl CoreState {
     pub async fn finish_service_transition(&self, transition: ServiceTransition) {
         match transition {
             ServiceTransition::Unchanged => {}
-            ServiceTransition::TurnOff => self.shutdown().await,
+            ServiceTransition::TurnOff => {
+                self.shutdown().await;
+                // Turned back on while audio was stopping: bring it back.
+                if self.service_enabled.load(Ordering::Acquire) {
+                    self.spawn_saved_session_restore();
+                }
+            }
             ServiceTransition::TurnOn => {
                 self.spawn_saved_session_restore();
             }
@@ -692,6 +703,73 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn concurrent_service_toggles_leave_flag_settings_and_inhibitor_agreeing() {
+        for round in 0..300 {
+            let (keep_awake, _spawner) = crate::keep_awake::testing::recording(true);
+            let state = CoreState::new().with_keep_awake(keep_awake);
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let (a, b) = (state.clone(), state.clone());
+            let (ba, bb) = (barrier.clone(), barrier.clone());
+            let off = std::thread::spawn(move || {
+                ba.wait();
+                a.begin_service_transition(false);
+            });
+            let on = std::thread::spawn(move || {
+                bb.wait();
+                b.begin_service_transition(true);
+            });
+            off.join().unwrap();
+            on.join().unwrap();
+            let live = state.service_enabled.load(Ordering::Acquire);
+            assert_eq!(
+                state.saved_settings.lock().service_enabled,
+                live,
+                "round {round}: saved flag disagrees with the live flag"
+            );
+            assert_eq!(
+                state.keep_awake.is_enabled(),
+                live,
+                "round {round}: inhibitor disagrees with the live flag"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_activation_queued_behind_a_switch_is_refused_once_the_service_is_off() {
+        let state = CoreState::new_mock().await;
+        let app = crate::build_router(state.clone());
+        let held = state.config_lock.clone().lock_owned().await;
+        let request = tokio::spawn({
+            use tower::ServiceExt;
+            let app = app.clone();
+            async move {
+                app.oneshot(
+                    axum::http::Request::builder()
+                        .method("POST")
+                        .uri("/api/outputs/active")
+                        .header("content-type", "application/json")
+                        .body(axum::body::Body::from(
+                            r#"{"transport":"sonos","device_id":"uuid:mock-sonos"}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+            }
+        });
+        // Let the request pass the service gate and queue on the lock.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        state.begin_service_transition(false);
+        drop(held);
+        assert_eq!(
+            request.await.unwrap(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(state.active_output().is_none());
+    }
 
     #[test]
     fn a_new_state_holds_the_inhibitor_only_while_the_service_is_on() {

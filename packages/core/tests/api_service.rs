@@ -136,3 +136,28 @@ async fn concurrent_toggles_leave_flag_and_inhibitor_in_step() {
     );
     assert!(!state.sleep_inhibited());
 }
+
+#[tokio::test]
+async fn turning_off_finishes_even_if_the_client_goes_away() {
+    let (app, state) = mock_app().await;
+    let (status, _) = send(
+        app.clone(),
+        post_json(
+            "/api/outputs/active",
+            r#"{"transport":"sonos","device_id":"uuid:mock-sonos"}"#,
+        ),
+    )
+    .await;
+    assert!(status.is_success());
+    // Poll the request once, so the handler starts stopping audio, then
+    // drop it the way hyper does when the client disconnects.
+    let mut request = Box::pin(app.oneshot(put_json("/api/service", r#"{"enabled":false}"#)));
+    let _ = futures_util::poll!(&mut request);
+    drop(request);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(!state.service_enabled.load(Ordering::Acquire));
+    assert!(
+        state.active_output().is_none(),
+        "the output must still be stopped after the client left"
+    );
+}

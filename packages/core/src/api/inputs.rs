@@ -72,6 +72,13 @@ pub async fn activate_input(
     JsonBody(req): JsonBody<ActivateInputRequest>,
 ) -> Result<StatusCode, ApiError> {
     let _configuration = state.config_lock.lock().await;
+    // The service may have been turned off while this request waited.
+    if !state
+        .service_enabled
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(ApiError::service_paused());
+    }
     state.activate_input_locked(&req.name).await?;
     Ok(StatusCode::NO_CONTENT)
 }
