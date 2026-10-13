@@ -10,3 +10,4 @@ pub mod error_copy;
 pub mod keys;
 pub mod model;
 pub mod update;
+pub mod view;
