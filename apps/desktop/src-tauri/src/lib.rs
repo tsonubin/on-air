@@ -19,9 +19,7 @@ mod macos_airplay;
 mod tray_icon;
 mod window_presentation;
 
-use on_air_core::api::ws::WsEvent;
-use on_air_core::keep_awake::KeepAwake;
-use on_air_core::state::CoreState;
+use on_air_core::state::{CoreState, ServiceTransition};
 use window_presentation::WindowPresentation;
 
 struct AutostartMenu(CheckMenuItem<tauri::Wry>);
@@ -75,21 +73,6 @@ fn set_service_enabled(app: tauri::AppHandle, enabled: bool) -> Result<bool, Str
     apply_service_enabled(&app, enabled)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ServiceTransition {
-    Unchanged,
-    TurnOn,
-    TurnOff,
-}
-
-fn service_transition(current: bool, requested: bool) -> ServiceTransition {
-    match (current, requested) {
-        (false, true) => ServiceTransition::TurnOn,
-        (true, false) => ServiceTransition::TurnOff,
-        _ => ServiceTransition::Unchanged,
-    }
-}
-
 /// Label of the tray item that toggles the service.
 fn service_menu_label(enabled: bool) -> &'static str {
     if enabled {
@@ -99,75 +82,45 @@ fn service_menu_label(enabled: bool) -> &'static str {
     }
 }
 
-/// The core-side effects of a service change, in order: persist the flag,
-/// tell WebSocket clients, then hold or release the sleep inhibitor.
-fn apply_service_transition(
-    state: &CoreState,
-    keep_awake: &KeepAwake,
-    transition: ServiceTransition,
-) {
-    let enabled = match transition {
-        ServiceTransition::Unchanged => return,
-        ServiceTransition::TurnOn => true,
-        ServiceTransition::TurnOff => false,
-    };
-    state.set_service_enabled(enabled);
-    let _ = state.ws_tx.send(WsEvent::ServiceStateChanged { enabled });
-    keep_awake.set_enabled(enabled);
-}
-
-/// Shared by the tray item and the `set_service_enabled` command so both
-/// keep the core, the inhibitor, the tray label and the window in step.
+/// Shared by the tray item and the `set_service_enabled` command. The core
+/// owns the transition (flag, clients, inhibitor, audio work); the shell
+/// keeps only the tray label and the window event in step with it.
 fn apply_service_enabled(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     let state = app
         .try_state::<CoreState>()
         .ok_or("the on-air service is not running in this process")?;
-    let keep_awake = app
-        .try_state::<KeepAwake>()
-        .ok_or("the on-air service is not running in this process")?;
-    let transition = service_transition(state.service_enabled.load(Ordering::Acquire), enabled);
+    let transition = state.begin_service_transition(enabled);
     if transition == ServiceTransition::Unchanged {
         return Ok(enabled);
     }
-    apply_service_transition(&state, &keep_awake, transition);
     let menu = app.try_state::<ServiceMenu>();
     if let Some(menu) = &menu {
         let _ = menu.0.set_text(service_menu_label(enabled));
     }
     let _ = app.emit("service-changed", enabled);
-    match transition {
-        ServiceTransition::TurnOff => {
-            // Keep the item unclickable until the audio resources are down.
-            let menu = menu.map(|menu| menu.0.clone());
-            if let Some(menu) = &menu {
-                let _ = menu.set_enabled(false);
-            }
-            let state = state.inner().clone();
-            tauri::async_runtime::spawn(async move {
-                state.shutdown().await;
-                if let Some(menu) = menu {
-                    let _ = menu.set_enabled(true);
-                }
-            });
-        }
-        ServiceTransition::TurnOn => {
-            state.spawn_saved_session_restore();
-        }
-        ServiceTransition::Unchanged => {}
+    // Keep the item unclickable until the audio resources are down.
+    let menu = menu
+        .filter(|_| transition == ServiceTransition::TurnOff)
+        .map(|menu| menu.0.clone());
+    if let Some(menu) = &menu {
+        let _ = menu.set_enabled(false);
     }
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn(async move {
+        state.finish_service_transition(transition).await;
+        if let Some(menu) = menu {
+            let _ = menu.set_enabled(true);
+        }
+    });
     Ok(enabled)
 }
 
 /// Everything between an exit request and process exit, in order: stop the
 /// audio resources, release the sleep inhibitor, then exit. The inhibitor is
 /// a child process on macOS and Linux, so skipping this leaves it running.
-async fn finish_exit(
-    shutdown: impl Future<Output = ()>,
-    keep_awake: &KeepAwake,
-    exit: impl FnOnce(),
-) {
+async fn finish_exit(shutdown: impl Future<Output = ()>, core: &CoreState, exit: impl FnOnce()) {
     shutdown.await;
-    keep_awake.set_enabled(false);
+    core.keep_awake.set_enabled(false);
     exit();
 }
 
@@ -421,7 +374,6 @@ pub fn run() {
             let service_on = state.service_enabled.load(Ordering::Acquire);
             app.manage(state.clone());
             app.manage(ShutdownStarted(AtomicBool::new(false)));
-            app.manage(KeepAwake::system(service_on));
 
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
@@ -528,20 +480,11 @@ pub fn run() {
                     let handle = app_handle.clone();
                     let code = code.unwrap_or(0);
                     tauri::async_runtime::spawn(async move {
-                        let core = handle.try_state::<CoreState>().map(|state| state.inner().clone());
-                        let stop_core = async move {
-                            if let Some(core) = core {
-                                core.shutdown().await;
+                        match handle.try_state::<CoreState>().map(|state| state.inner().clone()) {
+                            Some(core) => {
+                                finish_exit(core.shutdown(), &core, || handle.exit(code)).await
                             }
-                        };
-                        match handle.try_state::<KeepAwake>() {
-                            Some(keep_awake) => {
-                                finish_exit(stop_core, &keep_awake, || handle.exit(code)).await
-                            }
-                            None => {
-                                stop_core.await;
-                                handle.exit(code);
-                            }
+                            None => handle.exit(code),
                         }
                     });
                 }
@@ -565,6 +508,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use on_air_core::api::ws::WsEvent;
     use on_air_core::keep_awake::testing::{fake_method, recording, Event};
     use std::sync::{Arc, Mutex};
 
@@ -575,53 +519,52 @@ mod tests {
     }
 
     #[test]
-    fn a_request_for_the_current_state_changes_nothing() {
-        assert_eq!(service_transition(true, true), ServiceTransition::Unchanged);
-        assert_eq!(
-            service_transition(false, false),
-            ServiceTransition::Unchanged
-        );
-        assert_eq!(service_transition(false, true), ServiceTransition::TurnOn);
-        assert_eq!(service_transition(true, false), ServiceTransition::TurnOff);
-    }
-
-    #[test]
     fn turning_the_service_off_and_on_updates_core_clients_and_inhibitor() {
-        let state = CoreState::new();
         let (keep_awake, spawner) = recording(true);
+        let state = CoreState::new().with_keep_awake(keep_awake);
         let mut events = state.ws_tx.subscribe();
         let current = state.service_enabled.load(Ordering::Acquire);
 
-        apply_service_transition(&state, &keep_awake, ServiceTransition::Unchanged);
+        assert_eq!(
+            state.begin_service_transition(current),
+            ServiceTransition::Unchanged
+        );
         assert_eq!(state.service_enabled.load(Ordering::Acquire), current);
         assert!(events.try_recv().is_err(), "no change, no event");
         assert_eq!(spawner.events(), vec![Event::Started(fake_method())]);
 
-        apply_service_transition(&state, &keep_awake, ServiceTransition::TurnOff);
+        assert_eq!(
+            state.begin_service_transition(false),
+            ServiceTransition::TurnOff
+        );
         assert!(!state.service_enabled.load(Ordering::Acquire));
         assert!(matches!(
             events.try_recv(),
             Ok(WsEvent::ServiceStateChanged { enabled: false })
         ));
-        assert!(!keep_awake.is_enabled());
+        assert!(!state.keep_awake.is_enabled());
         assert_eq!(
             spawner.events(),
             vec![Event::Started(fake_method()), Event::Released]
         );
 
-        apply_service_transition(&state, &keep_awake, ServiceTransition::TurnOn);
+        assert_eq!(
+            state.begin_service_transition(true),
+            ServiceTransition::TurnOn
+        );
         assert!(state.service_enabled.load(Ordering::Acquire));
         assert!(matches!(
             events.try_recv(),
             Ok(WsEvent::ServiceStateChanged { enabled: true })
         ));
-        assert!(keep_awake.is_enabled());
+        assert!(state.keep_awake.is_enabled());
     }
 
     #[test]
     fn exit_stops_the_core_then_releases_the_inhibitor_then_exits() {
         let (keep_awake, spawner) = recording(true);
-        let held = &keep_awake;
+        let state = CoreState::new().with_keep_awake(keep_awake);
+        let held = &state;
         let log = Arc::new(Mutex::new(Vec::new()));
         let shutdown_log = log.clone();
         let exit_log = log.clone();
@@ -636,7 +579,10 @@ mod tests {
             },
             held,
             move || {
-                assert!(!held.is_enabled(), "inhibitor is released before exit");
+                assert!(
+                    !held.keep_awake.is_enabled(),
+                    "inhibitor is released before exit"
+                );
                 exit_log.lock().unwrap().push("exit");
             },
         ));
