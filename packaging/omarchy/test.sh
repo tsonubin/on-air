@@ -63,7 +63,11 @@ grep -q 'on-air service toggle' "$snippets/omarchy-menu.jsonc" || fail "menu ser
 echo "ok $snippets/*.json*"
 
 if have luac; then
-  luac -p "$snippets/bindings.lua" "$snippets/hyprland-rules.lua" || fail "lua snippets do not parse"
+  # One file per call: luac 5.4.4 (Ubuntu 22.04) double-frees when it is
+  # given several files at once.
+  for f in "$snippets/bindings.lua" "$snippets/hyprland-rules.lua"; do
+    luac -p "$f" || fail "$f does not parse"
+  done
 fi
 grep -q 'tui = "on-air"' "$snippets/bindings.lua" || fail "bindings.lua"
 grep -q 'omarchy-launch-or-focus-tui on-air' "$snippets/bindings.conf" || fail "bindings.conf"
