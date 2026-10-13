@@ -89,6 +89,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Ws(Incoming::Event(event)) => on_event(model, event),
         Msg::Snapshot(Ok(snapshot)) => {
             model.snapshot = *snapshot;
+            model.notice = sleep_notice(&model.snapshot);
             if matches!(
                 model.pending,
                 Some(Pending { ref label }) if label == LABEL_REFRESH
@@ -136,6 +137,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     }
 }
 
+/// A refused sleep lock is worth its own line: the laptop may suspend
+/// mid-stream. Nothing to say while the service is off or the core is old.
+fn sleep_notice(snapshot: &Snapshot) -> Option<String> {
+    let status = snapshot.status.as_ref()?;
+    (status.service_enabled && status.sleep_inhibited == Some(false))
+        .then(|| crate::error_copy::SLEEP_NOT_INHIBITED_COPY.to_string())
+}
+
 fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cmd> {
     model.pending = None;
     match result {
@@ -170,7 +179,13 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
             } else {
                 model.error = Some(copy);
             }
-            vec![]
+            // Mixer changes are shown before the core confirms them; on a
+            // failure, reload the core's real values over the optimistic ones.
+            if label == LABEL_MIXER {
+                vec![Cmd::Refresh]
+            } else {
+                vec![]
+            }
         }
     }
 }
@@ -211,6 +226,14 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
                 tracks,
             });
             vec![]
+        }
+        WsEvent::InputStateChanged {
+            active: false,
+            error: Some(_),
+            ..
+        } => {
+            model.error = Some(crate::error_copy::INPUT_STOPPED_COPY.to_string());
+            vec![Cmd::Refresh]
         }
         WsEvent::OutputStateChanged { .. }
         | WsEvent::InputStateChanged { .. }
@@ -332,11 +355,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::VolumeUp => set_volume(model, 1),
         Action::VolumeDown => set_volume(model, -1),
         Action::ResetBand => match (model.pane, model.mixer_row) {
-            (Pane::Mixer, MixerRow::Eq(band)) => {
-                let mut eq = model.snapshot.eq;
-                eq[band] = 0.0;
-                pending(model, LABEL_MIXER, vec![Cmd::SetEq(eq)])
-            }
+            (Pane::Mixer, MixerRow::Eq(band)) => set_eq_band(model, band, 0.0),
             _ => vec![],
         },
         Action::Stop => {
@@ -519,24 +538,27 @@ fn adjust(model: &mut Model, direction: i32) -> Vec<Cmd> {
     match model.mixer_row {
         MixerRow::Volume => set_volume(model, direction),
         MixerRow::Eq(band) => {
-            let mut eq = model.snapshot.eq;
-            eq[band] =
-                (eq[band] + EQ_STEP_DB * direction as f32).clamp(EQ_RANGE_DB.0, EQ_RANGE_DB.1);
-            pending(model, LABEL_MIXER, vec![Cmd::SetEq(eq)])
+            let gain = model.snapshot.eq[band] + EQ_STEP_DB * direction as f32;
+            set_eq_band(model, band, gain)
         }
         MixerRow::InputRate | MixerRow::OutputRate => {
-            let Some(rates) = &model.snapshot.rates else {
+            let input = model.mixer_row == MixerRow::InputRate;
+            let Some(rates) = &mut model.snapshot.rates else {
                 return vec![];
             };
-            let side = if model.mixer_row == MixerRow::InputRate {
-                &rates.input
+            let side = if input {
+                &mut rates.input
             } else {
-                &rates.output
+                &mut rates.output
             };
             let Some(next) = next_in_catalog(&side.supported_hz, side.sample_rate_hz, direction)
             else {
                 return vec![];
             };
+            if next == side.sample_rate_hz {
+                return vec![];
+            }
+            side.sample_rate_hz = next;
             let cmd = if model.mixer_row == MixerRow::InputRate {
                 Cmd::SetSampleRate {
                     input_hz: Some(next),
@@ -570,7 +592,18 @@ fn set_volume(model: &mut Model, direction: i32) -> Vec<Cmd> {
     if next == model.snapshot.volume {
         return vec![];
     }
+    model.snapshot.volume = next;
     pending(model, LABEL_MIXER, vec![Cmd::SetVolume(next)])
+}
+
+/// Set one band, show it at once, and send the whole curve.
+fn set_eq_band(model: &mut Model, band: usize, gain_db: f32) -> Vec<Cmd> {
+    let gain_db = gain_db.clamp(EQ_RANGE_DB.0, EQ_RANGE_DB.1);
+    if model.snapshot.eq[band] == gain_db {
+        return vec![];
+    }
+    model.snapshot.eq[band] = gain_db;
+    pending(model, LABEL_MIXER, vec![Cmd::SetEq(model.snapshot.eq)])
 }
 
 #[cfg(test)]
@@ -863,7 +896,11 @@ mod tests {
         let mut m = model_with_mock_snapshot();
         m.pane = Pane::Mixer;
         assert_eq!(update(&mut m, key('l')), vec![Cmd::SetVolume(55)]);
-        assert_eq!(update(&mut m, key('h')), vec![Cmd::SetVolume(45)]);
+        assert_eq!(
+            m.snapshot.volume, 55,
+            "the mixer shows the new value at once"
+        );
+        assert_eq!(update(&mut m, key('h')), vec![Cmd::SetVolume(50)]);
         m.snapshot.volume = 100;
         assert_eq!(update(&mut m, key('l')), vec![], "never above 100");
         m.snapshot.volume = 0;
@@ -874,11 +911,12 @@ mod tests {
             update(&mut m, key('l')),
             vec![Cmd::SetEq([0.0, 0.0, 1.0, 0.0, 0.0])]
         );
+        assert_eq!(m.snapshot.eq, [0.0, 0.0, 1.0, 0.0, 0.0]);
         m.snapshot.eq = [0.0, 0.0, 12.0, 0.0, 0.0];
         assert_eq!(
             update(&mut m, key('l')),
-            vec![Cmd::SetEq([0.0, 0.0, 12.0, 0.0, 0.0])],
-            "clamped at +12 dB"
+            vec![],
+            "clamped at +12 dB: nothing to send"
         );
 
         m.mixer_row = MixerRow::InputRate;
@@ -889,6 +927,10 @@ mod tests {
                 output_hz: None
             }],
             "48000 is the last entry, so it wraps to 44100"
+        );
+        assert_eq!(
+            m.snapshot.rates.as_ref().unwrap().input.sample_rate_hz,
+            44100
         );
         m.mixer_row = MixerRow::OutputRate;
         assert_eq!(
@@ -905,9 +947,46 @@ mod tests {
         let mut m = model_with_mock_snapshot();
         assert_eq!(m.pane, Pane::Sources);
         assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(55)]);
-        assert_eq!(update(&mut m, key('-')), vec![Cmd::SetVolume(45)]);
+        assert_eq!(update(&mut m, key('-')), vec![Cmd::SetVolume(50)]);
         assert_eq!(update(&mut m, key('=')), vec![Cmd::SetVolume(55)]);
-        assert_eq!(update(&mut m, key('_')), vec![Cmd::SetVolume(45)]);
+        assert_eq!(update(&mut m, key('_')), vec![Cmd::SetVolume(50)]);
+    }
+
+    #[test]
+    fn repeated_presses_accumulate() {
+        let mut m = model_with_mock_snapshot();
+        assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(55)]);
+        assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(60)]);
+        assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(65)]);
+        assert_eq!(m.snapshot.volume, 65);
+        m.pane = Pane::Mixer;
+        m.mixer_row = MixerRow::Eq(4);
+        update(&mut m, key('l'));
+        assert_eq!(
+            update(&mut m, key('l')),
+            vec![Cmd::SetEq([0.0, 0.0, 0.0, 0.0, 2.0])]
+        );
+    }
+
+    #[test]
+    fn a_failed_mixer_change_shows_the_error_and_resyncs() {
+        let mut m = model_with_mock_snapshot();
+        update(&mut m, key('+'));
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::Done {
+                    label: "Adjusting".into(),
+                    result: Err("Nothing is playing yet. Pick a speaker first.".into())
+                }
+            ),
+            vec![Cmd::Refresh],
+            "the core's real value replaces the optimistic one"
+        );
+        assert_eq!(
+            m.error.as_deref(),
+            Some("Nothing is playing yet. Pick a speaker first.")
+        );
     }
 
     #[test]
@@ -917,6 +996,7 @@ mod tests {
         m.mixer_row = MixerRow::Eq(1);
         m.snapshot.eq = [0.0, 3.0, 0.0, 0.0, 0.0];
         assert_eq!(update(&mut m, key('0')), vec![Cmd::SetEq([0.0; 5])]);
+        assert_eq!(m.snapshot.eq, [0.0; 5]);
     }
 
     #[test]
@@ -1060,6 +1140,51 @@ mod tests {
             vec![]
         );
         assert_eq!(update(&mut m, ev(WsEvent::Heartbeat)), vec![]);
+    }
+
+    #[test]
+    fn a_refused_sleep_inhibitor_becomes_a_notice_line() {
+        let mut m = Model::new();
+        let mut snap = model_with_mock_snapshot().snapshot;
+        snap.status.as_mut().unwrap().sleep_inhibited = Some(false);
+        update(&mut m, Msg::Snapshot(Ok(Box::new(snap.clone()))));
+        assert!(
+            m.notice
+                .as_deref()
+                .is_some_and(|n| n.contains("sleep not inhibited")),
+            "{:?}",
+            m.notice
+        );
+        snap.status.as_mut().unwrap().sleep_inhibited = Some(true);
+        update(&mut m, Msg::Snapshot(Ok(Box::new(snap.clone()))));
+        assert_eq!(m.notice, None);
+        snap.status.as_mut().unwrap().sleep_inhibited = Some(false);
+        snap.status.as_mut().unwrap().service_enabled = false;
+        update(&mut m, Msg::Snapshot(Ok(Box::new(snap))));
+        assert_eq!(
+            m.notice, None,
+            "nothing to inhibit while the service is off"
+        );
+    }
+
+    #[test]
+    fn a_source_that_dies_says_so() {
+        let mut m = model_with_mock_snapshot();
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::Ws(Incoming::Event(WsEvent::InputStateChanged {
+                    name: None,
+                    active: false,
+                    error: Some("parec exited".into()),
+                }))
+            ),
+            vec![Cmd::Refresh]
+        );
+        assert_eq!(
+            m.error.as_deref(),
+            Some("The source stopped unexpectedly. Choose it again to restart.")
+        );
     }
 
     #[test]

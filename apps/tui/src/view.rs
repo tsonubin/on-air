@@ -10,7 +10,7 @@ use crate::model::{MixerRow, Modal, Model, OutputRow, Pane};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -189,17 +189,6 @@ fn header_line(model: &Model) -> Paragraph<'_> {
             spans.push(Span::styled(format!(" {address} "), Style::new().dim()));
         }
         spans.push(Span::raw(" service on "));
-        if model
-            .snapshot
-            .status
-            .as_ref()
-            .is_some_and(|s| s.sleep_inhibited == Some(false))
-        {
-            spans.push(Span::styled(
-                " sleep not inhibited ",
-                Style::new().fg(Color::Yellow),
-            ));
-        }
     }
     if let Some(autostart) = model.autostart {
         spans.push(Span::styled(
@@ -297,7 +286,10 @@ fn sources_pane(model: &Model, frame: &mut Frame, area: Rect) {
             ListItem::new(Line::from(spans)).style(locked_style(model, style))
         })
         .collect();
-    frame.render_widget(List::new(items).block(block), area);
+    // The state only scrolls the list to the cursor; the marker and
+    // highlight are drawn by the items themselves.
+    let mut state = ListState::default().with_selected(Some(model.source_index));
+    frame.render_stateful_widget(List::new(items).block(block), area, &mut state);
 }
 
 fn outputs_pane(model: &Model, frame: &mut Frame, area: Rect) {
@@ -346,7 +338,10 @@ fn outputs_pane(model: &Model, frame: &mut Frame, area: Rect) {
             }
         })
         .collect();
-    frame.render_widget(List::new(items).block(block), area);
+    // The state only scrolls the list to the cursor; the marker and
+    // highlight are drawn by the items themselves.
+    let mut state = ListState::default().with_selected(Some(model.output_index));
+    frame.render_stateful_widget(List::new(items).block(block), area, &mut state);
 }
 
 fn bar(filled: usize, cells: usize) -> String {
@@ -407,7 +402,15 @@ fn mixer_pane(model: &Model, frame: &mut Frame, area: Rect) {
         ListItem::new(Line::from(vec![Span::raw(marker), Span::raw(text)]))
             .style(locked_style(model, style))
     });
-    frame.render_widget(List::new(rows).block(block), area);
+    // The state only scrolls the list to the cursor; the marker and
+    // highlight are drawn by the items themselves.
+    let mut state = ListState::default().with_selected(Some(
+        MixerRow::ALL
+            .iter()
+            .position(|row| *row == model.mixer_row)
+            .unwrap_or(0),
+    ));
+    frame.render_stateful_widget(List::new(rows).block(block), area, &mut state);
 }
 
 fn hint_line() -> Paragraph<'static> {
@@ -500,7 +503,7 @@ mod tests {
     };
     use crate::client::Connection;
     use crate::keys::KEYS;
-    use crate::model::{Modal, Model, PairTarget, Snapshot};
+    use crate::model::{Modal, Model, PairTarget, Pane, Snapshot};
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::style::Color;
@@ -630,11 +633,17 @@ mod tests {
     }
 
     #[test]
-    fn the_header_warns_when_sleep_is_not_inhibited() {
+    fn the_notice_line_sits_under_the_header_and_survives_a_long_header() {
         let mut m = model();
-        m.snapshot.status.as_mut().unwrap().sleep_inhibited = Some(false);
-        let t = text(&render(&m, 100, 30));
-        assert!(t.contains("sleep not inhibited"), "{t}");
+        m.snapshot
+            .active_output
+            .as_mut()
+            .unwrap()
+            .output
+            .device_name = "X".repeat(80);
+        m.notice = Some("sleep not inhibited — the laptop may suspend".into());
+        let b = render(&m, 100, 30);
+        assert_eq!(row_of(&b, "sleep not inhibited"), 1, "{}", text(&b));
         let t = text(&render(&model(), 100, 30));
         assert!(!t.contains("sleep not inhibited"), "{t}");
     }
@@ -767,6 +776,33 @@ mod tests {
         for binding in KEYS {
             assert!(t.contains(binding.help), "{} missing:\n{t}", binding.help);
         }
+    }
+
+    #[test]
+    fn the_outputs_pane_scrolls_to_keep_the_selection_visible() {
+        let mut m = model();
+        for i in 0..30 {
+            m.snapshot.outputs.push(output(
+                &format!("bt-{i}"),
+                &format!("Speaker {i:02}"),
+                "bluetooth",
+                false,
+                true,
+            ));
+        }
+        m.pane = Pane::Outputs;
+        m.output_index = m.output_rows().len() - 1;
+        let t = text(&render(&m, 100, 20));
+        assert!(t.contains("> Speaker 29"), "{t}");
+    }
+
+    #[test]
+    fn the_mixer_scrolls_in_a_short_stacked_window() {
+        let mut m = model();
+        m.pane = Pane::Mixer;
+        m.mixer_row = crate::model::MixerRow::OutputRate;
+        let t = text(&render(&m, 60, 24));
+        assert!(t.contains("> Out 44100"), "{t}");
     }
 
     #[test]

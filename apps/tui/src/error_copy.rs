@@ -6,6 +6,11 @@ use crate::client::ClientError;
 
 pub const UNREACHABLE_PREFIX: &str = "Core unreachable on ";
 pub const TIMEOUT_COPY: &str = "The audio service did not answer in time.";
+/// Shown when the core reports that the active source stopped on its own.
+pub const INPUT_STOPPED_COPY: &str = "The source stopped unexpectedly. Choose it again to restart.";
+/// The notice line when the service is on but no sleep lock is held.
+pub const SLEEP_NOT_INHIBITED_COPY: &str =
+    "sleep not inhibited — the laptop may suspend while streaming (see docs/omarchy.md)";
 
 fn copy_by_code(code: &str) -> Option<&'static str> {
     Some(match code {

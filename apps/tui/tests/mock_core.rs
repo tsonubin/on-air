@@ -209,3 +209,33 @@ async fn bar_and_service_subcommands_against_the_mock_core() {
     assert!(human.contains("service: on"), "{human}");
     assert!(on_air_tui::cli::service(&c, "maybe").await.is_err());
 }
+
+#[tokio::test]
+async fn a_tui_started_while_paused_still_gets_live_events() {
+    let c = mock_core().await;
+    c.set_service(false).await.unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = on_air_tui::client::spawn_events(c.base(), tx);
+    let opened = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(Incoming::Connection(Connection::Open)) = rx.recv().await {
+                break;
+            }
+        }
+    })
+    .await;
+    assert!(opened.is_ok(), "the event socket opens while paused");
+    c.set_service(true).await.unwrap();
+    let enabled = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(Incoming::Event(WsEvent::ServiceStateChanged { enabled })) = rx.recv().await
+            {
+                break enabled;
+            }
+        }
+    })
+    .await
+    .expect("the TUI hears the service come back on");
+    assert!(enabled);
+    handle.abort();
+}

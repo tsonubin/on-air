@@ -9,6 +9,7 @@ pub mod autostart;
 pub mod cli;
 pub mod client;
 pub mod error_copy;
+pub mod handoff;
 pub mod keys;
 pub mod model;
 pub mod theme;

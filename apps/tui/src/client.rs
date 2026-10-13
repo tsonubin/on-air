@@ -237,6 +237,13 @@ impl Client {
                 done(update::LABEL_CONNECT, self.connect_bluetooth(&id).await)
             }
             Cmd::OpenBluetoothSettings => {
+                // Open it from the TUI's own session when the core is local:
+                // the user service may have no display to open a window on.
+                if crate::handoff::is_loopback_base(&self.base)
+                    && crate::handoff::open_bluetooth_settings()
+                {
+                    return done(update::LABEL_SETTINGS, Ok(()));
+                }
                 done(update::LABEL_SETTINGS, self.open_bluetooth_settings().await)
             }
             Cmd::SetService(enabled) => done(
