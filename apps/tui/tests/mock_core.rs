@@ -4,8 +4,10 @@
 //! serde structs they copy.
 
 use on_air_core::state::CoreState;
-use on_air_tui::client::{Client, ClientError};
+use on_air_tui::api::WsEvent;
+use on_air_tui::client::{Client, ClientError, Connection, Incoming};
 use on_air_tui::error_copy;
+use std::time::Duration;
 
 async fn mock_core() -> Client {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -77,4 +79,32 @@ async fn unreachable_core_is_a_named_error() {
     let err = c.status().await.unwrap_err();
     assert!(matches!(err, ClientError::Unreachable(_)), "{err:?}");
     assert!(error_copy::copy(&err).starts_with("Core unreachable on http://127.0.0.1:1;"));
+}
+
+#[tokio::test]
+async fn events_arrive_after_a_service_change() {
+    let c = mock_core().await;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let handle = on_air_tui::client::spawn_events(c.base(), tx);
+    assert!(matches!(
+        rx.recv().await,
+        Some(Incoming::Connection(Connection::Connecting))
+    ));
+    assert!(matches!(
+        rx.recv().await,
+        Some(Incoming::Connection(Connection::Open))
+    ));
+    c.set_service(false).await.unwrap();
+    let enabled = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(Incoming::Event(WsEvent::ServiceStateChanged { enabled })) = rx.recv().await
+            {
+                break enabled;
+            }
+        }
+    })
+    .await
+    .expect("a ServiceStateChanged event within 5 s");
+    assert!(!enabled);
+    handle.abort();
 }

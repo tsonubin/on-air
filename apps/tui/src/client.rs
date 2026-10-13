@@ -2,17 +2,21 @@
 //! `packages/control-client/src/http.ts`; the TUI never needs a pairing
 //! token because the core trusts loopback callers.
 
+use crate::api::WsEvent;
 use crate::api::{
     ActiveInputResponse, ActiveOutputResponse, ActiveOutputView, AirPlayModeResponse, ApiErrorBody,
     BluetoothDeviceInfo, BluetoothListResponse, CdAction, CdStatus, EqResponse, InputsResponse,
     OutputInfo, OutputVolumeResponse, OutputsResponse, PinResponse, SampleRateResponse,
     ServiceResponse, StatusResponse,
 };
+use futures_util::StreamExt;
 use reqwest::Method;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
 use std::time::Duration;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio_tungstenite::tungstenite::Message;
 
 /// Budget for reads and simple writes.
 pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
@@ -20,6 +24,126 @@ pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 pub const SLOW_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub const DEFAULT_BASE: &str = "http://127.0.0.1:47990";
+
+/// A socket with no frame for this long is treated as dead; the core sends
+/// a heartbeat every 10 s.
+pub const STALL: Duration = Duration::from_secs(20);
+pub const MIN_BACKOFF: Duration = Duration::from_millis(500);
+pub const MAX_BACKOFF: Duration = Duration::from_secs(10);
+const BACKOFF_JITTER: f64 = 0.2;
+
+/// Reconnect delay for the `attempt`-th consecutive failure: 500 ms doubling
+/// to a 10 s cap, then ±20 % scaled by `jitter` in `[-1, 1]`.
+pub fn backoff_delay(attempt: u32, jitter: f64) -> Duration {
+    let base = MIN_BACKOFF
+        .checked_mul(1u32 << attempt.min(16))
+        .unwrap_or(MAX_BACKOFF)
+        .min(MAX_BACKOFF);
+    let factor = 1.0 + BACKOFF_JITTER * jitter.clamp(-1.0, 1.0);
+    Duration::from_secs_f64(base.as_secs_f64() * factor)
+}
+
+/// `http(s)://host:port` → `ws(s)://host:port/api/ws`.
+pub fn ws_url(base: &str) -> String {
+    let base = base.trim_end_matches('/');
+    let ws = if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        format!("ws://{base}")
+    };
+    format!("{ws}/api/ws")
+}
+
+/// State of the event socket as the UI shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Connection {
+    Connecting,
+    Open,
+    Reconnecting,
+    Closed,
+}
+
+/// What the event task sends the UI.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Incoming {
+    Connection(Connection),
+    Event(WsEvent),
+}
+
+/// Subscribe to `/api/ws` forever: `Connecting`, then `Open` on connect,
+/// `Reconnecting` on close or stall, each parsed event in between. Frames
+/// with a `type` this client does not know arrive as `WsEvent::Unknown`.
+/// The task never ends on its own; abort the handle to stop it.
+pub fn spawn_events(base: &str, tx: UnboundedSender<Incoming>) -> tokio::task::JoinHandle<()> {
+    let url = ws_url(base);
+    tokio::spawn(async move {
+        let mut attempt: u32 = 0;
+        let mut rng = Xorshift::seeded(std::process::id() as u64 ^ 0x9E37_79B9_7F4A_7C15);
+        if tx
+            .send(Incoming::Connection(Connection::Connecting))
+            .is_err()
+        {
+            return;
+        }
+        loop {
+            if let Ok((mut socket, _)) = tokio_tungstenite::connect_async(&url).await {
+                {
+                    attempt = 0;
+                    if tx.send(Incoming::Connection(Connection::Open)).is_err() {
+                        return;
+                    }
+                    loop {
+                        let frame = tokio::time::timeout(STALL, socket.next()).await;
+                        match frame {
+                            Ok(Some(Ok(Message::Text(text)))) => {
+                                match serde_json::from_str::<WsEvent>(&text) {
+                                    Ok(event) => {
+                                        if tx.send(Incoming::Event(event)).is_err() {
+                                            return;
+                                        }
+                                    }
+                                    Err(error) => eprintln!("on-air: bad event frame: {error}"),
+                                }
+                            }
+                            Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Ok(Some(Err(_))) => break,
+                            Ok(Some(Ok(_))) => {}
+                            Err(_stall) => break,
+                        }
+                    }
+                }
+            }
+            if tx
+                .send(Incoming::Connection(Connection::Reconnecting))
+                .is_err()
+            {
+                return;
+            }
+            tokio::time::sleep(backoff_delay(attempt, rng.unit())).await;
+            attempt = attempt.saturating_add(1);
+        }
+    })
+}
+
+/// Enough randomness for reconnect jitter without a dependency.
+struct Xorshift(u64);
+
+impl Xorshift {
+    fn seeded(seed: u64) -> Self {
+        Xorshift(if seed == 0 { 1 } else { seed })
+    }
+
+    /// A value in `[-1, 1]`.
+    fn unit(&mut self) -> f64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClientError {
@@ -320,5 +444,23 @@ mod tests {
     #[test]
     fn a_trailing_slash_is_trimmed_from_the_base() {
         assert_eq!(Client::new("http://x:1/").base(), "http://x:1");
+    }
+
+    #[test]
+    fn backoff_doubles_and_caps() {
+        assert_eq!(backoff_delay(0, 0.0), Duration::from_millis(500));
+        assert_eq!(backoff_delay(1, 0.0), Duration::from_millis(1000));
+        assert_eq!(backoff_delay(10, 0.0), Duration::from_secs(10));
+        assert_eq!(backoff_delay(0, 1.0), Duration::from_millis(600));
+        assert_eq!(backoff_delay(0, -1.0), Duration::from_millis(400));
+    }
+
+    #[test]
+    fn the_events_url_is_the_ws_form_of_the_base() {
+        assert_eq!(
+            ws_url("http://127.0.0.1:47990"),
+            "ws://127.0.0.1:47990/api/ws"
+        );
+        assert_eq!(ws_url("https://host"), "wss://host/api/ws");
     }
 }
