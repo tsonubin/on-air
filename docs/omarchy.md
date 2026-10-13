@@ -20,18 +20,20 @@ From a clone of this repository:
 packaging/omarchy/install.sh
 ```
 
-That builds and installs the `on-air` package with `makepkg -si`, enables
-the service with `systemctl --user enable --now on-air-core`, and prints the
-snippets below with the path each belongs in. It edits nothing under
-`~/.config`.
+That builds the `on-air` package from the commit you have checked out,
+installs it with `makepkg -si`, enables the service with
+`systemctl --user enable --now on-air-core`, and prints the snippets below
+with the path each belongs in. It edits nothing under `~/.config`. Commit
+local changes first; uncommitted edits are not built.
 
-By hand:
+Then check it:
 
 ```bash
-cd packaging/aur/on-air && makepkg -si
-systemctl --user enable --now on-air-core
 on-air status
 ```
+
+`packaging/aur/on-air/PKGBUILD` on its own builds a tagged release (the AUR
+form). Use it once a release that contains the terminal UI is tagged.
 
 The package installs `on-air-core` and `on-air` to `/usr/bin`, the unit to
 `/usr/lib/systemd/user/on-air-core.service`, a launcher entry, an icon, and
@@ -138,12 +140,16 @@ Two fixes:
 
   ```js
   polkit.addRule(function (action, subject) {
-    if (action.id == "org.freedesktop.login1.inhibit-block-sleep" &&
+    if ((action.id == "org.freedesktop.login1.inhibit-block-sleep" ||
+         action.id == "org.freedesktop.login1.inhibit-block-idle") &&
         subject.user == "YOUR_USERNAME") {
       return polkit.Result.YES;
     }
   });
   ```
+
+  The core asks for both sleep and idle locks in one request, so the rule
+  has to grant both.
 
   then `systemctl --user restart on-air-core`.
 

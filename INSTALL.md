@@ -40,13 +40,14 @@ clone:
 packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
 ```
 
-By hand:
+`install.sh` builds the commit you have checked out. Then:
 
 ```bash
-cd packaging/aur/on-air && makepkg -si
-systemctl --user enable --now on-air-core
 on-air                            # the terminal UI; `on-air --help` for the subcommands
 ```
+
+`packaging/aur/on-air/PKGBUILD` by itself builds a tagged release (the AUR
+form); use it once a release containing the terminal UI is tagged.
 
 The launcher entry, the `Super+Shift+Alt+O` hotkey, the menu rows, the
 bar module and the sleep notes are in [docs/omarchy.md](docs/omarchy.md).

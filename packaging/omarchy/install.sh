@@ -1,21 +1,57 @@
 #!/bin/sh
-# Build and install on-air on Omarchy or Arch, enable the core service,
-# then print the snippets and where each one goes. Run from a clone:
+# Build and install on-air on Omarchy or Arch from this clone, enable the
+# core service, then print the snippets and where each one goes:
 #   packaging/omarchy/install.sh
-# Nothing under ~/.config is edited; the snippets are yours to paste.
+# It builds the checkout you run it from (its last commit), not a release
+# tag. Nothing under ~/.config is edited; the snippets are yours to paste.
+#
+#   --prepare-only DIR   stage the package build in DIR and stop (used by
+#                        packaging/omarchy/test.sh; needs no makepkg)
 set -eu
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 recipe=$root/packaging/aur/on-air
 doc=/usr/share/doc/on-air/omarchy
 
+prepare_only=
+case "${1:-}" in
+  --prepare-only)
+    prepare_only=${2:?--prepare-only needs a directory}
+    ;;
+  "") ;;
+  *)
+    echo "usage: $0 [--prepare-only DIR]" >&2
+    exit 2
+    ;;
+esac
+
+# Stage: the recipe, with its source switched from the release tag to a
+# tarball of this checkout's HEAD.
+if [ -n "$prepare_only" ]; then
+  build=$prepare_only
+  mkdir -p "$build"
+else
+  build=$(mktemp -d "${TMPDIR:-/tmp}/on-air-build.XXXXXX")
+fi
+pkgver=$(sed -n 's/^pkgver=//p' "$recipe/PKGBUILD")
+if [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
+  echo "note: building the last commit; uncommitted changes are not included" >&2
+fi
+git -C "$root" archive --format=tar.gz --prefix="on-air-$pkgver/" \
+  -o "$build/on-air-$pkgver.tar.gz" HEAD
+sed 's|^source=.*|source=("on-air-${pkgver}.tar.gz")|' "$recipe/PKGBUILD" > "$build/PKGBUILD"
+if [ -n "$prepare_only" ]; then
+  echo "$build"
+  exit 0
+fi
+
 command -v makepkg >/dev/null 2>&1 || {
   echo "makepkg not found: this installer is for Omarchy and Arch Linux." >&2
   exit 1
 }
 
-echo "== Building and installing the on-air package (makepkg -si)"
-(cd "$recipe" && makepkg -si)
+echo "== Building and installing the on-air package from $root (makepkg -si)"
+(cd "$build" && makepkg -si)
 
 echo "== Enabling the on-air-core user service"
 systemctl --user daemon-reload
@@ -38,3 +74,4 @@ show shell-bar.json      '~/.config/omarchy/shell.json under bar.layout.right (O
 show waybar.jsonc        '~/.config/waybar/config.jsonc (Omarchy 3)'
 echo
 echo "Launch on-air from the app launcher (Super+Space), or run: on-air"
+echo "The build directory $build can be deleted."

@@ -82,4 +82,22 @@ grep -q '^pkgname=on-air$' packaging/aur/on-air/PKGBUILD || fail "pkgname"
 grep -q 'xdg-terminal-exec' packaging/aur/on-air/PKGBUILD || fail "PKGBUILD depends on xdg-terminal-exec"
 grep -q '^pkgbase = on-air$' packaging/aur/on-air/.SRCINFO || fail ".SRCINFO pkgbase"
 echo "ok $dir/install.sh packaging/aur/on-air"
+# install.sh must build this checkout, not the last release tag.
+stage=$(mktemp -d)
+trap '[ -n "$stage" ] && rm -rf -- "$stage"' EXIT
+sh "$dir/install.sh" --prepare-only "$stage" >/dev/null || fail "install.sh --prepare-only failed"
+[ -f "$stage/PKGBUILD" ] || fail "install.sh staged no PKGBUILD"
+grep -q '^source=("on-air-${pkgver}.tar.gz")$' "$stage/PKGBUILD" || fail "staged PKGBUILD does not use the local tarball"
+bash -n "$stage/PKGBUILD" || fail "staged PKGBUILD syntax"
+archive=$(ls "$stage"/on-air-*.tar.gz)
+for f in apps/tui/Cargo.toml packaging/omarchy/on-air.desktop packaging/omarchy/on-air-core.service Cargo.lock; do
+  tar -tzf "$archive" | grep -q "^on-air-[^/]*/$f$" || fail "staged source lacks $f"
+done
+echo "ok $dir/install.sh builds the checkout"
+
+# The documented polkit fallback must grant everything the inhibitor asks
+# for: --what=sleep:idle needs both actions.
+grep -q 'inhibit-block-sleep' docs/omarchy.md || fail "docs polkit rule lacks inhibit-block-sleep"
+grep -q 'inhibit-block-idle' docs/omarchy.md || fail "docs polkit rule lacks inhibit-block-idle"
+echo "ok docs/omarchy.md polkit rule"
 echo "all ok"
