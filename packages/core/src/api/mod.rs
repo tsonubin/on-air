@@ -8,5 +8,6 @@ pub mod inputs;
 pub mod outputs;
 pub mod pairing;
 pub mod sample_rate;
+pub mod service;
 pub mod stream;
 pub mod ws;

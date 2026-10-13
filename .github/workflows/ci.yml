@@ -49,7 +49,7 @@ jobs:
           pnpm --filter mobile exec expo export --platform android --output-dir "${{ runner.temp }}/on-air-expo-export-android" --max-workers 2
 
   test-core:
-    name: fmt / clippy / core tests
+    name: fmt / clippy / core and tui tests
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -62,10 +62,14 @@ jobs:
       - uses: swatinem/rust-cache@v2
       - name: Install ALSA (cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev pkg-config
-      - name: Lint core
-        run: cargo clippy --locked -p on-air-core --all-targets -- -D warnings
-      - name: Test core
-        run: cargo test --locked -p on-air-core
+      - name: Lint core and tui
+        run: cargo clippy --locked -p on-air-core -p on-air-tui --all-targets -- -D warnings
+      - name: Test core and tui
+        run: cargo test --locked -p on-air-core -p on-air-tui
+      - name: Validate Omarchy packaging
+        run: |
+          sudo apt-get install -y desktop-file-utils jq lua5.4
+          sh packaging/omarchy/test.sh
 
   e2e-mobile:
     name: phone client e2e against the mock core

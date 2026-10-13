@@ -68,6 +68,12 @@ pub trait Inhibitor: Send {
     /// Lets the machine sleep again. Must return promptly: the caller may be
     /// the tray event thread or the exit path.
     fn release(self: Box<Self>);
+
+    /// Whether the inhibitor still holds. A helper process can start and
+    /// then exit at once, which is how a refused logind lock looks.
+    fn is_alive(&mut self) -> bool {
+        true
+    }
 }
 
 /// Starts inhibitors. The production implementation talks to the OS; tests
@@ -78,6 +84,16 @@ pub trait InhibitorSpawner: Send + Sync {
 
 /// Spawns the real helper process or execution-state thread.
 pub struct SystemSpawner;
+
+/// Never holds anything. For cores that must not touch the OS, such as the
+/// mock core used by tests and CI.
+pub struct NoopSpawner;
+
+impl InhibitorSpawner for NoopSpawner {
+    fn spawn(&self, _method: &InhibitMethod) -> Option<Box<dyn Inhibitor>> {
+        None
+    }
+}
 
 impl InhibitorSpawner for SystemSpawner {
     fn spawn(&self, method: &InhibitMethod) -> Option<Box<dyn Inhibitor>> {
@@ -106,6 +122,10 @@ impl InhibitorSpawner for SystemSpawner {
 struct ProcessInhibitor(std::process::Child);
 
 impl Inhibitor for ProcessInhibitor {
+    fn is_alive(&mut self) -> bool {
+        matches!(self.0.try_wait(), Ok(None))
+    }
+
     fn release(self: Box<Self>) {
         let mut child = self.0;
         let _ = child.kill();
@@ -187,10 +207,20 @@ impl KeepAwake {
         keep_awake
     }
 
-    /// Test probe; production code reads the core's service flag instead.
-    #[cfg(test)]
+    /// Whether the inhibitor is wanted. Production code reads the core's
+    /// service flag; this is for tests and for [`KeepAwake::is_holding`].
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Acquire)
+    }
+
+    /// Whether a platform inhibitor is actually held right now: false when
+    /// disabled, when this platform has no method, or when the OS refused it.
+    pub fn is_holding(&self) -> bool {
+        self.active
+            .lock()
+            .unwrap()
+            .as_mut()
+            .is_some_and(|inhibitor| inhibitor.is_alive())
     }
 
     /// Idempotent; releasing never blocks the caller.
@@ -219,8 +249,7 @@ impl Drop for KeepAwake {
     }
 }
 
-#[cfg(test)]
-pub(crate) mod testing {
+pub mod testing {
     use super::*;
     use std::sync::Arc;
 
@@ -234,9 +263,19 @@ pub(crate) mod testing {
     #[derive(Clone, Default)]
     pub struct RecordingSpawner {
         pub events: Arc<Mutex<Vec<Event>>>,
+        refuse: bool,
     }
 
     impl RecordingSpawner {
+        /// A spawner whose OS always refuses the inhibitor: it records the
+        /// attempt and returns nothing to hold.
+        pub fn refusing() -> Self {
+            Self {
+                events: Arc::default(),
+                refuse: true,
+            }
+        }
+
         pub fn events(&self) -> Vec<Event> {
             self.events.lock().unwrap().clone()
         }
@@ -256,6 +295,9 @@ pub(crate) mod testing {
                 .lock()
                 .unwrap()
                 .push(Event::Started(method.clone()));
+            if self.refuse {
+                return None;
+            }
             Some(Box::new(RecordedInhibitor(self.events.clone())))
         }
     }
@@ -372,5 +414,54 @@ mod tests {
             started.elapsed() < std::time::Duration::from_secs(5),
             "release must kill the helper and return without waiting out its sleep"
         );
+    }
+
+    #[test]
+    fn is_holding_follows_the_live_inhibitor() {
+        let (keep_awake, _spawner) = recording(true);
+        assert!(keep_awake.is_holding());
+        keep_awake.set_enabled(false);
+        assert!(!keep_awake.is_holding());
+    }
+
+    #[test]
+    fn a_refused_inhibitor_is_enabled_but_not_holding() {
+        let spawner = testing::RecordingSpawner::refusing();
+        let keep_awake =
+            KeepAwake::with_spawner(Some(fake_method()), Box::new(spawner.clone()), true);
+        assert!(keep_awake.is_enabled());
+        assert!(!keep_awake.is_holding());
+        assert_eq!(spawner.events(), vec![Event::Started(fake_method())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_that_exits_at_once_is_not_holding() {
+        // logind refusing the lock looks like this: systemd-inhibit starts,
+        // prints "Access denied" and exits.
+        let refused = InhibitMethod::Process {
+            program: "false".into(),
+            args: vec![],
+        };
+        let keep_awake = KeepAwake::with_spawner(Some(refused), Box::new(SystemSpawner), true);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(keep_awake.is_enabled());
+        assert!(!keep_awake.is_holding(), "a dead helper holds nothing");
+
+        let alive = InhibitMethod::Process {
+            program: "sleep".into(),
+            args: vec!["30".into()],
+        };
+        let keep_awake = KeepAwake::with_spawner(Some(alive), Box::new(SystemSpawner), true);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(keep_awake.is_holding());
+        keep_awake.set_enabled(false);
+    }
+
+    #[test]
+    fn no_platform_method_is_never_holding() {
+        let keep_awake =
+            KeepAwake::with_spawner(None, Box::new(testing::RecordingSpawner::default()), true);
+        assert!(!keep_awake.is_holding());
     }
 }

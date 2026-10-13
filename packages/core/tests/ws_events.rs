@@ -115,3 +115,39 @@ fn cd_state_event_is_tagged_json() {
     assert_eq!(json["track"], 3);
     assert_eq!(json["title"], "So What");
 }
+
+#[tokio::test]
+async fn a_paused_service_still_streams_events_so_clients_see_it_come_back() {
+    let state = CoreState::new_mock().await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = on_air_core::build_router(state.clone())
+        .into_make_service_with_connect_info::<std::net::SocketAddr>();
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    state.begin_service_transition(false);
+
+    let (mut ws_stream, _) = connect_async(format!("ws://{addr}/api/ws"))
+        .await
+        .expect("the event socket opens while the service is paused");
+
+    let ws_tx = state.ws_tx.clone();
+    let turned_on = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if ws_tx.receiver_count() > 0 {
+                state.begin_service_transition(true);
+            }
+            if let Ok(Some(Ok(Message::Text(text)))) =
+                tokio::time::timeout(std::time::Duration::from_millis(50), ws_stream.next()).await
+            {
+                if text.contains("ServiceStateChanged") {
+                    break text.to_string();
+                }
+            }
+        }
+    })
+    .await
+    .expect("ServiceStateChanged reaches a client connected while paused");
+    assert!(turned_on.contains("\"enabled\":true"), "{turned_on}");
+}

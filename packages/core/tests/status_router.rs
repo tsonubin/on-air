@@ -27,4 +27,5 @@ async fn status_route_returns_ok_json() {
     assert!(json["version"].is_string());
     assert_eq!(json["service_enabled"], true);
     assert!(json["lan_addresses"].is_array());
+    assert!(json["sleep_inhibited"].is_boolean());
 }

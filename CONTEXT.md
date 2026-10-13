@@ -34,6 +34,19 @@ Processed mono L16 at the input/pipeline rate, published on an in-process bus. S
 
 HTTP WAV body at `/stream/<nonce>/audio.wav`, where the 32-hex nonce is minted per activation. A Sonos and AirPlay delivery adapter on the pipeline PCM bus. Served only while that output is live, so speakers can GET it without a pairing token and an old URL stops working on the next switch.
 
+## Control surface
+
+A client of the core's control plane that shows and changes state but owns
+no playback: the terminal UI (`apps/tui`), the Tauri window, the phone
+remote. Closing any of them changes nothing about what is playing.
+
+## Service
+
+The core process (`on-air-core`, or the core embedded in the Tauri app). It
+owns playback, discovery and the sleep inhibitor, and it is what autostart
+starts: on Linux the `on-air-core` systemd user unit, on macOS and Windows
+the desktop app's login item.
+
 ## Error envelope
 
 Every non-2xx API response is JSON `{"error", "code"}`: clients map the stable snake_case `code` (`ApiErrorCode` in `packages/api-types`) to their own copy and never match on the `error` text.

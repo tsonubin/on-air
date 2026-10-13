@@ -1,5 +1,5 @@
 use axum::http::{header, HeaderValue, Method};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -12,6 +12,7 @@ pub mod cd;
 pub mod dsp;
 pub mod events;
 pub mod http;
+pub mod keep_awake;
 pub mod mdns;
 pub mod net;
 pub mod pairing;
@@ -34,20 +35,20 @@ pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub service_enabled: bool,
+    /// Whether a platform sleep inhibitor is held right now. False while the
+    /// service is off, on platforms without one, and when the OS refused it.
+    pub sleep_inhibited: bool,
     /// Non-loopback IPv4 addresses of this host, so the desktop can show the
     /// address a phone must type. Empty when unknown.
     pub lan_addresses: Vec<String>,
 }
 
-pub fn status() -> StatusResponse {
-    status_with_service(true)
-}
-
-pub fn status_with_service(service_enabled: bool) -> StatusResponse {
+pub fn status_for(state: &CoreState) -> StatusResponse {
     StatusResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
-        service_enabled,
+        service_enabled: state.service_enabled.load(Ordering::Acquire),
+        sleep_inhibited: state.sleep_inhibited(),
         lan_addresses: net::lan_addresses(),
     }
 }
@@ -86,6 +87,7 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/sample-rate",
             get(api::sample_rate::get_sample_rate).put(api::sample_rate::set_sample_rate),
         )
+        .route("/api/service", put(api::service::set_service))
         .route("/api/ws", get(api::ws::ws_handler))
         .route("/api/pairing/pin", get(api::pairing::get_pin))
         .route("/api/pairing/verify", post(api::pairing::verify_pin))
@@ -120,9 +122,7 @@ pub fn build_router(state: CoreState) -> Router {
 async fn status_handler(
     axum::extract::State(state): axum::extract::State<CoreState>,
 ) -> Json<StatusResponse> {
-    Json(status_with_service(
-        state.service_enabled.load(Ordering::Acquire),
-    ))
+    Json(status_for(&state))
 }
 
 pub fn mock_mode_enabled() -> bool {
@@ -133,12 +133,58 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
     let state = if mock_mode_enabled() {
         CoreState::new_mock().await
     } else {
-        CoreState::new()
+        persistent_state_from_env()
     };
     serve_with_state(listener, state).await
 }
 
+/// Where the headless core keeps `settings.json` (and `paired-remotes.json`
+/// beside it): `config_dir` when it is absolute (`ON_AIR_CONFIG_DIR`), else
+/// `<xdg_config_home>/on-air-core`, else `<home>/.config/on-air-core`.
+/// Relative or empty locations are ignored, as the XDG spec asks.
+pub fn settings_path_from(
+    config_dir: Option<std::path::PathBuf>,
+    xdg_config_home: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    let absolute = |path: Option<std::path::PathBuf>| path.filter(|p| p.is_absolute());
+    let dir = absolute(config_dir)
+        .or_else(|| absolute(xdg_config_home).map(|dir| dir.join("on-air-core")))
+        .or_else(|| absolute(home).map(|home| home.join(".config/on-air-core")))?;
+    Some(dir.join("settings.json"))
+}
+
+/// The headless core as a user service: the last source, speaker, volume,
+/// EQ, rates, service flag and paired phones survive a restart, as they do
+/// in the desktop app. With nowhere to keep them it runs from defaults.
+fn persistent_state_from_env() -> CoreState {
+    let path = settings_path_from(
+        std::env::var_os("ON_AIR_CONFIG_DIR").map(Into::into),
+        std::env::var_os("XDG_CONFIG_HOME").map(Into::into),
+        std::env::var_os("HOME").map(Into::into),
+    );
+    match path {
+        Some(path) => CoreState::new_persistent(path),
+        None => {
+            eprintln!("on-air-core: no HOME or ON_AIR_CONFIG_DIR; settings will not persist");
+            CoreState::new()
+        }
+    }
+}
+
 pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::io::Result<()> {
+    serve_with_state_until(listener, state, std::future::pending()).await
+}
+
+/// Serve until `shutdown` resolves, then stop the audio work, the
+/// background tasks and the sleep inhibitor before returning. This is the
+/// path `systemctl --user stop` takes; without it the laptop speakers could
+/// stay muted. Open connections (a TUI's event socket) are not waited for.
+pub async fn serve_with_state_until(
+    listener: TcpListener,
+    state: CoreState,
+    shutdown: impl std::future::Future<Output = ()>,
+) -> std::io::Result<()> {
     let port = listener.local_addr()?.port();
     state.serve_port.store(port, Ordering::Release);
     if !state.mock {
@@ -153,11 +199,41 @@ pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::i
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
-    axum::serve(
+    let server = axum::serve(
         listener,
-        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .await
+        build_router(state.clone()).into_make_service_with_connect_info::<SocketAddr>(),
+    );
+    tokio::select! {
+        result = std::future::IntoFuture::into_future(server) => result?,
+        () = shutdown => {}
+    }
+    state.shutdown().await;
+    state.abort_background_tasks();
+    state.keep_awake.set_enabled(false);
+    Ok(())
+}
+
+/// SIGTERM (systemd stop, logout) or Ctrl-C.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut terminate) => {
+                tokio::select! {
+                    _ = terminate.recv() => {}
+                    _ = tokio::signal::ctrl_c() => {}
+                }
+            }
+            Err(_) => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = tokio::signal::ctrl_c().await;
+    }
 }
 
 pub async fn serve_with_state_std(
@@ -192,5 +268,15 @@ pub fn run_serve() {
         mock_mode_enabled()
     );
     let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
-    runtime.block_on(serve_on(addr)).expect("serve");
+    runtime
+        .block_on(async {
+            let listener = TcpListener::bind(addr).await?;
+            let state = if mock_mode_enabled() {
+                CoreState::new_mock().await
+            } else {
+                persistent_state_from_env()
+            };
+            serve_with_state_until(listener, state, shutdown_signal()).await
+        })
+        .expect("serve");
 }

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- on-air launcher icon: the live-dial mark from the desktop app (the
+     bowl and stem of a lowercase a with its lamp lit) on a rounded square,
+     the shape Omarchy's own app icons use. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img">
+  <title>on-air</title>
+  <rect width="64" height="64" rx="14" fill="#1c1b1a"/>
+  <circle cx="27" cy="39" r="11" fill="none" stroke="#f3e9d2" stroke-width="7"/>
+  <rect x="35" y="27" width="7" height="24" rx="3.5" fill="#f3e9d2"/>
+  <line x1="40" y1="28" x2="45.5" y2="19" stroke="#f3e9d2" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="47" cy="15" r="5" fill="#e2352b"/>
+</svg>

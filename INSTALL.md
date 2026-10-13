@@ -1,9 +1,10 @@
 # Install on-air
 
 on-air captures audio on your computer and sends it to **one** wireless output
-at a time — AirPlay, Bluetooth, or Sonos. The desktop app runs in the tray,
-can start on login, and is controllable from a companion mobile app on the
-same LAN. There is no cloud remote: the phone finds the desktop by probing
+at a time — AirPlay, Bluetooth, or Sonos. On Linux the core runs as a user
+service controlled by the `on-air` terminal UI; on macOS and Windows the
+desktop app runs in the tray. Both can start on login and are controllable
+from a companion mobile app on the same LAN. There is no cloud remote: the phone finds the desktop by probing
 port **47990** across its own /24 subnet (or you type the desktop's IP),
 control is HTTP/WebSocket on that port, and LAN clients pair with a PIN. The
 core also advertises `_on-air._tcp` over mDNS, but the phone does not browse
@@ -16,7 +17,8 @@ automatic source zip/tarball; that is not the install path.
 
 | Artifact | What it is |
 | --- | --- |
-| **on-air-desktop** | Tauri 2 tray app (recommended). Embeds `on-air-core`. |
+| **on-air** (Linux) | Arch package: `on-air-core` service + `on-air` terminal UI (recommended on Linux). |
+| **on-air-desktop** | Tauri 2 tray app (recommended on macOS and Windows). Embeds `on-air-core`. |
 | **on-air-core** | Headless binary. Same control plane, no GUI. |
 
 Package-manager recipes live in this repository (`Casks/`, `Formula/`,
@@ -27,6 +29,30 @@ publishes (the file `SHA256SUMS` is attached to the release by CI).
 
 Until that release exists, or if the GitHub repository is private, use
 [Build from source](#build-from-source).
+
+## Omarchy / Arch (recommended on Linux)
+
+The core runs as a systemd user service and the `on-air` terminal UI
+controls it: no WebKit, no GPU toolkit, themed by your terminal. From a
+clone:
+
+```bash
+packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
+```
+
+`install.sh` builds the commit you have checked out. Then:
+
+```bash
+on-air                            # the terminal UI; `on-air --help` for the subcommands
+```
+
+`packaging/aur/on-air/PKGBUILD` by itself builds a tagged release (the AUR
+form); use it once a release containing the terminal UI is tagged.
+
+The launcher entry, the `Super+Shift+Alt+O` hotkey, the menu rows, the
+bar module and the sleep notes are in [docs/omarchy.md](docs/omarchy.md).
+The Linux installers below ship the WebKitGTK desktop window instead; they
+still work, but the terminal UI is the lighter path.
 
 ## Desktop GUI
 
@@ -77,6 +103,9 @@ Manual fallback from the GitHub Release:
 
 ### Debian / Ubuntu — APT
 
+Installs the WebKitGTK desktop window. On Linux the terminal UI above is the
+recommended path; this is for distributions without `makepkg`.
+
 Install the Tauri `.deb` from the GitHub Release (`amd64` or `arm64`):
 
 ```bash
@@ -108,8 +137,10 @@ repo is published.
 
 Recipes are under `packaging/aur/`. They are **not** on the public AUR yet;
 install from the tree, or copy the directories into an AUR git package.
+`on-air` (core + terminal UI, source build) is the recommended one and is
+described in [Omarchy / Arch](#omarchy--arch-recommended-on-linux).
 
-Desktop GUI (binary, extracts the release `.deb`):
+Desktop GUI (binary, extracts the release `.deb`; the WebKitGTK window):
 
 ```bash
 cd packaging/aur/on-air-bin
@@ -127,6 +158,9 @@ makepkg -si
 ```
 
 ### Fedora / RHEL — RPM
+
+Installs the WebKitGTK desktop window; on Fedora the headless core plus the
+`on-air-tui-linux-*` release binary is the lighter path.
 
 Install the Tauri-produced RPM from the GitHub Release:
 
@@ -202,13 +236,19 @@ Nix, APT (`on-air-core` .deb), AUR (`on-air-core`), and RPM
 (`on-air-core.spec`) all install a binary named `on-air-core` that listens on
 all interfaces, `0.0.0.0:47990`, so phones and Sonos speakers on the LAN can
 reach it. Set `BIND=127.0.0.1` to keep it loopback-only and `PORT` to use
-another port. Mock senders with `ON_AIR_MOCK=1`.
+another port. Mock senders with `ON_AIR_MOCK=1`. Settings and paired phones
+persist in `~/.config/on-air-core/` (`$XDG_CONFIG_HOME/on-air-core` when set,
+or `ON_AIR_CONFIG_DIR` to choose the directory).
 
 Release binaries (when published) keep their original `-serve-` names:
 
 - `on-air-core-serve-macos-aarch64` / `on-air-core-serve-macos-x86_64`
 - `on-air-core-serve-linux-x86_64` / `on-air-core-serve-linux-aarch64`
 - `on-air-core-serve-windows-x86_64.exe` / `on-air-core-serve-windows-aarch64.exe`
+
+The Linux terminal UI is published next to them as
+`on-air-tui-linux-x86_64` / `on-air-tui-linux-aarch64`; it talks to a core
+on `127.0.0.1:47990` (`--base` for another address).
 
 ```bash
 chmod +x on-air-core-serve-linux-x86_64
@@ -225,6 +265,7 @@ https://github.com/tsonubin/on-air/releases
 | macOS | Intel | `on-air-desktop_0.1.0_x64.dmg` |
 | Linux | x86_64 | `on-air-desktop_0.1.0_amd64.deb`, `on-air-desktop-0.1.0-1.x86_64.rpm`, `on-air-desktop_0.1.0_amd64.AppImage` |
 | Linux | arm64 | `on-air-desktop_0.1.0_arm64.deb`, `on-air-desktop-0.1.0-1.aarch64.rpm`, `on-air-desktop_0.1.0_aarch64.AppImage` |
+| Linux | x86_64, arm64 | `on-air-tui-linux-x86_64`, `on-air-tui-linux-aarch64` (terminal UI; pair with a headless core) |
 | Windows | x64 | `on-air-desktop_0.1.0_x64-setup.exe`, `on-air-desktop_0.1.0_x64_en-US.msi`, `on-air-desktop_0.1.0_x64-portable.zip` |
 | Windows | arm64 | `on-air-desktop_0.1.0_arm64-setup.exe`, `on-air-desktop_0.1.0_arm64_en-US.msi`, `on-air-desktop_0.1.0_arm64-portable.zip` |
 
@@ -240,7 +281,10 @@ pnpm install
 # headless core
 cargo run --locked --release -p on-air-core --bin on-air-core
 
-# desktop GUI
+# terminal UI (Linux)
+cargo build --locked --release -p on-air-tui   # target/release/on-air
+
+# desktop GUI (macOS, Windows; also Linux WebKitGTK)
 pnpm --dir apps/desktop tauri build
 ```
 
@@ -292,8 +336,9 @@ public debug key.
 
 ## After install
 
-1. Launch **on-air** (tray icon). Autostart on login is available from the
-   desktop app.
+1. Launch **on-air**: on Linux the terminal UI (launcher entry or `on-air`;
+   `a` toggles starting the service at login), elsewhere the tray icon with
+   autostart in the desktop app.
 2. On macOS, AirPlay destination is chosen with the system route picker in
    the app; Sonos/Bluetooth and volume/EQ remain remote-controllable.
 3. From a phone on the same LAN, open the mobile remote. It scans the phone's
@@ -337,6 +382,8 @@ on-air-core-serve-macos-aarch64
 on-air-core-serve-macos-x86_64
 on-air-core-serve-linux-x86_64
 on-air-core-serve-linux-aarch64
+on-air-tui-linux-x86_64
+on-air-tui-linux-aarch64
 on-air-core-serve-windows-x86_64.exe
 on-air-core-serve-windows-aarch64.exe
 SHA256SUMS
@@ -355,6 +402,7 @@ and documents any still-missing files.
 
 | Manager | Files | User command |
 | --- | --- | --- |
+| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air` | `packaging/omarchy/install.sh` |
 | Homebrew cask | `Casks/on-air.rb` | `brew install --cask on-air` |
 | Homebrew formula | `Formula/on-air-core.rb` | `brew install on-air-core` |
 | Nix | `flake.nix`, `packaging/nix/` | `nix run .#on-air-core` |

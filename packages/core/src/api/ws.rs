@@ -1,4 +1,4 @@
-use crate::api::auth::Paired;
+use crate::api::auth::Authorized;
 use crate::state::CoreState;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -12,8 +12,10 @@ pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
 
 pub use crate::events::WsEvent;
 
+/// Authorized rather than Paired: a client connected while the service is
+/// paused must still hear `ServiceStateChanged` when it comes back on.
 pub async fn ws_handler(
-    Paired: Paired,
+    Authorized: Authorized,
     ws: WebSocketUpgrade,
     State(state): State<CoreState>,
 ) -> Response {

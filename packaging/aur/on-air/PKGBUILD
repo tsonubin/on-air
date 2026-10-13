@@ -1,0 +1,49 @@
+# Maintainer: Shay <tsonubin@users.noreply.github.com>
+# The Omarchy / Arch package: the on-air-core service and the on-air
+# terminal UI, built from source, with the launcher entry, icon, systemd
+# user unit and Omarchy snippets. Shaped after Omarchy's own Rust recipes.
+pkgname=on-air
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='LAN audio to AirPlay, Bluetooth or Sonos: core service and terminal UI'
+arch=('x86_64' 'aarch64')
+url="https://github.com/tsonubin/on-air"
+license=('custom:unknown')
+depends=('alsa-lib' 'openssl' 'libpulse' 'bluez-utils' 'xdg-terminal-exec' 'hicolor-icon-theme')
+optdepends=('python-pyatv: AirPlay without OwnTone')
+makedepends=('cargo' 'git')
+provides=('on-air' 'on-air-core')
+conflicts=('on-air-bin' 'on-air-core')
+options=('!debug' '!lto')
+source=("${pkgname}-${pkgver}::git+https://github.com/tsonubin/on-air.git#tag=v${pkgver}")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "${pkgname}-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
+}
+
+build() {
+  cd "${pkgname}-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release -p on-air-core -p on-air-tui
+}
+
+check() {
+  cd "${pkgname}-${pkgver}"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen -p on-air-core -p on-air-tui
+}
+
+package() {
+  cd "${pkgname}-${pkgver}"
+  install -Dm755 target/release/on-air-core "$pkgdir/usr/bin/on-air-core"
+  install -Dm755 target/release/on-air "$pkgdir/usr/bin/on-air"
+  install -Dm644 packaging/omarchy/on-air-core.service "$pkgdir/usr/lib/systemd/user/on-air-core.service"
+  install -Dm644 packaging/omarchy/on-air.desktop "$pkgdir/usr/share/applications/on-air.desktop"
+  install -Dm644 packaging/omarchy/on-air.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/on-air.svg"
+  install -dm755 "$pkgdir/usr/share/doc/on-air/omarchy"
+  install -m644 packaging/omarchy/snippets/* "$pkgdir/usr/share/doc/on-air/omarchy/"
+}

@@ -1,0 +1,27 @@
+pkgbase = on-air
+	pkgdesc = LAN audio to AirPlay, Bluetooth or Sonos: core service and terminal UI
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/tsonubin/on-air
+	arch = x86_64
+	arch = aarch64
+	license = custom:unknown
+	makedepends = cargo
+	makedepends = git
+	depends = alsa-lib
+	depends = openssl
+	depends = libpulse
+	depends = bluez-utils
+	depends = xdg-terminal-exec
+	depends = hicolor-icon-theme
+	optdepends = python-pyatv: AirPlay without OwnTone
+	provides = on-air
+	provides = on-air-core
+	conflicts = on-air-bin
+	conflicts = on-air-core
+	options = !debug
+	options = !lto
+	source = on-air-0.1.0::git+https://github.com/tsonubin/on-air.git#tag=v0.1.0
+	sha256sums = SKIP
+
+pkgname = on-air
