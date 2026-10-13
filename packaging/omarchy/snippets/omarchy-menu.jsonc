@@ -1,0 +1,8 @@
+// on-air rows for the Omarchy 4 menu (Super+Space).
+// Paste into ~/.config/omarchy/extensions/omarchy-menu.jsonc, inside the
+// top-level object. Dotted ids place rows: "on-air" is a root entry and
+// "on-air.open" sits inside it.
+"on-air": {"icon":"󰝚","label":"on-air"},
+"on-air.open": {"icon":"󰝚","label":"Open","action":"omarchy-launch-or-focus-tui on-air"},
+"on-air.service": {"icon":"󰐥","label":"Service on/off","action":"on-air service toggle"},
+"on-air.restart": {"icon":"󰜉","label":"Restart core","action":"systemctl --user restart on-air-core"},

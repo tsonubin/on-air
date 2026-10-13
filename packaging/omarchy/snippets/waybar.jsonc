@@ -1,0 +1,8 @@
+// on-air module for Waybar (Omarchy 3). Add to ~/.config/waybar/config.jsonc
+// and list "custom/on-air" in "modules-right".
+"custom/on-air": {
+  "exec": "on-air bar",
+  "return-type": "json",
+  "interval": 5,
+  "on-click": "omarchy-launch-or-focus-tui on-air"
+},

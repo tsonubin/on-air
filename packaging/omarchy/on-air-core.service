@@ -1,0 +1,18 @@
+# on-air core as a systemd user service: the LAN audio streaming service
+# the `on-air` terminal UI, the phone remote and Sonos speakers talk to.
+# Enable with `systemctl --user enable --now on-air-core`; the TUI's `a`
+# key does the same.
+[Unit]
+Description=on-air core (LAN audio streaming to AirPlay, Bluetooth or Sonos)
+Documentation=https://github.com/tsonubin/on-air
+After=pipewire.service wireplumber.service pipewire-pulse.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/on-air-core
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
