@@ -242,21 +242,54 @@ mod platform {
         )))
     }
 
+    /// Where to send the user to pair a speaker, first match wins. Omarchy 4
+    /// has its shell's Bluetooth panel; Omarchy 3 has the `bluetui` TUI;
+    /// `Command::spawn` succeeding means the binary exists, so each desktop
+    /// only ever reaches its own entry.
+    pub const SETTINGS_CANDIDATES: &[(&str, &[&str])] = &[
+        ("omarchy-shell", &["shell", "toggle", "omarchy.bluetooth"]),
+        ("omarchy-launch-tui", &["bluetui"]),
+        ("gnome-control-center", &["bluetooth"]),
+        ("blueman-manager", &[]),
+        ("kcmshell6", &["kcm_bluetooth"]),
+        ("kcmshell5", &["bluedevildevices"]),
+    ];
+
     pub fn open_settings() -> Result<(), SenderError> {
-        const CANDIDATES: &[(&str, &[&str])] = &[
-            ("gnome-control-center", &["bluetooth"]),
-            ("blueman-manager", &[]),
-            ("kcmshell6", &["kcm_bluetooth"]),
-            ("kcmshell5", &["bluedevildevices"]),
-        ];
-        for (bin, args) in CANDIDATES {
+        for (bin, args) in SETTINGS_CANDIDATES {
             if Command::new(bin).args(*args).spawn().is_ok() {
                 return Ok(());
             }
         }
         Err(SenderError::internal(
-            "could not open Bluetooth settings (tried GNOME, Blueman, KDE)",
+            "could not open Bluetooth settings (tried Omarchy, GNOME, Blueman, KDE)",
         ))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::SETTINGS_CANDIDATES;
+
+        #[test]
+        fn omarchy_panels_come_before_desktop_settings() {
+            let programs: Vec<&str> = SETTINGS_CANDIDATES.iter().map(|(bin, _)| *bin).collect();
+            assert_eq!(
+                programs,
+                vec![
+                    "omarchy-shell",
+                    "omarchy-launch-tui",
+                    "gnome-control-center",
+                    "blueman-manager",
+                    "kcmshell6",
+                    "kcmshell5"
+                ]
+            );
+            assert_eq!(
+                SETTINGS_CANDIDATES[0].1,
+                &["shell", "toggle", "omarchy.bluetooth"]
+            );
+            assert_eq!(SETTINGS_CANDIDATES[1].1, &["bluetui"]);
+        }
     }
 }
 
