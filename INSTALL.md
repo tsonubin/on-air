@@ -33,21 +33,21 @@ Until that release exists, or if the GitHub repository is private, use
 ## Omarchy / Arch (recommended on Linux)
 
 The core runs as a systemd user service and the `on-air` terminal UI
-controls it: no WebKit, no GPU toolkit, themed by your terminal. From the
-AUR (Omarchy ships `yay`; its menu also has Install > AUR):
+controls it: no WebKit, no GPU toolkit, themed by your terminal.
 
 ```bash
-yay -S on-air-bin                 # prebuilt; no compiler needed
-systemctl --user enable --now on-air-core
+curl -fsSL https://raw.githubusercontent.com/tsonubin/on-air/main/packaging/omarchy/install.sh | sh
 on-air                            # the terminal UI; `on-air --help` for the subcommands
 ```
 
-`yay -S on-air` builds the same thing from source instead (needs Rust; slow
-on older laptops). To build the commit you have checked out in a clone:
-
-```bash
-packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
-```
+The installer builds the `on-air-bin` pacman package from the latest
+release's prebuilt binaries (checked against its `SHA256SUMS`; nothing
+compiles), installs it with `makepkg -si`, starts the `on-air-core` user
+service and prints the Omarchy snippets. Run it again to update. From a
+clone, `packaging/omarchy/install.sh --source` builds the release from
+source instead (needs Rust; slow on older laptops) and `--checkout` builds
+the commit you have checked out. Once the recipes in `packaging/aur/` are on
+the AUR, `yay -S on-air-bin` installs the same package.
 
 The launcher entry, the `Super+Shift+Alt+O` hotkey, the menu rows, the
 bar module and the sleep notes are in [docs/omarchy.md](docs/omarchy.md).
@@ -144,11 +144,11 @@ Recipes are under `packaging/aur/`; each directory is one AUR package.
 | `on-air-core` | Headless core only, built from source |
 | `on-air-desktop-bin` | The WebKitGTK desktop window, from the release `.deb` |
 
-```bash
-yay -S on-air-bin            # or on-air, on-air-core, on-air-desktop-bin
-```
-
-From the tree instead: `cd packaging/aur/<package> && makepkg -si`.
+These recipes are not on the AUR yet (new AUR accounts are closed for
+now); once they are, `yay -S <package>` installs them. Until then, build one
+from the tree with `cd packaging/aur/<package> && makepkg -si` (the `-bin`
+recipes need the release's checksums filled in first), or use the
+installer above for `on-air-bin`.
 
 ### Fedora / RHEL — RPM
 
@@ -395,12 +395,12 @@ and documents any still-missing files.
 
 | Manager | Files | User command |
 | --- | --- | --- |
-| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air-bin` | `yay -S on-air-bin` |
+| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air-bin` | `curl -fsSL …/packaging/omarchy/install.sh \| sh` |
 | Homebrew cask | `Casks/on-air.rb` | `brew install --cask on-air` |
 | Homebrew formula | `Formula/on-air-core.rb` | `brew install on-air-core` |
 | Nix | `flake.nix`, `packaging/nix/` | `nix run .#on-air-core` |
 | APT | `packaging/debian/`, `packaging/apt/` | `packaging/apt/install.sh` |
-| Arch / yay | `packaging/aur/on-air-bin`, `on-air`, `on-air-core`, `on-air-desktop-bin` | `yay -S on-air-bin` |
+| Arch / AUR | `packaging/aur/on-air-bin`, `on-air`, `on-air-core`, `on-air-desktop-bin` | `yay -S on-air-bin` (once published) |
 | RPM | `packaging/rpm/*.spec` | `dnf install <url>` / `rpmbuild -ba` |
 | winget | `packaging/winget/` | `winget install --manifest packaging/winget` |
 

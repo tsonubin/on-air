@@ -49,7 +49,8 @@ A dedicated `homebrew-on-air` repo is optional later; copy `Casks/` and
 `packaging/aur/on-air` is the Omarchy-first package: the core service plus
 the terminal UI, built from source, with the files under `packaging/omarchy/`
 (unit, launcher entry, icon, snippets). `sh packaging/omarchy/test.sh`
-validates them; `packaging/omarchy/install.sh` is the user-facing installer;
+validates them; `packaging/omarchy/install.sh` is the user-facing installer
+(prebuilt from the latest release by default, so it needs no AUR account);
 [`docs/omarchy.md`](../docs/omarchy.md) is the integration guide. Submitting
 the same recipe to `omacom-io/omarchy-pkgs` (Omarchy's own repo, so
 `omarchy pkg add on-air` works) is a copy of that directory.

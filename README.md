@@ -6,7 +6,9 @@ app is **Omarchy-first**: the core runs as a systemd user service and the
 `on-air` terminal UI controls it, with no browser engine. macOS and Windows
 use the Tauri tray app.
 
-**Install:** on Omarchy or Arch, `yay -S on-air-bin`. Everything else is in
+**Install:** on Omarchy or Arch,
+`curl -fsSL https://raw.githubusercontent.com/tsonubin/on-air/main/packaging/omarchy/install.sh | sh`
+(prebuilt, nothing compiles). Everything else is in
 [INSTALL.md](INSTALL.md) (Homebrew, winget, APT, RPM, Nix, or source)
 and [docs/omarchy.md](docs/omarchy.md) for the Omarchy integration.
 

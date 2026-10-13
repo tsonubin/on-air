@@ -85,7 +85,7 @@ echo "ok $dir/install.sh packaging/aur/on-air"
 # install.sh must build this checkout, not the last release tag.
 stage=$(mktemp -d)
 trap '[ -n "$stage" ] && rm -rf -- "$stage"' EXIT
-sh "$dir/install.sh" --prepare-only "$stage" >/dev/null || fail "install.sh --prepare-only failed"
+sh "$dir/install.sh" --checkout --prepare-only "$stage" >/dev/null || fail "install.sh --checkout --prepare-only failed"
 [ -f "$stage/PKGBUILD" ] || fail "install.sh staged no PKGBUILD"
 grep -q '^source=("on-air-${pkgver}.tar.gz")$' "$stage/PKGBUILD" || fail "staged PKGBUILD does not use the local tarball"
 bash -n "$stage/PKGBUILD" || fail "staged PKGBUILD syntax"
@@ -94,6 +94,27 @@ for f in apps/tui/Cargo.toml packaging/omarchy/on-air.desktop packaging/omarchy/
   tar -tzf "$archive" | grep -q "^on-air-[^/]*/$f$" || fail "staged source lacks $f"
 done
 echo "ok $dir/install.sh builds the checkout"
+# The default install: the release's on-air-bin recipe with the binary
+# checksums from its SHA256SUMS, staged from a fake release over file://.
+fake=$(mktemp -d)
+trap '[ -n "$stage" ] && rm -rf -- "$stage"; rm -rf -- "$fake"' EXIT
+mkdir -p "$fake/raw/v9.0.0/packaging/aur" "$fake/releases/download/v9.0.0"
+cp -r packaging/aur/on-air-bin "$fake/raw/v9.0.0/packaging/aur/"
+for f in on-air-core-serve-linux-x86_64 on-air-tui-linux-x86_64 on-air-core-serve-linux-aarch64 on-air-tui-linux-aarch64; do
+  echo "$(printf %s "$f" | sha256sum | cut -d' ' -f1)  $f"
+done > "$fake/releases/download/v9.0.0/SHA256SUMS"
+ON_AIR_RAW_URL="file://$fake/raw" ON_AIR_RELEASE_URL="file://$fake/releases" \
+  sh "$dir/install.sh" --version 9.0.0 --prepare-only "$fake/bin" >/dev/null || fail "install.sh prebuilt staging failed"
+core_sum=$(printf %s on-air-core-serve-linux-x86_64 | sha256sum | cut -d' ' -f1)
+grep -q "^sha256sums_x86_64=('$core_sum' '" "$fake/bin/PKGBUILD" || fail "install.sh did not pin the release checksums"
+grep -q "SKIP" "$fake/bin/PKGBUILD" && fail "install.sh left a SKIP checksum"
+bash -n "$fake/bin/PKGBUILD" || fail "staged on-air-bin PKGBUILD syntax"
+[ -f "$fake/bin/on-air.install" ] || fail "install.sh did not stage on-air-bin's on-air.install"
+sed -i '/on-air-tui-linux-aarch64/d' "$fake/releases/download/v9.0.0/SHA256SUMS"
+ON_AIR_RAW_URL="file://$fake/raw" ON_AIR_RELEASE_URL="file://$fake/releases" \
+  sh "$dir/install.sh" --version 9.0.0 --prepare-only "$fake/bad" >/dev/null 2>&1 &&
+  fail "install.sh accepted a release missing a binary checksum"
+echo "ok $dir/install.sh installs a release prebuilt"
 
 # Release recipes: one MIT license, one version, and the prebuilt package
 # installs the same files as the source build.
