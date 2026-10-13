@@ -7,6 +7,7 @@ use on_air_core::state::CoreState;
 use on_air_tui::api::WsEvent;
 use on_air_tui::client::{Client, ClientError, Connection, Incoming};
 use on_air_tui::error_copy;
+use on_air_tui::update::{Cmd, Msg};
 use std::time::Duration;
 
 async fn mock_core() -> Client {
@@ -107,4 +108,74 @@ async fn events_arrive_after_a_service_change() {
     .expect("a ServiceStateChanged event within 5 s");
     assert!(!enabled);
     handle.abort();
+}
+
+#[tokio::test]
+async fn a_snapshot_loads_every_part_from_the_mock_core() {
+    let c = mock_core().await;
+    let (snap, failures) = c.load_snapshot().await;
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(snap.pin.as_deref(), Some("123456"));
+    assert_eq!(snap.inputs, vec!["Mock Monitor"]);
+    assert_eq!(
+        snap.outputs
+            .iter()
+            .filter(|o| o.transport == "bluetooth")
+            .count(),
+        2
+    );
+    assert_eq!(snap.volume, 50);
+    assert!(snap.rates.is_some());
+    assert_eq!(snap.cd.as_ref().map(|cd| cd.present), Some(false));
+    assert_eq!(snap.airplay_mode.as_deref(), Some("owntone"));
+}
+
+#[tokio::test]
+async fn a_paused_core_still_yields_the_parts_that_load() {
+    let c = mock_core().await;
+    c.set_service(false).await.unwrap();
+    let (snap, failures) = c.load_snapshot().await;
+    assert_eq!(snap.status.as_ref().map(|s| s.service_enabled), Some(false));
+    assert!(
+        failures.is_empty(),
+        "a paused service is a state the header shows, not an error: {failures:?}"
+    );
+    assert!(snap.inputs.is_empty());
+}
+
+#[tokio::test]
+async fn run_cmd_round_trips_an_activation() {
+    let c = mock_core().await;
+    let msgs = c
+        .run_cmd(Cmd::ActivateOutput {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+        })
+        .await;
+    assert!(
+        matches!(msgs.as_slice(), [Msg::Done { label, result: Ok(()) }] if label == "Switching output"),
+        "{msgs:?}"
+    );
+    let msgs = c
+        .run_cmd(Cmd::ActivateOutput {
+            transport: "sonos".into(),
+            device_id: "nope".into(),
+        })
+        .await;
+    assert!(
+        matches!(msgs.as_slice(), [Msg::Done { result: Err(copy), .. }] if copy == "That device is no longer available. Refresh devices and try again."),
+        "{msgs:?}"
+    );
+    let msgs = c.run_cmd(Cmd::Refresh).await;
+    assert!(
+        matches!(msgs.as_slice(), [Msg::Snapshot(Ok(snap))] if snap.active_output.is_some()),
+        "{msgs:?}"
+    );
+    assert!(c.run_cmd(Cmd::Quit).await.is_empty());
+    let down = Client::new("http://127.0.0.1:1");
+    let msgs = down.run_cmd(Cmd::Refresh).await;
+    assert!(
+        matches!(msgs.as_slice(), [Msg::Snapshot(Err(copy))] if copy.starts_with("Core unreachable")),
+        "{msgs:?}"
+    );
 }

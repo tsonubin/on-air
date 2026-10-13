@@ -9,6 +9,9 @@ use crate::api::{
     OutputInfo, OutputVolumeResponse, OutputsResponse, PinResponse, SampleRateResponse,
     ServiceResponse, StatusResponse,
 };
+use crate::error_copy;
+use crate::model::Snapshot;
+use crate::update::{self, Cmd, Msg};
 use futures_util::StreamExt;
 use reqwest::Method;
 use serde::de::DeserializeOwned;
@@ -124,6 +127,146 @@ pub fn spawn_events(base: &str, tx: UnboundedSender<Incoming>) -> tokio::task::J
             attempt = attempt.saturating_add(1);
         }
     })
+}
+
+impl Client {
+    /// Every part of the snapshot in parallel. A part that fails stays at
+    /// its default and its copy is collected, except that a paused service
+    /// is a state the header shows, not an error, so its 503s are dropped.
+    /// A missing `status` means the core is gone; the caller reports that.
+    pub async fn load_snapshot(&self) -> (Snapshot, Vec<String>) {
+        let (
+            status,
+            pin,
+            inputs,
+            active_input,
+            outputs,
+            active_output,
+            volume,
+            eq,
+            rates,
+            cd,
+            airplay_mode,
+        ) = tokio::join!(
+            self.status(),
+            self.pin(),
+            self.inputs(),
+            self.active_input(),
+            self.outputs(),
+            self.active_output(),
+            self.volume(),
+            self.eq(),
+            self.sample_rate(),
+            self.cd(),
+            self.airplay_mode(),
+        );
+        let mut failures: Vec<String> = Vec::new();
+        let paused = matches!(&status, Ok(status) if !status.service_enabled);
+        let snapshot = Snapshot {
+            status: take_part(status, paused, &mut failures),
+            pin: take_part(pin, paused, &mut failures),
+            inputs: take_part(inputs, paused, &mut failures).unwrap_or_default(),
+            active_input: take_part(active_input, paused, &mut failures).and_then(|r| r.name),
+            outputs: take_part(outputs, paused, &mut failures).unwrap_or_default(),
+            active_output: take_part(active_output, paused, &mut failures).flatten(),
+            volume: take_part(volume, paused, &mut failures).unwrap_or_default(),
+            eq: take_part(eq, paused, &mut failures).unwrap_or_default(),
+            rates: take_part(rates, paused, &mut failures),
+            cd: take_part(cd, paused, &mut failures),
+            airplay_mode: take_part(airplay_mode, paused, &mut failures),
+        };
+        (snapshot, failures)
+    }
+
+    /// Execute one command and return the messages to feed back. `Quit`
+    /// yields nothing; a refresh yields the snapshot and, when parts of it
+    /// failed, a `Done` carrying their copy.
+    pub async fn run_cmd(&self, cmd: Cmd) -> Vec<Msg> {
+        let done = |label: &str, result: Result<(), ClientError>| {
+            vec![Msg::Done {
+                label: label.to_string(),
+                result: result.map_err(|error| error_copy::copy(&error)),
+            }]
+        };
+        match cmd {
+            Cmd::Quit => vec![],
+            Cmd::Refresh => {
+                let (snapshot, failures) = self.load_snapshot().await;
+                if snapshot.status.is_none() {
+                    let copy = failures.into_iter().next().unwrap_or_else(|| {
+                        error_copy::copy(&ClientError::Unreachable(self.base.clone()))
+                    });
+                    return vec![Msg::Snapshot(Err(copy))];
+                }
+                let mut msgs = vec![Msg::Snapshot(Ok(Box::new(snapshot)))];
+                if !failures.is_empty() {
+                    msgs.push(Msg::Done {
+                        label: update::LABEL_REFRESH.to_string(),
+                        result: Err(failures.join(" ")),
+                    });
+                }
+                msgs
+            }
+            Cmd::ActivateInput(name) => {
+                done(update::LABEL_SOURCE, self.activate_input(&name).await)
+            }
+            Cmd::ActivateOutput {
+                transport,
+                device_id,
+            } => done(
+                update::LABEL_OUTPUT,
+                self.activate_output(&transport, &device_id).await,
+            ),
+            Cmd::DeactivateOutput => done(update::LABEL_STOP, self.deactivate_output().await),
+            Cmd::SetVolume(volume) => done(update::LABEL_MIXER, self.set_volume(volume).await),
+            Cmd::SetEq(gains) => done(update::LABEL_MIXER, self.set_eq(gains).await),
+            Cmd::SetSampleRate {
+                input_hz,
+                output_hz,
+            } => done(
+                update::LABEL_MIXER,
+                self.set_sample_rate(input_hz, output_hz).await,
+            ),
+            Cmd::ControlCd(action) => done(update::LABEL_CD, self.control_cd(action).await),
+            Cmd::PairAirplay { device_id, pin } => done(
+                update::LABEL_PAIR,
+                self.pair_airplay(&device_id, &pin).await,
+            ),
+            Cmd::PairBluetooth(id) => done(update::LABEL_PAIR, self.pair_bluetooth(&id).await),
+            Cmd::ConnectBluetooth(id) => {
+                done(update::LABEL_CONNECT, self.connect_bluetooth(&id).await)
+            }
+            Cmd::OpenBluetoothSettings => {
+                done(update::LABEL_SETTINGS, self.open_bluetooth_settings().await)
+            }
+            Cmd::SetService(enabled) => done(
+                update::LABEL_SERVICE,
+                self.set_service(enabled).await.map(|_| ()),
+            ),
+            // Autostart is a host concern, wired by the entry point.
+            Cmd::QueryAutostart | Cmd::SetAutostart(_) => vec![],
+        }
+    }
+}
+
+/// One part of the snapshot: its value, or `None` with its copy recorded.
+/// A 503 while the service is paused is expected and not recorded.
+fn take_part<T>(
+    result: Result<T, ClientError>,
+    paused: bool,
+    failures: &mut Vec<String>,
+) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(ClientError::Http { status: 503, .. }) if paused => None,
+        Err(error) => {
+            let copy = error_copy::copy(&error);
+            if !failures.contains(&copy) {
+                failures.push(copy);
+            }
+            None
+        }
+    }
 }
 
 /// Enough randomness for reconnect jitter without a dependency.
