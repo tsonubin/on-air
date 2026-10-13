@@ -1,3 +1,10 @@
+on-air-core (0.2.0) UNRELEASED; urgency=medium
+
+  * Persist settings and paired phones; stop cleanly on SIGTERM.
+  * License the source under MIT.
+
+ -- Shay <tsonubin@users.noreply.github.com>  Tue, 13 Oct 2026 12:00:00 +0000
+
 on-air-core (0.1.0) UNRELEASED; urgency=medium
 
   * Initial Debian package for the on-air-core serve example.

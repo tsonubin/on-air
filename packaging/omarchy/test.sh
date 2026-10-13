@@ -95,6 +95,48 @@ for f in apps/tui/Cargo.toml packaging/omarchy/on-air.desktop packaging/omarchy/
 done
 echo "ok $dir/install.sh builds the checkout"
 
+# Release recipes: one MIT license, one version, and the prebuilt package
+# installs the same files as the source build.
+grep -q '^MIT License' LICENSE 2>/dev/null || fail "LICENSE is not the MIT license"
+version=$(sed -n 's/^version = "\(.*\)"/\1/p' packages/core/Cargo.toml | head -1)
+for recipe in on-air on-air-bin on-air-core on-air-desktop-bin; do
+  pkgbuild=packaging/aur/$recipe/PKGBUILD
+  need "$pkgbuild"
+  need "packaging/aur/$recipe/.SRCINFO"
+  bash -n "$pkgbuild" || fail "$pkgbuild syntax"
+  grep -q "^license=('MIT')$" "$pkgbuild" || fail "$pkgbuild license is not MIT"
+  grep -q "^pkgver=$version$" "$pkgbuild" || fail "$pkgbuild pkgver is not $version"
+  grep -q "pkgver = $version$" "packaging/aur/$recipe/.SRCINFO" || fail "$recipe .SRCINFO pkgver is not $version"
+  grep -q 'licenses/' "$pkgbuild" || fail "$pkgbuild does not install the license"
+done
+for recipe in on-air on-air-bin; do
+  grep -q '^install=on-air.install$' "packaging/aur/$recipe/PKGBUILD" || fail "$recipe has no post-install message"
+  cmp -s packaging/omarchy/on-air.install "packaging/aur/$recipe/on-air.install" \
+    || fail "packaging/aur/$recipe/on-air.install differs from packaging/omarchy/on-air.install"
+done
+sh -n packaging/omarchy/on-air.install || fail "on-air.install syntax"
+grep -q 'systemctl --user enable --now on-air-core' packaging/omarchy/on-air.install || fail "on-air.install does not say how to start the service"
+grep -q 'on-air-tui-linux-' packaging/aur/on-air-bin/PKGBUILD || fail "on-air-bin does not fetch the prebuilt terminal UI"
+grep -q 'on-air-core-serve-linux-' packaging/aur/on-air-bin/PKGBUILD || fail "on-air-bin does not fetch the prebuilt core"
+[ -f "$stage/on-air.install" ] || fail "install.sh did not stage on-air.install"
+for recipe in on-air on-air-bin on-air-core on-air-desktop-bin; do
+  bash packaging/aur/srcinfo.sh "packaging/aur/$recipe" | cmp -s - "packaging/aur/$recipe/.SRCINFO" \
+    || fail "packaging/aur/$recipe/.SRCINFO is stale; run packaging/aur/srcinfo.sh packaging/aur/$recipe"
+done
+# on-air-bin downloads the packaging files from the tag; their pinned
+# checksums must match this checkout or the AUR build fails.
+python3 - <<'PYCHECK' || fail "on-air-bin checksums do not match the packaging files"
+import hashlib, pathlib, re, sys
+text = pathlib.Path("packaging/aur/on-air-bin/PKGBUILD").read_text()
+paths = re.findall(r'"[^"]+::\$\{_raw\}/([^"]+)"', text)
+sums = re.findall(r"'([0-9a-f]{64})'", text.split("sha256sums=(", 1)[1].split(")", 1)[0])
+bad = [p for p, s in zip(paths, sums) if hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest() != s]
+if not paths or len(paths) != len(sums) or bad:
+    print("mismatch:", bad or f"{len(paths)} sources, {len(sums)} sums", file=sys.stderr)
+    sys.exit(1)
+PYCHECK
+echo "ok packaging/aur recipes (MIT, $version)"
+
 # The documented polkit fallback must grant everything the inhibitor asks
 # for: --what=sleep:idle needs both actions.
 grep -q 'inhibit-block-sleep' docs/omarchy.md || fail "docs polkit rule lacks inhibit-block-sleep"

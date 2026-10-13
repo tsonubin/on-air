@@ -14,26 +14,28 @@ ships in the package under `/usr/share/doc/on-air/omarchy/`.
 
 ## Install
 
-From a clone of this repository:
+From the AUR, with the `yay` Omarchy ships (or the Omarchy menu's
+Install > AUR):
+
+```bash
+yay -S on-air-bin
+systemctl --user enable --now on-air-core
+on-air status
+```
+
+`on-air-bin` is prebuilt, so nothing compiles; that matters on older
+laptops. `yay -S on-air` installs the same files built from source.
+
+To build the commit you have checked out in a clone instead:
 
 ```bash
 packaging/omarchy/install.sh
 ```
 
-That builds the `on-air` package from the commit you have checked out,
-installs it with `makepkg -si`, enables the service with
-`systemctl --user enable --now on-air-core`, and prints the snippets below
-with the path each belongs in. It edits nothing under `~/.config`. Commit
-local changes first; uncommitted edits are not built.
-
-Then check it:
-
-```bash
-on-air status
-```
-
-`packaging/aur/on-air/PKGBUILD` on its own builds a tagged release (the AUR
-form). Use it once a release that contains the terminal UI is tagged.
+That builds the `on-air` package from your checkout, installs it with
+`makepkg -si`, enables the service, and prints the snippets below with the
+path each belongs in. It edits nothing under `~/.config`. Commit local
+changes first; uncommitted edits are not built.
 
 The package installs `on-air-core` and `on-air` to `/usr/bin`, the unit to
 `/usr/lib/systemd/user/on-air-core.service`, a launcher entry, an icon, and

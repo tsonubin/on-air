@@ -1,11 +1,11 @@
 # Maintainer: Shay <tsonubin@users.noreply.github.com>
 pkgname=on-air-core
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="LAN audio streaming core (HTTP/WS + AirPlay/Bluetooth/Sonos senders)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/tsonubin/on-air"
-license=('custom:unknown')
+license=('MIT')
 depends=('alsa-lib' 'openssl')
 makedepends=('cargo' 'pkgconf' 'git')
 source=("${pkgname}-${pkgver}::git+https://github.com/tsonubin/on-air.git#tag=v${pkgver}")
@@ -31,4 +31,5 @@ check() {
 package() {
   cd "${pkgname}-${pkgver}"
   install -Dm755 target/release/on-air-core "$pkgdir/usr/bin/on-air-core"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

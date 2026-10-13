@@ -2,9 +2,8 @@ class OnAirCore < Formula
   desc "LAN audio streaming core (AirPlay, Bluetooth, Sonos)"
   homepage "https://github.com/tsonubin/on-air"
   url "https://github.com/tsonubin/on-air.git",
-      tag:      "v0.1.0",
-      revision: "5e372829c846cdadacac1ebe8f4c1f5a4acec0b7"
-  license :cannot_represent
+      tag:      "v0.2.0"
+  license "MIT"
   head "https://github.com/tsonubin/on-air.git", branch: "main"
 
   depends_on "pkg-config" => :build

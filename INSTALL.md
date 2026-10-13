@@ -22,7 +22,7 @@ automatic source zip/tarball; that is not the install path.
 | **on-air-core** | Headless binary. Same control plane, no GUI. |
 
 Package-manager recipes live in this repository (`Casks/`, `Formula/`,
-`flake.nix`, `packaging/`). They pin version **0.1.0**. Binary recipes expect
+`flake.nix`, `packaging/`). They pin version **0.2.0**. Binary recipes expect
 the GitHub Release asset names listed in [Expected release assets](#expected-release-assets).
 SHA-256 values are filled by `packaging/update-checksums.sh` after a release
 publishes (the file `SHA256SUMS` is attached to the release by CI).
@@ -33,21 +33,21 @@ Until that release exists, or if the GitHub repository is private, use
 ## Omarchy / Arch (recommended on Linux)
 
 The core runs as a systemd user service and the `on-air` terminal UI
-controls it: no WebKit, no GPU toolkit, themed by your terminal. From a
-clone:
+controls it: no WebKit, no GPU toolkit, themed by your terminal. From the
+AUR (Omarchy ships `yay`; its menu also has Install > AUR):
+
+```bash
+yay -S on-air-bin                 # prebuilt; no compiler needed
+systemctl --user enable --now on-air-core
+on-air                            # the terminal UI; `on-air --help` for the subcommands
+```
+
+`yay -S on-air` builds the same thing from source instead (needs Rust; slow
+on older laptops). To build the commit you have checked out in a clone:
 
 ```bash
 packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
 ```
-
-`install.sh` builds the commit you have checked out. Then:
-
-```bash
-on-air                            # the terminal UI; `on-air --help` for the subcommands
-```
-
-`packaging/aur/on-air/PKGBUILD` by itself builds a tagged release (the AUR
-form); use it once a release containing the terminal UI is tagged.
 
 The launcher entry, the `Super+Shift+Alt+O` hotkey, the menu rows, the
 bar module and the sleep notes are in [docs/omarchy.md](docs/omarchy.md).
@@ -97,9 +97,9 @@ winget install Tsonubin.OnAir
 
 Manual fallback from the GitHub Release:
 
-- NSIS: `on-air-desktop_0.1.0_x64-setup.exe` or `_arm64-setup.exe`
-- MSI: `on-air-desktop_0.1.0_x64_en-US.msi` or `_arm64_en-US.msi`
-- Portable zip: `on-air-desktop_0.1.0_x64-portable.zip` or `_arm64-portable.zip`
+- NSIS: `on-air-desktop_0.2.0_x64-setup.exe` or `_arm64-setup.exe`
+- MSI: `on-air-desktop_0.2.0_x64_en-US.msi` or `_arm64_en-US.msi`
+- Portable zip: `on-air-desktop_0.2.0_x64-portable.zip` or `_arm64-portable.zip`
 
 ### Debian / Ubuntu — APT
 
@@ -113,7 +113,7 @@ Install the Tauri `.deb` from the GitHub Release (`amd64` or `arm64`):
 packaging/apt/install.sh
 
 # or by hand — amd64
-VERSION=0.1.0
+VERSION=0.2.0
 curl -fLO "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop_${VERSION}_amd64.deb"
 sudo apt install "./on-air-desktop_${VERSION}_amd64.deb"
 
@@ -135,27 +135,20 @@ repo is published.
 
 ### Arch Linux — yay / AUR
 
-Recipes are under `packaging/aur/`. They are **not** on the public AUR yet;
-install from the tree, or copy the directories into an AUR git package.
-`on-air` (core + terminal UI, source build) is the recommended one and is
-described in [Omarchy / Arch](#omarchy--arch-recommended-on-linux).
+Recipes are under `packaging/aur/`; each directory is one AUR package.
 
-Desktop GUI (binary, extracts the release `.deb`; the WebKitGTK window):
-
-```bash
-cd packaging/aur/on-air-bin
-makepkg -si
-# after an AUR publish:
-# yay -S on-air-bin
-```
-
-Headless core (builds with `cargo`):
+| Package | What it installs |
+| --- | --- |
+| `on-air-bin` | Core service + terminal UI, prebuilt (recommended; see [Omarchy / Arch](#omarchy--arch-recommended-on-linux)) |
+| `on-air` | The same, built from source |
+| `on-air-core` | Headless core only, built from source |
+| `on-air-desktop-bin` | The WebKitGTK desktop window, from the release `.deb` |
 
 ```bash
-cd packaging/aur/on-air-core
-makepkg -si
-# yay -S on-air-core
+yay -S on-air-bin            # or on-air, on-air-core, on-air-desktop-bin
 ```
+
+From the tree instead: `cd packaging/aur/<package> && makepkg -si`.
 
 ### Fedora / RHEL — RPM
 
@@ -165,7 +158,7 @@ Installs the WebKitGTK desktop window; on Fedora the headless core plus the
 Install the Tauri-produced RPM from the GitHub Release:
 
 ```bash
-VERSION=0.1.0
+VERSION=0.2.0
 # x86_64
 sudo dnf install \
   "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.x86_64.rpm"
@@ -261,13 +254,13 @@ https://github.com/tsonubin/on-air/releases
 
 | Platform | Arch | File |
 | --- | --- | --- |
-| macOS | Apple silicon | `on-air-desktop_0.1.0_aarch64.dmg` |
-| macOS | Intel | `on-air-desktop_0.1.0_x64.dmg` |
-| Linux | x86_64 | `on-air-desktop_0.1.0_amd64.deb`, `on-air-desktop-0.1.0-1.x86_64.rpm`, `on-air-desktop_0.1.0_amd64.AppImage` |
-| Linux | arm64 | `on-air-desktop_0.1.0_arm64.deb`, `on-air-desktop-0.1.0-1.aarch64.rpm`, `on-air-desktop_0.1.0_aarch64.AppImage` |
+| macOS | Apple silicon | `on-air-desktop_0.2.0_aarch64.dmg` |
+| macOS | Intel | `on-air-desktop_0.2.0_x64.dmg` |
+| Linux | x86_64 | `on-air-desktop_0.2.0_amd64.deb`, `on-air-desktop-0.2.0-1.x86_64.rpm`, `on-air-desktop_0.2.0_amd64.AppImage` |
+| Linux | arm64 | `on-air-desktop_0.2.0_arm64.deb`, `on-air-desktop-0.2.0-1.aarch64.rpm`, `on-air-desktop_0.2.0_aarch64.AppImage` |
 | Linux | x86_64, arm64 | `on-air-tui-linux-x86_64`, `on-air-tui-linux-aarch64` (terminal UI; pair with a headless core) |
-| Windows | x64 | `on-air-desktop_0.1.0_x64-setup.exe`, `on-air-desktop_0.1.0_x64_en-US.msi`, `on-air-desktop_0.1.0_x64-portable.zip` |
-| Windows | arm64 | `on-air-desktop_0.1.0_arm64-setup.exe`, `on-air-desktop_0.1.0_arm64_en-US.msi`, `on-air-desktop_0.1.0_arm64-portable.zip` |
+| Windows | x64 | `on-air-desktop_0.2.0_x64-setup.exe`, `on-air-desktop_0.2.0_x64_en-US.msi`, `on-air-desktop_0.2.0_x64-portable.zip` |
+| Windows | arm64 | `on-air-desktop_0.2.0_arm64-setup.exe`, `on-air-desktop_0.2.0_arm64_en-US.msi`, `on-air-desktop_0.2.0_arm64-portable.zip` |
 
 ## Build from source
 
@@ -357,26 +350,26 @@ CI (`.github/workflows/release.yml`) builds a draft release with the Tauri
 bundles, the headless `on-air-core` binary (published under the
 `on-air-core-serve-<os>-<arch>` names below) and `SHA256SUMS`, and publishes it
 only when every platform succeeded. Names match Tauri 2 defaults for
-`productName` `on-air-desktop` version `0.1.0`:
+`productName` `on-air-desktop` version `0.2.0`:
 
 ```
 # macOS
-on-air-desktop_0.1.0_aarch64.dmg
-on-air-desktop_0.1.0_x64.dmg
+on-air-desktop_0.2.0_aarch64.dmg
+on-air-desktop_0.2.0_x64.dmg
 # Linux
-on-air-desktop_0.1.0_amd64.deb
-on-air-desktop_0.1.0_arm64.deb
-on-air-desktop-0.1.0-1.x86_64.rpm
-on-air-desktop-0.1.0-1.aarch64.rpm
-on-air-desktop_0.1.0_amd64.AppImage
-on-air-desktop_0.1.0_aarch64.AppImage
+on-air-desktop_0.2.0_amd64.deb
+on-air-desktop_0.2.0_arm64.deb
+on-air-desktop-0.2.0-1.x86_64.rpm
+on-air-desktop-0.2.0-1.aarch64.rpm
+on-air-desktop_0.2.0_amd64.AppImage
+on-air-desktop_0.2.0_aarch64.AppImage
 # Windows
-on-air-desktop_0.1.0_x64-setup.exe
-on-air-desktop_0.1.0_arm64-setup.exe
-on-air-desktop_0.1.0_x64_en-US.msi
-on-air-desktop_0.1.0_arm64_en-US.msi
-on-air-desktop_0.1.0_x64-portable.zip
-on-air-desktop_0.1.0_arm64-portable.zip
+on-air-desktop_0.2.0_x64-setup.exe
+on-air-desktop_0.2.0_arm64-setup.exe
+on-air-desktop_0.2.0_x64_en-US.msi
+on-air-desktop_0.2.0_arm64_en-US.msi
+on-air-desktop_0.2.0_x64-portable.zip
+on-air-desktop_0.2.0_arm64-portable.zip
 # Headless
 on-air-core-serve-macos-aarch64
 on-air-core-serve-macos-x86_64
@@ -392,7 +385,7 @@ SHA256SUMS
 After a successful Release run:
 
 ```bash
-packaging/update-checksums.sh 0.1.0
+packaging/update-checksums.sh 0.2.0
 ```
 
 That rewrites Homebrew `sha256`, AUR `sha256sums`, winget `InstallerSha256`,
@@ -402,12 +395,12 @@ and documents any still-missing files.
 
 | Manager | Files | User command |
 | --- | --- | --- |
-| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air` | `packaging/omarchy/install.sh` |
+| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air-bin` | `yay -S on-air-bin` |
 | Homebrew cask | `Casks/on-air.rb` | `brew install --cask on-air` |
 | Homebrew formula | `Formula/on-air-core.rb` | `brew install on-air-core` |
 | Nix | `flake.nix`, `packaging/nix/` | `nix run .#on-air-core` |
 | APT | `packaging/debian/`, `packaging/apt/` | `packaging/apt/install.sh` |
-| Arch / yay | `packaging/aur/on-air-bin`, `packaging/aur/on-air-core` | `makepkg -si` / `yay -S on-air-bin` |
+| Arch / yay | `packaging/aur/on-air-bin`, `on-air`, `on-air-core`, `on-air-desktop-bin` | `yay -S on-air-bin` |
 | RPM | `packaging/rpm/*.spec` | `dnf install <url>` / `rpmbuild -ba` |
 | winget | `packaging/winget/` | `winget install --manifest packaging/winget` |
 

@@ -40,6 +40,7 @@ fi
 git -C "$root" archive --format=tar.gz --prefix="on-air-$pkgver/" \
   -o "$build/on-air-$pkgver.tar.gz" HEAD
 sed 's|^source=.*|source=("on-air-${pkgver}.tar.gz")|' "$recipe/PKGBUILD" > "$build/PKGBUILD"
+cp "$recipe/on-air.install" "$build/on-air.install"
 if [ -n "$prepare_only" ]; then
   echo "$build"
   exit 0

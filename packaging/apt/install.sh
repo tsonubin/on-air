@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO="${REPO:-tsonubin/on-air}"
-VERSION="${VERSION:-0.1.0}"
+VERSION="${VERSION:-0.2.0}"
 ARCH="${ARCH:-$(dpkg --print-architecture 2>/dev/null || echo amd64)}"
 FILE="on-air-desktop_${VERSION}_${ARCH}.deb"
 URL="https://github.com/${REPO}/releases/download/v${VERSION}/${FILE}"

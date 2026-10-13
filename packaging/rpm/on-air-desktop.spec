@@ -1,14 +1,14 @@
 # Binary spec: re-wrap the Tauri-produced GitHub Release RPM so COPR/local
 # rpmbuild can consume a URL. Prefer installing that RPM directly:
-#   sudo dnf install https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop-0.1.0-1.x86_64.rpm
-#   sudo dnf install https://github.com/tsonubin/on-air/releases/download/v0.1.0/on-air-desktop-0.1.0-1.aarch64.rpm
+#   sudo dnf install https://github.com/tsonubin/on-air/releases/download/v0.2.0/on-air-desktop-0.2.0-1.x86_64.rpm
+#   sudo dnf install https://github.com/tsonubin/on-air/releases/download/v0.2.0/on-air-desktop-0.2.0-1.aarch64.rpm
 
 Name:           on-air-desktop
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        LAN audio streaming to AirPlay, Bluetooth, or Sonos (desktop GUI)
 
-License:        Unspecified
+License:        MIT
 URL:            https://github.com/tsonubin/on-air
 %ifarch aarch64
 Source0:        https://github.com/tsonubin/on-air/releases/download/v%{version}/on-air-desktop-%{version}-1.aarch64.rpm
@@ -46,5 +46,8 @@ rpm2cpio %{SOURCE0} | cpio -idmv -D %{buildroot}
 %{_datadir}/icons
 
 %changelog
+* Tue Oct 13 2026 Shay <tsonubin@users.noreply.github.com> - 0.2.0-1
+- Rebuild for v0.2.0; MIT license
+
 * Thu Aug 27 2026 Shay <tsonubin@users.noreply.github.com> - 0.1.0-1
 - Initial binary wrap of the Tauri GitHub Release RPM
