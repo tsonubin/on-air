@@ -11,7 +11,8 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/tsonubin/on-air"
 license=('MIT')
 depends=('alsa-lib' 'openssl' 'libpulse' 'bluez-utils' 'xdg-terminal-exec' 'hicolor-icon-theme')
-optdepends=('python-pyatv: AirPlay without OwnTone')
+optdepends=('owntone-server: AirPlay through OwnTone, with PIN pairing'
+            'uv: AirPlay without OwnTone, through pyatv')
 provides=('on-air' 'on-air-core')
 conflicts=('on-air' 'on-air-core')
 install=on-air.install
@@ -20,8 +21,10 @@ _raw="https://raw.githubusercontent.com/tsonubin/on-air/v${pkgver}"
 _rel="https://github.com/tsonubin/on-air/releases/download/v${pkgver}"
 # Packaging files from the tag; their checksums are checked against the
 # repository by packaging/omarchy/test.sh.
+# The license is saved as on-air-LICENSE: a source named LICENSE would be
+# shadowed by this recipe's own 0BSD LICENSE next to the PKGBUILD.
 source=(
-        "LICENSE::${_raw}/LICENSE"
+        "on-air-LICENSE::${_raw}/LICENSE"
         "on-air-core.service::${_raw}/packaging/omarchy/on-air-core.service"
         "on-air.desktop::${_raw}/packaging/omarchy/on-air.desktop"
         "on-air.svg::${_raw}/packaging/omarchy/on-air.svg"
@@ -61,7 +64,7 @@ package() {
   install -Dm644 on-air-core.service "$pkgdir/usr/lib/systemd/user/on-air-core.service"
   install -Dm644 on-air.desktop "$pkgdir/usr/share/applications/on-air.desktop"
   install -Dm644 on-air.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/on-air.svg"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 on-air-LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -dm755 "$pkgdir/usr/share/doc/on-air/omarchy"
   install -m644 omarchy-menu.jsonc bindings.lua bindings.conf hyprland-rules.lua \
     hyprland-rules.conf shell-bar.json waybar.jsonc "$pkgdir/usr/share/doc/on-air/omarchy/"

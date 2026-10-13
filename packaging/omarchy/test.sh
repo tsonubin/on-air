@@ -109,6 +109,36 @@ for recipe in on-air on-air-bin on-air-core on-air-desktop-bin; do
   grep -q "pkgver = $version$" "packaging/aur/$recipe/.SRCINFO" || fail "$recipe .SRCINFO pkgver is not $version"
   grep -q 'licenses/' "$pkgbuild" || fail "$pkgbuild does not install the license"
 done
+# Each directory is a whole AUR repository: a 0BSD license for the recipe,
+# a .gitignore that keeps every recipe file, and no source named like one
+# of those files (makepkg would use the local file instead of downloading).
+python3 - <<'PYCHECK' || fail "AUR recipe directories do not follow the submission guidelines"
+import pathlib, sys
+errors = []
+for recipe in ("on-air", "on-air-bin", "on-air-core", "on-air-desktop-bin"):
+    d = pathlib.Path("packaging/aur") / recipe
+    lic = d / "LICENSE"
+    if not lic.is_file() or "Permission to use, copy, modify, and/or distribute" not in lic.read_text():
+        errors.append(f"{recipe}: LICENSE is not the 0BSD recipe license")
+    ignore = d / ".gitignore"
+    kept = set()
+    if ignore.is_file():
+        kept = {l[1:] for l in ignore.read_text().splitlines() if l.startswith("!")}
+    else:
+        errors.append(f"{recipe}: no .gitignore")
+    files = {p.name for p in d.iterdir() if p.is_file()}
+    for name in sorted(files - kept):
+        errors.append(f"{recipe}: .gitignore does not keep {name}")
+    for line in (d / ".SRCINFO").read_text().splitlines():
+        key, _, value = line.strip().partition(" = ")
+        if key == "source" or key.startswith("source_"):
+            name = value.split("::", 1)[0] if "::" in value else value.rsplit("/", 1)[-1]
+            if name in files:
+                errors.append(f"{recipe}: source {name} is shadowed by the local file")
+for e in errors:
+    print(e, file=sys.stderr)
+sys.exit(1 if errors else 0)
+PYCHECK
 for recipe in on-air on-air-bin; do
   grep -q '^install=on-air.install$' "packaging/aur/$recipe/PKGBUILD" || fail "$recipe has no post-install message"
   cmp -s packaging/omarchy/on-air.install "packaging/aur/$recipe/on-air.install" \

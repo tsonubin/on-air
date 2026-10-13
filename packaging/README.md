@@ -56,20 +56,43 @@ the same recipe to `omacom-io/omarchy-pkgs` (Omarchy's own repo, so
 
 Four AUR packages, one directory each under `packaging/aur/`: `on-air-bin`
 (prebuilt, recommended), `on-air` (source), `on-air-core` (headless) and
-`on-air-desktop-bin` (the WebKitGTK window). To publish one, with an AUR
-account and its SSH key:
+`on-air-desktop-bin` (the WebKitGTK window). Each directory is the whole AUR
+repository for that package, following the
+[AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines):
+`PKGBUILD`, `.SRCINFO`, the `.install` message where there is one, a 0BSD
+`LICENSE` for the recipe itself (the software stays MIT), and a `.gitignore`
+that keeps makepkg's downloads and build output out of the commit.
 
-```bash
-git clone ssh://aur@aur.archlinux.org/on-air-bin.git aur-on-air-bin
-cp packaging/aur/on-air-bin/{PKGBUILD,.SRCINFO,on-air.install} aur-on-air-bin/
-cd aur-on-air-bin && makepkg --printsrcinfo > .SRCINFO   # on Arch; matches the repo copy
-git add -A && git commit -m "on-air-bin 0.2.0" && git push
+Publish `on-air-bin` and `on-air-desktop-bin` only after
+`packaging/update-checksums.sh` has filled their binary checksums: until
+then they are `SKIP`, so the downloads would go unverified.
+
+One time, on an aur.archlinux.org account: make a key with
+`ssh-keygen -f ~/.ssh/aur`, paste `~/.ssh/aur.pub` into *My Account → SSH
+Public Key*, and add to `~/.ssh/config`:
+
+```text
+Host aur.archlinux.org
+  IdentityFile ~/.ssh/aur
+  User aur
 ```
 
-`packaging/aur/srcinfo.sh <dir>` writes the same `.SRCINFO` where
-`makepkg` is missing. Publish `on-air-bin` and `on-air-desktop-bin` only
-after `packaging/update-checksums.sh` has filled their binary checksums:
-until then they are `SKIP`, so the downloads would go unverified.
+Then, per package, from this checkout on Arch (the AUR only accepts the
+`master` branch; commits carry your git name and email):
+
+```bash
+git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/on-air-bin.git aur-on-air-bin
+cp -r packaging/aur/on-air-bin/. aur-on-air-bin/
+cd aur-on-air-bin
+makepkg --printsrcinfo | diff - .SRCINFO   # no output: the repo copy is current
+makepkg -si                                # build and install it once before publishing
+git add -A && git status --short           # only the recipe files, nothing makepkg downloaded
+git commit -m "Initial upload: on-air-bin 0.2.0" && git push
+```
+
+For a new release, bump `pkgver` (back to `pkgrel=1`), refresh the
+checksums and `.SRCINFO`, and push the same way. `packaging/aur/srcinfo.sh
+<dir>` writes the `.SRCINFO` where `makepkg` is missing.
 
 ### winget
 

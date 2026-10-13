@@ -10,7 +10,8 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/tsonubin/on-air"
 license=('MIT')
 depends=('alsa-lib' 'openssl' 'libpulse' 'bluez-utils' 'xdg-terminal-exec' 'hicolor-icon-theme')
-optdepends=('python-pyatv: AirPlay without OwnTone')
+optdepends=('owntone-server: AirPlay through OwnTone, with PIN pairing'
+            'uv: AirPlay without OwnTone, through pyatv')
 makedepends=('cargo' 'git')
 provides=('on-air' 'on-air-core')
 conflicts=('on-air-bin' 'on-air-core')

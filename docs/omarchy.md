@@ -41,8 +41,11 @@ The package installs `on-air-core` and `on-air` to `/usr/bin`, the unit to
 `/usr/lib/systemd/user/on-air-core.service`, a launcher entry, an icon, and
 the snippets. It depends on `libpulse` (`pactl`, `parec`, `pacat` for the
 PipeWire capture), `bluez-utils` (`bluetoothctl`) and `xdg-terminal-exec`
-(what opens the launcher entry in your terminal). AirPlay without OwnTone
-needs `python-pyatv`.
+(what opens the launcher entry in your terminal). AirPlay goes through
+OwnTone (`owntone-server` in the AUR) when it runs, otherwise through pyatv:
+install `uv` and fetch pyatv once with
+`uv run --with pyatv python3 -c "import pyatv"`, since the core runs it
+offline.
 
 ## Launch
 
