@@ -1,5 +1,5 @@
 use axum::http::{header, HeaderValue, Method};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Serialize;
 use std::net::SocketAddr;
@@ -35,20 +35,20 @@ pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub service_enabled: bool,
+    /// Whether a platform sleep inhibitor is held right now. False while the
+    /// service is off, on platforms without one, and when the OS refused it.
+    pub sleep_inhibited: bool,
     /// Non-loopback IPv4 addresses of this host, so the desktop can show the
     /// address a phone must type. Empty when unknown.
     pub lan_addresses: Vec<String>,
 }
 
-pub fn status() -> StatusResponse {
-    status_with_service(true)
-}
-
-pub fn status_with_service(service_enabled: bool) -> StatusResponse {
+pub fn status_for(state: &CoreState) -> StatusResponse {
     StatusResponse {
         status: "ok",
         version: env!("CARGO_PKG_VERSION"),
-        service_enabled,
+        service_enabled: state.service_enabled.load(Ordering::Acquire),
+        sleep_inhibited: state.sleep_inhibited(),
         lan_addresses: net::lan_addresses(),
     }
 }
@@ -87,6 +87,7 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/sample-rate",
             get(api::sample_rate::get_sample_rate).put(api::sample_rate::set_sample_rate),
         )
+        .route("/api/service", put(api::service::set_service))
         .route("/api/ws", get(api::ws::ws_handler))
         .route("/api/pairing/pin", get(api::pairing::get_pin))
         .route("/api/pairing/verify", post(api::pairing::verify_pin))
@@ -121,9 +122,7 @@ pub fn build_router(state: CoreState) -> Router {
 async fn status_handler(
     axum::extract::State(state): axum::extract::State<CoreState>,
 ) -> Json<StatusResponse> {
-    Json(status_with_service(
-        state.service_enabled.load(Ordering::Acquire),
-    ))
+    Json(status_for(&state))
 }
 
 pub fn mock_mode_enabled() -> bool {

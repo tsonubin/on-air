@@ -147,6 +147,22 @@ pub struct CoreState {
     pub(crate) pcm_sink: Arc<RecordingPcmSink>,
 }
 
+/// What a request to set the service flag amounts to, given its current value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceTransition {
+    Unchanged,
+    TurnOn,
+    TurnOff,
+}
+
+pub fn service_transition(current: bool, requested: bool) -> ServiceTransition {
+    match (current, requested) {
+        (false, true) => ServiceTransition::TurnOn,
+        (true, false) => ServiceTransition::TurnOff,
+        _ => ServiceTransition::Unchanged,
+    }
+}
+
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
 // Network speakers buffer and read live radio streams in bursts. At 1024 mono
 // frames per chunk this retains roughly 12 seconds / 1 MiB at 44.1 kHz, enough
@@ -450,6 +466,36 @@ impl CoreState {
     pub fn set_service_enabled(&self, enabled: bool) {
         self.service_enabled.store(enabled, Ordering::Release);
         self.update_saved_settings(|saved| saved.service_enabled = enabled);
+    }
+
+    /// The synchronous half of a service change: claim the flag, persist it,
+    /// tell WebSocket clients, then hold or release the sleep inhibitor.
+    /// Claiming is one atomic step so two concurrent requests for the same
+    /// state cannot both run the side effects.
+    pub fn begin_service_transition(&self, enabled: bool) -> ServiceTransition {
+        if self
+            .service_enabled
+            .compare_exchange(!enabled, enabled, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return ServiceTransition::Unchanged;
+        }
+        self.update_saved_settings(|saved| saved.service_enabled = enabled);
+        let _ = self.ws_tx.send(WsEvent::ServiceStateChanged { enabled });
+        self.keep_awake.set_enabled(enabled);
+        service_transition(!enabled, enabled)
+    }
+
+    /// The asynchronous half: stop the live audio work after turning off,
+    /// or restore the saved session after turning on.
+    pub async fn finish_service_transition(&self, transition: ServiceTransition) {
+        match transition {
+            ServiceTransition::Unchanged => {}
+            ServiceTransition::TurnOff => self.shutdown().await,
+            ServiceTransition::TurnOn => {
+                self.spawn_saved_session_restore();
+            }
+        }
     }
 
     fn persist_settings_now(&self) {

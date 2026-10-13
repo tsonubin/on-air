@@ -77,6 +77,23 @@ fn peer_is_loopback(parts: &Parts, allow_missing: bool) -> bool {
         .unwrap_or(allow_missing)
 }
 
+/// A paired remote or the loopback desktop, whether or not the service is
+/// paused. Only for routes that must work while paused, such as turning the
+/// service back on; everything else uses [`Paired`].
+pub struct Authorized;
+
+#[async_trait::async_trait]
+impl FromRequestParts<CoreState> for Authorized {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &CoreState,
+    ) -> Result<Self, Self::Rejection> {
+        authorize_parts(parts, state).map(|()| Authorized)
+    }
+}
+
 #[async_trait::async_trait]
 impl FromRequestParts<CoreState> for Paired {
     type Rejection = ApiError;
@@ -88,6 +105,13 @@ impl FromRequestParts<CoreState> for Paired {
         if !state.service_enabled.load(Ordering::Acquire) {
             return Err(ApiError::service_paused());
         }
+        authorize_parts(parts, state).map(|()| Paired)
+    }
+}
+
+/// The token-or-loopback check shared by [`Paired`] and [`Authorized`].
+fn authorize_parts(parts: &Parts, state: &CoreState) -> Result<(), ApiError> {
+    {
         let path = parts.uri.path();
         let header = parts
             .headers
@@ -108,7 +132,7 @@ impl FromRequestParts<CoreState> for Paired {
         };
         let pairing = state.pairing.lock();
         if authorize(path, authorization, peer_is_loopback, &pairing) {
-            Ok(Paired)
+            Ok(())
         } else {
             Err(ApiError::not_paired())
         }
