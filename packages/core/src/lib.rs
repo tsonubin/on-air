@@ -133,9 +133,43 @@ pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
     let state = if mock_mode_enabled() {
         CoreState::new_mock().await
     } else {
-        CoreState::new()
+        persistent_state_from_env()
     };
     serve_with_state(listener, state).await
+}
+
+/// Where the headless core keeps `settings.json` (and `paired-remotes.json`
+/// beside it): `config_dir` when it is absolute (`ON_AIR_CONFIG_DIR`), else
+/// `<xdg_config_home>/on-air-core`, else `<home>/.config/on-air-core`.
+/// Relative or empty locations are ignored, as the XDG spec asks.
+pub fn settings_path_from(
+    config_dir: Option<std::path::PathBuf>,
+    xdg_config_home: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    let absolute = |path: Option<std::path::PathBuf>| path.filter(|p| p.is_absolute());
+    let dir = absolute(config_dir)
+        .or_else(|| absolute(xdg_config_home).map(|dir| dir.join("on-air-core")))
+        .or_else(|| absolute(home).map(|home| home.join(".config/on-air-core")))?;
+    Some(dir.join("settings.json"))
+}
+
+/// The headless core as a user service: the last source, speaker, volume,
+/// EQ, rates, service flag and paired phones survive a restart, as they do
+/// in the desktop app. With nowhere to keep them it runs from defaults.
+fn persistent_state_from_env() -> CoreState {
+    let path = settings_path_from(
+        std::env::var_os("ON_AIR_CONFIG_DIR").map(Into::into),
+        std::env::var_os("XDG_CONFIG_HOME").map(Into::into),
+        std::env::var_os("HOME").map(Into::into),
+    );
+    match path {
+        Some(path) => CoreState::new_persistent(path),
+        None => {
+            eprintln!("on-air-core: no HOME or ON_AIR_CONFIG_DIR; settings will not persist");
+            CoreState::new()
+        }
+    }
 }
 
 pub async fn serve_with_state(listener: TcpListener, state: CoreState) -> std::io::Result<()> {
