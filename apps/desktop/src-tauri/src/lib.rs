@@ -13,15 +13,14 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 #[cfg(not(target_os = "macos"))]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
-mod keep_awake;
 mod login_item;
 #[cfg(target_os = "macos")]
 mod macos_airplay;
 mod tray_icon;
 mod window_presentation;
 
-use keep_awake::KeepAwake;
 use on_air_core::api::ws::WsEvent;
+use on_air_core::keep_awake::KeepAwake;
 use on_air_core::state::CoreState;
 use window_presentation::WindowPresentation;
 
@@ -566,7 +565,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use keep_awake::testing::{fake_method, recording, Event};
+    use on_air_core::keep_awake::testing::{fake_method, recording, Event};
     use std::sync::{Arc, Mutex};
 
     #[test]

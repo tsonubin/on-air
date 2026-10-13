@@ -3,6 +3,7 @@
 
 use crate::cd::CdDeck;
 use crate::events::{emit_catalog_diff, WsEvent};
+use crate::keep_awake::KeepAwake;
 use crate::pairing::PairingState;
 use crate::pipeline::input::InputWiring;
 use crate::pipeline::{InputError, InputSession};
@@ -112,6 +113,8 @@ pub struct CoreState {
     /// Controls whether remote clients may start or configure audio work. The
     /// lightweight HTTP and discovery services remain online while disabled.
     pub service_enabled: Arc<AtomicBool>,
+    /// The platform sleep inhibitor, held exactly while the service is on.
+    pub keep_awake: Arc<KeepAwake>,
     saved_settings: Arc<StdMutex<SavedSettings>>,
     settings_persistence: Option<SettingsPersistence>,
     settings_revision: Arc<AtomicU64>,
@@ -214,6 +217,7 @@ impl CoreState {
             output_sample_rate_hz,
             output_volume: Arc::new(AtomicU8::new(saved_settings.volume)),
             service_enabled: Arc::new(AtomicBool::new(saved_settings.service_enabled)),
+            keep_awake: Arc::new(KeepAwake::system(saved_settings.service_enabled)),
             saved_settings: Arc::new(StdMutex::new(saved_settings)),
             settings_persistence,
             settings_revision: Arc::new(AtomicU64::new(0)),
@@ -232,9 +236,28 @@ impl CoreState {
         }
     }
 
+    /// Replace the sleep inhibitor, for tests and for hosts that hold their
+    /// own. The replacement is held or released to match the service flag
+    /// the moment it is installed.
+    pub fn with_keep_awake(mut self, keep_awake: KeepAwake) -> Self {
+        keep_awake.set_enabled(self.service_enabled.load(Ordering::Acquire));
+        self.keep_awake = Arc::new(keep_awake);
+        self
+    }
+
+    /// Whether a platform sleep inhibitor is held right now.
+    pub fn sleep_inhibited(&self) -> bool {
+        self.keep_awake.is_holding()
+    }
+
     /// E2E / CI: fake inputs and transports, fixed pairing PIN, no hardware.
     pub async fn new_mock() -> Self {
-        let mut state = Self::new();
+        // The mock core must never start a real `systemd-inhibit` on CI.
+        let mut state = Self::new().with_keep_awake(KeepAwake::with_spawner(
+            None,
+            Box::new(crate::keep_awake::NoopSpawner),
+            true,
+        ));
         state.set_mock(true);
         state.pairing = Arc::new(StdMutex::new(PairingState::mock()));
         state.input.set_mock_inputs(vec!["Mock Monitor".into()]);
@@ -623,6 +646,14 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn a_new_state_holds_the_inhibitor_only_while_the_service_is_on() {
+        let (keep_awake, spawner) = crate::keep_awake::testing::recording(true);
+        let state = CoreState::new().with_keep_awake(keep_awake);
+        assert!(state.sleep_inhibited());
+        assert_eq!(spawner.events().len(), 1);
+    }
 
     fn settings_test_path(name: &str) -> PathBuf {
         let nonce = SystemTime::now()

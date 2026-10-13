@@ -12,6 +12,7 @@ pub mod cd;
 pub mod dsp;
 pub mod events;
 pub mod http;
+pub mod keep_awake;
 pub mod mdns;
 pub mod net;
 pub mod pairing;
