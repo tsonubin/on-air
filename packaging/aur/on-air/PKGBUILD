@@ -3,17 +3,18 @@
 # terminal UI, built from source, with the launcher entry, icon, systemd
 # user unit and Omarchy snippets. Shaped after Omarchy's own Rust recipes.
 pkgname=on-air
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='LAN audio to AirPlay, Bluetooth or Sonos: core service and terminal UI'
 arch=('x86_64' 'aarch64')
 url="https://github.com/tsonubin/on-air"
-license=('custom:unknown')
+license=('MIT')
 depends=('alsa-lib' 'openssl' 'libpulse' 'bluez-utils' 'xdg-terminal-exec' 'hicolor-icon-theme')
 optdepends=('python-pyatv: AirPlay without OwnTone')
 makedepends=('cargo' 'git')
 provides=('on-air' 'on-air-core')
 conflicts=('on-air-bin' 'on-air-core')
+install=on-air.install
 options=('!debug' '!lto')
 source=("${pkgname}-${pkgver}::git+https://github.com/tsonubin/on-air.git#tag=v${pkgver}")
 sha256sums=('SKIP')
@@ -46,4 +47,5 @@ package() {
   install -Dm644 packaging/omarchy/on-air.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/on-air.svg"
   install -dm755 "$pkgdir/usr/share/doc/on-air/omarchy"
   install -m644 packaging/omarchy/snippets/* "$pkgdir/usr/share/doc/on-air/omarchy/"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

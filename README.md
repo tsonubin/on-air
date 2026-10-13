@@ -6,7 +6,8 @@ app is **Omarchy-first**: the core runs as a systemd user service and the
 `on-air` terminal UI controls it, with no browser engine. macOS and Windows
 use the Tauri tray app.
 
-**Install:** see [INSTALL.md](INSTALL.md) (Omarchy/Arch, Homebrew, winget, APT, RPM, Nix, or source)
+**Install:** on Omarchy or Arch, `yay -S on-air-bin`. Everything else is in
+[INSTALL.md](INSTALL.md) (Homebrew, winget, APT, RPM, Nix, or source)
 and [docs/omarchy.md](docs/omarchy.md) for the Omarchy integration.
 
 Control plane listens on port `47990`. Pair from the LAN with a PIN. Transports

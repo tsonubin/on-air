@@ -10,7 +10,7 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "on-air-core";
-  version = "0.1.0";
+  version = "0.2.0";
 
   inherit src;
 
@@ -46,6 +46,7 @@ rustPlatform.buildRustPackage rec {
     description = "LAN audio streaming core (HTTP/WS control + AirPlay/Bluetooth/Sonos senders)";
     homepage = "https://github.com/tsonubin/on-air";
     mainProgram = "on-air-core";
+    license = lib.licenses.mit;
     platforms = lib.platforms.unix;
   };
 }

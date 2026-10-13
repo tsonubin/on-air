@@ -1,11 +1,12 @@
 pkgbase = on-air
 	pkgdesc = LAN audio to AirPlay, Bluetooth or Sonos: core service and terminal UI
-	pkgver = 0.1.0
+	pkgver = 0.2.0
 	pkgrel = 1
 	url = https://github.com/tsonubin/on-air
+	install = on-air.install
 	arch = x86_64
 	arch = aarch64
-	license = custom:unknown
+	license = MIT
 	makedepends = cargo
 	makedepends = git
 	depends = alsa-lib
@@ -21,7 +22,7 @@ pkgbase = on-air
 	conflicts = on-air-core
 	options = !debug
 	options = !lto
-	source = on-air-0.1.0::git+https://github.com/tsonubin/on-air.git#tag=v0.1.0
+	source = on-air-0.2.0::git+https://github.com/tsonubin/on-air.git#tag=v0.2.0
 	sha256sums = SKIP
 
 pkgname = on-air

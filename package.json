@@ -1,6 +1,7 @@
 {
   "name": "on-air",
   "private": true,
+  "license": "MIT",
   "scripts": {
     "dev": "turbo run dev",
     "dev:desktop": "pnpm --filter desktop tauri dev",

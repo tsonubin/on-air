@@ -1,9 +1,9 @@
 Name:           on-air-core
-Version:        0.1.0
+Version:        0.2.0
 Release:        1%{?dist}
 Summary:        LAN audio streaming core (AirPlay, Bluetooth, Sonos)
 
-License:        Unspecified
+License:        MIT
 URL:            https://github.com/tsonubin/on-air
 Source0:        https://github.com/tsonubin/on-air/archive/refs/tags/v%{version}.tar.gz
 
@@ -34,5 +34,8 @@ cargo test --release --locked --package on-air-core
 %{_bindir}/on-air-core
 
 %changelog
+* Tue Oct 13 2026 Shay <tsonubin@users.noreply.github.com> - 0.2.0-1
+- Persist settings and paired phones; clean shutdown on SIGTERM; MIT license
+
 * Thu Aug 27 2026 Shay <tsonubin@users.noreply.github.com> - 0.1.0-1
 - Initial package
