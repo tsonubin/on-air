@@ -243,8 +243,10 @@ impl Client {
                 update::LABEL_SERVICE,
                 self.set_service(enabled).await.map(|_| ()),
             ),
-            // Autostart is a host concern, wired by the entry point.
-            Cmd::QueryAutostart | Cmd::SetAutostart(_) => vec![],
+            Cmd::QueryAutostart => vec![Msg::Autostart(crate::autostart::is_enabled().await)],
+            Cmd::SetAutostart(enabled) => {
+                vec![Msg::Autostart(crate::autostart::set_enabled(enabled).await)]
+            }
         }
     }
 }

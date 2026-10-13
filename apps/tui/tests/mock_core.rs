@@ -179,3 +179,33 @@ async fn run_cmd_round_trips_an_activation() {
         "{msgs:?}"
     );
 }
+
+#[tokio::test]
+async fn bar_and_service_subcommands_against_the_mock_core() {
+    let c = mock_core().await;
+    let line: serde_json::Value = serde_json::from_str(&on_air_tui::cli::bar(&c).await).unwrap();
+    assert_eq!(line["class"], "idle");
+    assert_eq!(
+        on_air_tui::cli::service(&c, "toggle").await.unwrap(),
+        "service off"
+    );
+    let line: serde_json::Value = serde_json::from_str(&on_air_tui::cli::bar(&c).await).unwrap();
+    assert_eq!(line["class"], "off");
+    assert_eq!(
+        on_air_tui::cli::service(&c, "on").await.unwrap(),
+        "service on"
+    );
+    c.activate_output("sonos", "uuid:mock-sonos").await.unwrap();
+    let line: serde_json::Value = serde_json::from_str(&on_air_tui::cli::bar(&c).await).unwrap();
+    assert_eq!(line["class"], "live");
+    assert_eq!(line["text"], "󰝚 Mock Sonos");
+    let down: serde_json::Value =
+        serde_json::from_str(&on_air_tui::cli::bar(&Client::new("http://127.0.0.1:1")).await)
+            .unwrap();
+    assert_eq!(down["class"], "down");
+    let status = on_air_tui::cli::status(&c, true).await.unwrap();
+    assert!(status.contains("\"service_enabled\""), "{status}");
+    let human = on_air_tui::cli::status(&c, false).await.unwrap();
+    assert!(human.contains("service: on"), "{human}");
+    assert!(on_air_tui::cli::service(&c, "maybe").await.is_err());
+}

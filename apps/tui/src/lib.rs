@@ -5,9 +5,12 @@
 //! menu; closing it never stops streaming.
 
 pub mod api;
+pub mod autostart;
+pub mod cli;
 pub mod client;
 pub mod error_copy;
 pub mod keys;
 pub mod model;
+pub mod theme;
 pub mod update;
 pub mod view;
