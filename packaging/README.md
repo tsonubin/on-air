@@ -21,8 +21,10 @@ Requires `gh` authenticated against `tsonubin/on-air`. The script pulls
 - `packaging/aur/on-air-bin/PKGBUILD` (+ regenerates `.SRCINFO` if `makepkg` exists)
 - `packaging/winget/Tsonubin.OnAir.installer.yaml`
 
-Source-based recipes (Homebrew formula, Nix flake, AUR `on-air-core`, Debian
-`on-air-core`, RPM `on-air-core`) do not need binary hashes.
+Source-based recipes (Homebrew formula, Nix flake, AUR `on-air` and
+`on-air-core`, Debian `on-air-core`, RPM `on-air-core`) do not need binary
+hashes. The script also reports the `on-air-tui-linux-*` release binaries
+when they are missing.
 
 ## Publishing
 
@@ -37,9 +39,18 @@ brew tap tsonubin/on-air https://github.com/tsonubin/on-air.git
 A dedicated `homebrew-on-air` repo is optional later; copy `Casks/` and
 `Formula/` into it if you want `brew tap tsonubin/on-air` without the extra URL.
 
-### AUR (yay)
+### Omarchy / AUR (yay)
 
-Create `ssh://aur@aur.archlinux.org/on-air-bin.git` and
+`packaging/aur/on-air` is the Omarchy-first package: the core service plus
+the terminal UI, built from source, with the files under `packaging/omarchy/`
+(unit, launcher entry, icon, snippets). `sh packaging/omarchy/test.sh`
+validates them; `packaging/omarchy/install.sh` is the user-facing installer;
+[`docs/omarchy.md`](../docs/omarchy.md) is the integration guide. Submitting
+the same recipe to `omacom-io/omarchy-pkgs` (Omarchy's own repo, so
+`omarchy pkg add on-air` works) is a copy of that directory.
+
+Create `ssh://aur@aur.archlinux.org/on-air.git`,
+`ssh://aur@aur.archlinux.org/on-air-bin.git` and
 `ssh://aur@aur.archlinux.org/on-air-core.git`, copy the matching
 `packaging/aur/<pkg>/` contents (including `.SRCINFO`), and push. Until then
 `makepkg -si` from those directories works.

@@ -2,7 +2,9 @@
 
 Tauri 2 shell around the Rust core (`packages/core`), with a React 19 + Vite +
 Tailwind v4 webview. The page talks to the in-process core over loopback HTTP
-and WebSocket through `@on-air/control-client`.
+and WebSocket through `@on-air/control-client`. This is the macOS and Windows
+app; on Linux the recommended UI is the terminal UI in `apps/tui`, and the
+Linux bundles built here ship the WebKitGTK window for people who want it.
 
 ```bash
 pnpm --filter desktop dev          # Vite only, on http://127.0.0.1:1420 (needs a core on :47990)
