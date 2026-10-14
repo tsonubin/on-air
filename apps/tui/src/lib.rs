@@ -11,6 +11,7 @@ pub mod client;
 pub mod error_copy;
 pub mod handoff;
 pub mod keys;
+pub mod labels;
 pub mod model;
 pub mod service;
 pub mod theme;

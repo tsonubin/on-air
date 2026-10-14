@@ -4,6 +4,7 @@
 use crate::api::{CdAction, WsEvent};
 use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
+use crate::labels::input_labels;
 use crate::model::{MixerRow, Modal, Model, OutputRow, PairTarget, Pane, Pending, Snapshot};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
@@ -419,7 +420,7 @@ fn prev_pane(pane: Pane) -> Pane {
 fn move_selection(model: &mut Model, delta: i32) {
     match model.pane {
         Pane::Sources => {
-            let len = model.snapshot.inputs.len();
+            let len = input_labels(&model.snapshot.inputs).len();
             model.source_index = step(model.source_index, delta, len);
         }
         Pane::Outputs => {
@@ -466,7 +467,7 @@ fn step(index: usize, delta: i32, len: usize) -> usize {
 }
 
 fn clamp_selection(model: &mut Model) {
-    let sources = model.snapshot.inputs.len();
+    let sources = input_labels(&model.snapshot.inputs).len();
     model.source_index = model.source_index.min(sources.saturating_sub(1));
     let rows = model.output_rows();
     if rows.is_empty() {
@@ -486,9 +487,9 @@ fn clamp_selection(model: &mut Model) {
 
 fn select(model: &mut Model) -> Vec<Cmd> {
     match model.pane {
-        Pane::Sources => match model.snapshot.inputs.get(model.source_index) {
-            Some(name) => {
-                let name = name.clone();
+        Pane::Sources => match input_labels(&model.snapshot.inputs).get(model.source_index) {
+            Some(row) => {
+                let name = row.name.clone();
                 pending(model, LABEL_SOURCE, vec![Cmd::ActivateInput(name)])
             }
             None => vec![],
@@ -756,6 +757,19 @@ mod tests {
             vec![Cmd::ActivateInput("Mock Monitor".into())]
         );
         assert_eq!(m.pending.as_ref().unwrap().label, "Switching source");
+    }
+
+    #[test]
+    fn source_rows_skip_duplicate_names() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.inputs = vec!["a.monitor".into(), "a.monitor".into(), "USB mic".into()];
+        update(&mut m, code(KeyCode::Down));
+        update(&mut m, code(KeyCode::Down));
+        assert_eq!(m.source_index, 1);
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::ActivateInput("USB mic".into())]
+        );
     }
 
     #[test]

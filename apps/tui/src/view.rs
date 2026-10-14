@@ -6,6 +6,7 @@
 //! foregrounds are the sixteen ANSI colors plus the theme accent.
 
 use crate::keys::{HINTS, KEYS};
+use crate::labels::input_labels;
 use crate::model::{MixerRow, Modal, Model, OutputRow, Pane};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -264,16 +265,14 @@ fn sources_pane(model: &Model, frame: &mut Frame, area: Rect) {
     let focused = model.pane == Pane::Sources;
     let block = pane_block("Sources", focused, model.accent);
     let inner_width = area.width.saturating_sub(4) as usize;
-    let items: Vec<ListItem> = model
-        .snapshot
-        .inputs
+    let items: Vec<ListItem> = input_labels(&model.snapshot.inputs)
         .iter()
         .enumerate()
-        .map(|(index, name)| {
+        .map(|(index, row)| {
             let selected = focused && index == model.source_index;
-            let active = model.snapshot.active_input.as_deref() == Some(name.as_str());
+            let active = model.snapshot.active_input.as_deref() == Some(row.name.as_str());
             let marker = if selected { "> " } else { "  " };
-            let label = truncate(name, inner_width.saturating_sub(4));
+            let label = truncate(&row.label, inner_width.saturating_sub(4));
             let mut spans = vec![Span::raw(marker), Span::raw(label)];
             if active {
                 spans.push(Span::styled(" ●", Style::new().fg(Color::Green)));
@@ -661,6 +660,17 @@ mod tests {
         let t = text(&render(&model(), 100, 30));
         assert!(t.contains("> Mock Monitor"), "{t}");
         assert!(t.contains("  Built-in mic"), "{t}");
+    }
+
+    #[test]
+    fn sources_show_friendly_labels() {
+        let mut m = model();
+        m.snapshot.inputs = vec!["alsa_output.usb.monitor".into(), "Audio CD".into()];
+        m.snapshot.active_input = Some("alsa_output.usb.monitor".into());
+        let t = text(&render(&m, 100, 30));
+        assert!(t.contains("System monitor ●"), "{t}");
+        assert!(t.contains("Audio CD"), "{t}");
+        assert!(!t.contains("alsa_output"), "{t}");
     }
 
     #[test]
