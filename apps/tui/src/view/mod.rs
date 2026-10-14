@@ -5,48 +5,36 @@
 //! background (and Omarchy's opacity and glass rules) show through;
 //! foregrounds are the sixteen ANSI colors plus the theme accent.
 
-use crate::keys::{HINTS, KEYS};
-use crate::labels::input_labels;
-use crate::model::{DestRow, DestState, MixerRow, Modal, Model, Pane};
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+mod cd;
+mod header;
+mod hit;
+mod layout;
+mod mixer;
+mod overlay;
+mod route;
+
+pub use hit::{CdButton, HitMap, Target};
+pub use layout::truncate;
+
+use crate::model::{Modal, Model};
+use cd::cd_line;
+use header::{header_line, hint_line};
+use mixer::mixer_pane;
+use overlay::{help_overlay, pin_overlay};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use route::{outputs_pane, sources_pane};
 
 /// Below this the screen only asks for a larger window.
 pub const MIN_SIZE: (u16, u16) = (40, 10);
 /// Below this many columns the three panes stack vertically.
 pub const STACK_BELOW_COLUMNS: u16 = 80;
 
-const EQ_BANDS: [&str; 5] = ["60", "250", "1k", "4k", "12k"];
-const EQ_CELLS: usize = 9;
-const VOLUME_CELLS: usize = 10;
-
-/// Cut `text` to `width` display cells, ending in `…` when anything was cut.
-pub fn truncate(text: &str, width: usize) -> String {
-    if text.width() <= width {
-        return text.to_string();
-    }
-    if width == 0 {
-        return String::new();
-    }
-    let mut out = String::new();
-    let mut used = 0;
-    for c in text.chars() {
-        let w = c.width().unwrap_or(0);
-        if used + w > width - 1 {
-            break;
-        }
-        out.push(c);
-        used += w;
-    }
-    out.push('…');
-    out
-}
-
-pub fn view(model: &Model, frame: &mut Frame) {
+pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
+    let hits = HitMap::default();
     let area = frame.area();
     if area.width < MIN_SIZE.0 || area.height < MIN_SIZE.1 {
         let notice = Paragraph::new(format!(
@@ -55,7 +43,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
         ))
         .wrap(Wrap { trim: true });
         frame.render_widget(notice, area);
-        return;
+        return hits;
     }
     let cd_rows = u16::from(model.snapshot.cd.as_ref().is_some_and(|cd| cd.present));
     let error_rows = u16::from(model.error.is_some());
@@ -123,373 +111,7 @@ pub fn view(model: &Model, frame: &mut Frame) {
             error,
         } => pin_overlay(frame, area, target, input, error.as_deref()),
     }
-}
-
-fn header_line(model: &Model) -> Paragraph<'_> {
-    let mut spans = vec![Span::styled(" on-air ", Style::new().bold())];
-    match model.connection {
-        crate::client::Connection::Closed | crate::client::Connection::Reconnecting
-            if model.snapshot.status.is_none() =>
-        {
-            spans.push(Span::styled(
-                " core unreachable ",
-                Style::new().fg(Color::Red),
-            ));
-        }
-        crate::client::Connection::Closed => {
-            spans.push(Span::styled(" unreachable ", Style::new().fg(Color::Red)));
-        }
-        crate::client::Connection::Reconnecting | crate::client::Connection::Connecting => {
-            spans.push(Span::styled(
-                " reconnecting ",
-                Style::new().fg(Color::Yellow),
-            ));
-        }
-        crate::client::Connection::Open => {}
-    }
-    if !model.service_on() {
-        spans.push(Span::styled(
-            " monitor off — press m ",
-            Style::new().fg(Color::Yellow).bold(),
-        ));
-    } else {
-        match &model.snapshot.active_output {
-            Some(active) if active.is_live() => {
-                spans.push(Span::styled(
-                    " ● live ",
-                    Style::new().fg(Color::Green).bold(),
-                ));
-                spans.push(Span::raw(format!(
-                    "{} · {} ",
-                    transport_label(&active.output.transport),
-                    active.output.device_name
-                )));
-            }
-            Some(active) => {
-                spans.push(Span::styled(" ◌ starting ", Style::new().fg(Color::Yellow)));
-                spans.push(Span::raw(format!("{} ", active.output.device_name)));
-            }
-            None => spans.push(Span::styled(" ○ idle ", Style::new().dim())),
-        }
-        if let Some(pending) = &model.pending {
-            spans.push(Span::styled(
-                format!(" {}… ", pending.label),
-                Style::new().fg(Color::Yellow),
-            ));
-        }
-        if let Some(pin) = &model.snapshot.pin {
-            spans.push(Span::raw(format!(" PIN {pin} ")));
-        }
-        if let Some(address) = model
-            .snapshot
-            .status
-            .as_ref()
-            .and_then(|s| s.lan_addresses.as_ref())
-            .and_then(|a| a.first())
-        {
-            spans.push(Span::styled(format!(" {address} "), Style::new().dim()));
-        }
-        spans.push(Span::raw(" monitor on "));
-    }
-    if let Some(autostart) = model.autostart {
-        spans.push(Span::styled(
-            if autostart {
-                " login ✓ "
-            } else {
-                " login ✗ "
-            },
-            Style::new().dim(),
-        ));
-    }
-    Paragraph::new(Line::from(spans))
-}
-
-fn transport_label(transport: &str) -> &'static str {
-    crate::model::TRANSPORTS
-        .iter()
-        .find(|(id, _)| *id == transport)
-        .map(|(_, label)| *label)
-        .unwrap_or("Output")
-}
-
-fn cd_line(model: &Model) -> Paragraph<'_> {
-    let Some(cd) = &model.snapshot.cd else {
-        return Paragraph::new("");
-    };
-    let glyph = if cd.playing { "▶" } else { "⏸" };
-    let title = cd
-        .title
-        .clone()
-        .or_else(|| cd.album.clone())
-        .unwrap_or_default();
-    Paragraph::new(Line::from(vec![
-        Span::styled(format!(" {glyph} Audio CD "), Style::new().fg(Color::Cyan)),
-        Span::raw(format!(" {:02}/{:02}  ", cd.track, cd.track_count)),
-        Span::raw(title),
-        Span::styled(
-            format!("  {}/{}", clock(cd.position_ms), clock(cd.duration_ms)),
-            Style::new().dim(),
-        ),
-    ]))
-}
-
-fn clock(ms: u64) -> String {
-    let seconds = ms / 1000;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
-}
-
-fn pane_block<'a>(title: &'a str, focused: bool, accent: Color) -> Block<'a> {
-    let block = Block::bordered().title(format!(" {title} "));
-    if focused {
-        block.border_style(Style::new().fg(accent))
-    } else {
-        block
-    }
-}
-
-fn selection_style(model: &Model) -> Style {
-    Style::new()
-        .fg(model.accent)
-        .add_modifier(Modifier::REVERSED)
-}
-
-fn locked_style(model: &Model, style: Style) -> Style {
-    if model.locked() {
-        style.add_modifier(Modifier::DIM)
-    } else {
-        style
-    }
-}
-
-fn sources_pane(model: &Model, frame: &mut Frame, area: Rect) {
-    let focused = model.pane == Pane::Sources;
-    let block = pane_block("Sources", focused, model.accent);
-    let inner_width = area.width.saturating_sub(4) as usize;
-    let items: Vec<ListItem> = input_labels(&model.snapshot.inputs)
-        .iter()
-        .enumerate()
-        .map(|(index, row)| {
-            let selected = focused && index == model.source_index;
-            let active = model.snapshot.active_input.as_deref() == Some(row.name.as_str());
-            let marker = if selected { "> " } else { "  " };
-            let label = truncate(&row.label, inner_width.saturating_sub(4));
-            let mut spans = vec![Span::raw(marker), Span::raw(label)];
-            if active {
-                spans.push(Span::styled(" ●", Style::new().fg(Color::Green)));
-            }
-            let style = if selected {
-                selection_style(model)
-            } else {
-                Style::new()
-            };
-            ListItem::new(Line::from(spans)).style(locked_style(model, style))
-        })
-        .collect();
-    // The state only scrolls the list to the cursor; the marker and
-    // highlight are drawn by the items themselves.
-    let mut state = ListState::default().with_selected(Some(model.source_index));
-    frame.render_stateful_widget(List::new(items).block(block), area, &mut state);
-}
-
-fn outputs_pane(model: &Model, frame: &mut Frame, area: Rect) {
-    let focused = model.pane == Pane::Outputs;
-    let block = pane_block("Outputs", focused, model.accent);
-    let inner_width = area.width.saturating_sub(4) as usize;
-    let items: Vec<ListItem> = model
-        .dest_rows()
-        .into_iter()
-        .enumerate()
-        .map(|(row_index, row)| match row {
-            DestRow::Header(label) => {
-                ListItem::new(Line::from(Span::styled(label, Style::new().bold())))
-                    .style(locked_style(model, Style::new()))
-            }
-            DestRow::Empty(text) => ListItem::new(Line::from(Span::styled(
-                format!("  {}", truncate(text, inner_width.saturating_sub(2))),
-                Style::new().add_modifier(Modifier::DIM),
-            )))
-            .style(locked_style(model, Style::new())),
-            DestRow::Entry(entry) => {
-                let selected = focused && row_index == model.output_index;
-                let marker = if selected { "> " } else { "  " };
-                let suffix = if matches!(entry.state, DestState::Pin | DestState::NotPaired) {
-                    " (pair)"
-                } else {
-                    ""
-                };
-                let is_live = entry.state == DestState::Live;
-                let budget =
-                    inner_width.saturating_sub(2 + suffix.len() + if is_live { 7 } else { 0 });
-                let mut spans = vec![
-                    Span::raw(marker),
-                    Span::raw(format!("{}{suffix}", truncate(&entry.name, budget))),
-                ];
-                if is_live {
-                    spans.push(Span::styled(" ● live", Style::new().fg(Color::Green)));
-                }
-                let style = if selected {
-                    selection_style(model)
-                } else {
-                    Style::new()
-                };
-                ListItem::new(Line::from(spans)).style(locked_style(model, style))
-            }
-        })
-        .collect();
-    // The state only scrolls the list to the cursor; the marker and
-    // highlight are drawn by the items themselves.
-    let mut state = ListState::default().with_selected(Some(model.output_index));
-    frame.render_stateful_widget(List::new(items).block(block), area, &mut state);
-}
-
-fn bar(filled: usize, cells: usize) -> String {
-    let filled = filled.min(cells);
-    format!("{}{}", "█".repeat(filled), "░".repeat(cells - filled))
-}
-
-fn eq_band(gain_db: f32) -> String {
-    let (lo, hi) = crate::update::EQ_RANGE_DB;
-    let position = ((gain_db - lo) / (hi - lo) * (EQ_CELLS - 1) as f32).round() as usize;
-    (0..EQ_CELLS)
-        .map(|cell| {
-            if cell == position.min(EQ_CELLS - 1) {
-                '█'
-            } else {
-                '░'
-            }
-        })
-        .collect()
-}
-
-fn mixer_pane(model: &Model, frame: &mut Frame, area: Rect) {
-    let focused = model.pane == Pane::Mixer;
-    let block = pane_block("Mixer", focused, model.accent);
-    let snapshot = &model.snapshot;
-    let rows = MixerRow::ALL.iter().map(|row| {
-        let text = match row {
-            MixerRow::Volume => format!(
-                "Volume   {}  {:>3}",
-                bar(
-                    snapshot.volume as usize / (100 / VOLUME_CELLS),
-                    VOLUME_CELLS
-                ),
-                snapshot.volume
-            ),
-            MixerRow::Eq(band) => format!(
-                "EQ {:<4} {}  {:+.1} dB",
-                EQ_BANDS[*band],
-                eq_band(snapshot.eq[*band]),
-                snapshot.eq[*band]
-            ),
-            MixerRow::InputRate => match &snapshot.rates {
-                Some(rates) => format!("In {} Hz", rates.input.sample_rate_hz),
-                None => "In —".to_string(),
-            },
-            MixerRow::OutputRate => match &snapshot.rates {
-                Some(rates) => format!("Out {} Hz", rates.output.sample_rate_hz),
-                None => "Out —".to_string(),
-            },
-        };
-        let selected = focused && *row == model.mixer_row;
-        let marker = if selected { "> " } else { "  " };
-        let style = if selected {
-            selection_style(model)
-        } else {
-            Style::new()
-        };
-        ListItem::new(Line::from(vec![Span::raw(marker), Span::raw(text)]))
-            .style(locked_style(model, style))
-    });
-    // The state only scrolls the list to the cursor; the marker and
-    // highlight are drawn by the items themselves.
-    let mut state = ListState::default().with_selected(Some(
-        MixerRow::ALL
-            .iter()
-            .position(|row| *row == model.mixer_row)
-            .unwrap_or(0),
-    ));
-    frame.render_stateful_widget(List::new(rows).block(block), area, &mut state);
-}
-
-fn hint_line() -> Paragraph<'static> {
-    let mut spans = Vec::new();
-    for (key, what) in HINTS {
-        spans.push(Span::styled(format!(" {key} "), Style::new().bold()));
-        spans.push(Span::styled(format!("{what} "), Style::new().dim()));
-    }
-    Paragraph::new(Line::from(spans))
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let [vertical] = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .areas(area);
-    let [horizontal] = Layout::horizontal([Constraint::Length(width)])
-        .flex(Flex::Center)
-        .areas(vertical);
-    horizontal
-}
-
-fn help_overlay(frame: &mut Frame, area: Rect) {
-    let width = area.width.min(80);
-    let height = (KEYS.len() as u16 + 3).min(area.height);
-    let rect = centered(area, width, height);
-    frame.render_widget(Clear, rect);
-    let lines: Vec<Line> = KEYS
-        .iter()
-        .map(|binding| {
-            Line::from(vec![
-                Span::styled(format!(" {:<16} ", binding.keys), Style::new().bold()),
-                Span::raw(binding.help),
-            ])
-        })
-        .chain(std::iter::once(Line::from(Span::styled(
-            " any key closes ",
-            Style::new().dim(),
-        ))))
-        .collect();
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" Keys ")),
-        rect,
-    );
-}
-
-fn pin_overlay(
-    frame: &mut Frame,
-    area: Rect,
-    target: &crate::model::PairTarget,
-    input: &str,
-    error: Option<&str>,
-) {
-    let width = area.width.min(60);
-    let rect = centered(area, width, 7);
-    frame.render_widget(Clear, rect);
-    let prompt = if target.needs_pin() {
-        "Enter the PIN shown by the speaker, then press Enter."
-    } else {
-        "Press Enter to pair, Esc to cancel."
-    };
-    let shown = if target.needs_pin() {
-        format!("PIN: {input}▏")
-    } else {
-        String::new()
-    };
-    let mut lines = vec![
-        Line::from(prompt),
-        Line::from(Span::styled(shown, Style::new().bold())),
-    ];
-    if let Some(error) = error {
-        lines.push(Line::from(Span::styled(
-            error.to_string(),
-            Style::new().fg(Color::Red),
-        )));
-    }
-    frame.render_widget(
-        Paragraph::new(lines)
-            .wrap(Wrap { trim: true })
-            .block(Block::bordered().title(format!(" Pair {} ", target.name()))),
-        rect,
-    );
+    hits
 }
 
 #[cfg(test)]
@@ -583,7 +205,11 @@ mod tests {
 
     fn render(model: &Model, w: u16, h: u16) -> Buffer {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|frame| view(model, frame)).unwrap();
+        terminal
+            .draw(|frame| {
+                let _ = view(model, frame);
+            })
+            .unwrap();
         terminal.backend().buffer().clone()
     }
 

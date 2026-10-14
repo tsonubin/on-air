@@ -180,7 +180,9 @@ async fn run_tui(client: Client) {
         });
     }
 
-    let _ = terminal.draw(|frame| view(&model, frame));
+    let _ = terminal.draw(|frame| {
+        let _ = view(&model, frame);
+    });
     loop {
         let msg = tokio::select! {
             event = keys.next() => match event {
@@ -208,7 +210,12 @@ async fn run_tui(client: Client) {
         if dispatch(&mut model, msg) {
             break;
         }
-        if terminal.draw(|frame| view(&model, frame)).is_err() {
+        if terminal
+            .draw(|frame| {
+                let _ = view(&model, frame);
+            })
+            .is_err()
+        {
             break;
         }
     }
