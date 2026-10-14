@@ -44,7 +44,8 @@ shared-package, and TypeScript E2E sources. Rust is covered by `cargo fmt` and
 On Linux the core is a `systemd --user` service; the terminal UI is a client
 of it and quitting the UI never stops streaming. Inside the TUI, `m` turns the
 monitor (audio capture and streaming) on or off and `a` toggles starting the
-service at login. From a shell:
+service at login; `i` shows status (version, addresses, monitor) and the mouse
+works too (click rows, drag faders, click the CD progress bar). From a shell:
 
 ```bash
 on-air                                  # the terminal UI

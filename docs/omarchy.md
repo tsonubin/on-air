@@ -150,6 +150,66 @@ Two fixes:
 
   then `systemctl --user restart on-air-core`.
 
+## Using the TUI
+
+Run `on-air` in a terminal. Quitting never stops the service.
+
+### Keys
+
+| Key | Action |
+|---|---|
+| `Tab / Shift-Tab` | Next / previous pane |
+| `j` / `k`, `↓` / `↑` | Move within the pane |
+| `Enter` | Activate the source or output (opens pairing when needed) |
+| `h / l, ← / →` | Mixer: adjust the focused row |
+| `H / L` | Fine adjust (volume ±1, EQ ±0.5 dB) |
+| `+ / -` | Volume ±5 from any pane |
+| `0` | Mixer: reset the focused EQ band |
+| `x` | Stop the live output |
+| `Space` | CD play / pause |
+| `> / <` | CD next / previous track |
+| `[ / ]` | CD seek back / forward 10 s |
+| `g` | CD go to track |
+| `e` | CD eject (asks first) |
+| `m` | Monitor on / off |
+| `a` | Start the service at login on / off |
+| `i` | Status: version, addresses, monitor, login start |
+| `b` | Open Bluetooth settings |
+| `r` | Refresh devices |
+| `?` | This help |
+| `Esc` | Close, dismiss the error |
+| `q / Ctrl-C` | Quit; the service keeps running |
+
+### Mouse
+
+Mouse capture is on; it is turned off again on exit. Hold Shift while
+dragging to select text. If capture cannot be enabled the keyboard still
+works and the help overlay says "mouse off".
+
+| Where | Action |
+|---|---|
+| Source or output row | Left click: focus the pane, move the cursor and select (same as `Enter`). Wheel: move the cursor |
+| Volume or EQ fader | Left click or drag: set the value at that cell (the top is the maximum). Wheel: fine step. In the compact mixer a click only focuses the fader; a drag stays on the fader where the button went down |
+| Rate row | Left click: next rate. Wheel: next or previous |
+| CD buttons | Left click: previous, play / pause, next, eject (eject still asks first) |
+| CD progress bar | Left click: seek to that position |
+| `monitor off` tag | Left click: turn the monitor on or off |
+| `PIN` or address tag | Left click: open the status overlay |
+| Outside an open overlay | Left click: close it (same as `Esc`) |
+
+### Status
+
+`i` opens the status overlay: version, addresses, monitor state and
+whether the service starts at login. Click the `PIN` or address tag in the
+header for the same view.
+
+### Monitor off
+
+With the monitor off the header shows `monitor off — press m`. Capture and
+streaming are stopped, so the mixer, sources, outputs and CD controls are
+locked until you press `m` (or click the tag) to turn it back on. `i`, `?`,
+`a`, `Esc` and `q` still work.
+
 ## Bluetooth
 
 Press `b` in the TUI to open Bluetooth settings. On Omarchy 4 that toggles
