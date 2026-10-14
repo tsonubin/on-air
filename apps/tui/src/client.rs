@@ -320,7 +320,11 @@ impl Client {
     pub fn new(base: &str) -> Self {
         Client {
             base: base.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            // The core is local: a system HTTP_PROXY must not intercept it.
+            http: reqwest::Client::builder()
+                .no_proxy()
+                .build()
+                .expect("reqwest core client"),
         }
     }
 

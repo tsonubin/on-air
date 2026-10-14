@@ -31,7 +31,11 @@ if [ -n "$prepare_only" ]; then
   build=$prepare_only
   mkdir -p "$build"
 else
-  build=$(mktemp -d "${TMPDIR:-/tmp}/on-air-build.XXXXXX")
+  # Not /tmp: it is a size-capped tmpfs on Omarchy and a release Rust build
+  # overruns it ("Disk quota exceeded").
+  cache=${XDG_CACHE_HOME:-$HOME/.cache}
+  mkdir -p "$cache"
+  build=$(mktemp -d "$cache/on-air-build.XXXXXX")
 fi
 pkgver=$(sed -n 's/^pkgver=//p' "$recipe/PKGBUILD")
 if [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
@@ -53,6 +57,7 @@ command -v makepkg >/dev/null 2>&1 || {
 
 echo "== Building and installing the on-air package from $root (makepkg -si)"
 (cd "$build" && makepkg -si)
+rm -rf "$build"
 
 echo "== Enabling the on-air-core user service"
 systemctl --user daemon-reload
@@ -75,4 +80,3 @@ show shell-bar.json      '~/.config/omarchy/shell.json under bar.layout.right (O
 show waybar.jsonc        '~/.config/waybar/config.jsonc (Omarchy 3)'
 echo
 echo "Launch on-air from the app launcher (Super+Space), or run: on-air"
-echo "The build directory $build can be deleted."
