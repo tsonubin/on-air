@@ -207,7 +207,7 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
         Line::styled("LVL", locked_style(model, Style::new())),
     );
     let mut cells = meter_cells(&model.meter, usize::from(meter_width));
-    if model.locked() {
+    if model.locked() || model.core_down {
         for cell in &mut cells {
             cell.style = cell.style.add_modifier(Modifier::DIM);
         }

@@ -156,7 +156,8 @@ pub(super) fn monitor_off_panel(frame: &mut Frame, area: Rect) {
             ),
             Line::from("Press m to turn it on."),
         ])
-        .centered(),
-        centered(area, area.width, 3),
+        .centered()
+        .wrap(Wrap { trim: true }),
+        centered(area, area.width, 4),
     );
 }

@@ -109,11 +109,16 @@ pub fn seek_target(position_ms: u64, duration_ms: u64, delta_ms: i64) -> u64 {
 }
 
 /// Whether a command talks to `on-air-core`. Quitting and the host-side
-/// autostart and settings commands work without it.
+/// autostart and settings commands work without it, and a refresh is how
+/// the user finds out the core is back.
 pub fn needs_core(cmd: &Cmd) -> bool {
     !matches!(
         cmd,
-        Cmd::Quit | Cmd::QueryAutostart | Cmd::SetAutostart(_) | Cmd::OpenBluetoothSettings
+        Cmd::Quit
+            | Cmd::Refresh
+            | Cmd::QueryAutostart
+            | Cmd::SetAutostart(_)
+            | Cmd::OpenBluetoothSettings
     )
 }
 
@@ -1914,6 +1919,15 @@ mod tests {
         assert_eq!(m.pending, None);
         m.autostart = Some(false);
         assert_eq!(update(&mut m, key('a')), vec![Cmd::SetAutostart(true)]);
+    }
+
+    #[test]
+    fn core_down_still_allows_refresh_settings_and_quit() {
+        let mut m = model_with_mock_snapshot();
+        m.core_down = true;
+        assert_eq!(update(&mut m, key('r')), vec![Cmd::Refresh]);
+        assert_eq!(update(&mut m, key('b')), vec![Cmd::OpenBluetoothSettings]);
+        assert_eq!(update(&mut m, key('q')), vec![Cmd::Quit]);
     }
 
     #[test]
