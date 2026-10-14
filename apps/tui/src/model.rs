@@ -337,7 +337,7 @@ impl Model {
         }
     }
 
-    fn bluetooth_device(&self, id: &str) -> Option<&BluetoothDeviceInfo> {
+    pub fn bluetooth_device(&self, id: &str) -> Option<&BluetoothDeviceInfo> {
         self.snapshot
             .bluetooth
             .as_ref()?

@@ -253,3 +253,54 @@ async fn snapshot_includes_the_bluetooth_list() {
     let list = snapshot.bluetooth.expect("the list loaded");
     assert!(list.iter().any(|d| d.id == "bt-unpaired"), "{list:?}");
 }
+
+#[tokio::test]
+async fn bluetooth_pair_connect_activate() {
+    use on_air_tui::model::{Modal, Model, Pane};
+    use on_air_tui::update::update;
+
+    let c = mock_core().await;
+    let (snapshot, _) = c.load_snapshot().await;
+    let mut model = Model::new();
+    model.snapshot = snapshot;
+    model.pane = Pane::Outputs;
+    let key = |code| {
+        Msg::Key(crossterm::event::KeyEvent::new(
+            code,
+            crossterm::event::KeyModifiers::NONE,
+        ))
+    };
+    while model.selected_dest().map(|e| e.id).as_deref() != Some("bt-unpaired") {
+        update(&mut model, key(crossterm::event::KeyCode::Char('j')));
+    }
+    assert!(update(&mut model, key(crossterm::event::KeyCode::Enter)).is_empty());
+    assert!(matches!(model.modal, Modal::Pin { .. }));
+    let mut cmds = update(&mut model, key(crossterm::event::KeyCode::Enter));
+    let mut seen = Vec::new();
+    while let Some(cmd) = cmds.pop() {
+        seen.push(cmd.clone());
+        let mut next = Vec::new();
+        for msg in c.run_cmd(cmd).await {
+            next.extend(update(&mut model, msg));
+        }
+        cmds = next;
+        if matches!(seen.last(), Some(Cmd::ActivateOutput { .. })) {
+            break;
+        }
+    }
+    assert_eq!(
+        seen,
+        vec![
+            Cmd::PairBluetooth("bt-unpaired".into()),
+            Cmd::ConnectBluetooth("bt-unpaired".into()),
+            Cmd::ActivateOutput {
+                transport: "bluetooth".into(),
+                device_id: "bt-unpaired".into()
+            },
+        ]
+    );
+    assert_eq!(model.error, None);
+    let active = c.active_output().await.unwrap().unwrap();
+    assert_eq!(active.output.transport, "bluetooth");
+    assert_eq!(active.output.device_id, "bt-unpaired");
+}

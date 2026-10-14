@@ -6,8 +6,8 @@ use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
 use crate::model::{
-    DestRow, DestState, Meter, MixerControl, MixerRow, Modal, Model, PairTarget, Pane, Pending,
-    Snapshot, WriteSlot, METER_FLOOR_DB,
+    Activation, ActivationStep, DestRow, Meter, MixerControl, MixerRow, Modal, Model, PairTarget,
+    Pane, Pending, Snapshot, WriteSlot, METER_FLOOR_DB,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
@@ -191,20 +191,32 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
         Ok(()) => {
             model.error = None;
             if label == LABEL_PAIR {
-                if let Modal::Pin { target, .. } = std::mem::replace(&mut model.modal, Modal::None)
-                {
-                    let (transport, device_id) = match target {
-                        PairTarget::Airplay { device_id, .. } => ("airplay", device_id),
-                        PairTarget::Bluetooth { id, .. } => ("bluetooth", id),
-                    };
-                    model.pending = Some(Pending {
-                        label: LABEL_OUTPUT.into(),
-                    });
-                    return vec![Cmd::ActivateOutput {
-                        transport: transport.into(),
-                        device_id,
-                    }];
+                let paired = match std::mem::replace(&mut model.modal, Modal::None) {
+                    Modal::Pin { target, .. } => Some(match target {
+                        PairTarget::Airplay { device_id, name } => ("airplay", device_id, name),
+                        PairTarget::Bluetooth { id, name } => ("bluetooth", id, name),
+                    }),
+                    _ => current_device(model),
+                };
+                let Some(device) = paired else {
+                    model.activation = None;
+                    return vec![Cmd::Refresh];
+                };
+                // Bluetooth must connect before the core can route to it.
+                if device.0 == "bluetooth" {
+                    let cmd = Cmd::ConnectBluetooth(device.1.clone());
+                    return advance(model, device, ActivationStep::Connecting, cmd);
                 }
+                return activate_step(model, device);
+            }
+            if label == LABEL_CONNECT {
+                if let Some(device) = current_device(model) {
+                    return activate_step(model, device);
+                }
+            }
+            if label == LABEL_OUTPUT {
+                model.activation = None;
+                model.failed_output = None;
             }
             if label == LABEL_SETTINGS {
                 vec![]
@@ -214,14 +226,59 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
         }
         Err(copy) => {
             if let Modal::Pin { error, input, .. } = &mut model.modal {
+                // The activation stays until the modal is closed.
                 *error = Some(copy);
                 input.clear();
-            } else {
-                model.error = Some(copy);
+                return vec![];
             }
+            if matches!(label, LABEL_PAIR | LABEL_CONNECT | LABEL_OUTPUT) {
+                if let Some(a) = model.activation.take() {
+                    model.failed_output = Some((a.transport, a.id));
+                }
+            }
+            model.error = Some(copy);
             vec![]
         }
     }
+}
+
+/// A device of the Enter flow: transport, id and name.
+type Device = (&'static str, String, String);
+
+/// The device of the activation in progress.
+fn current_device(model: &Model) -> Option<Device> {
+    let a = model.activation.as_ref()?;
+    let transport = match a.transport.as_str() {
+        "airplay" => "airplay",
+        "bluetooth" => "bluetooth",
+        _ => "sonos",
+    };
+    Some((transport, a.id.clone(), a.name.clone()))
+}
+
+/// Start one step of the Enter flow for `device`.
+fn advance(model: &mut Model, device: Device, step: ActivationStep, cmd: Cmd) -> Vec<Cmd> {
+    let (transport, id, name) = device;
+    let label = match step {
+        ActivationStep::Pairing => LABEL_PAIR,
+        ActivationStep::Connecting => LABEL_CONNECT,
+        ActivationStep::Activating => LABEL_OUTPUT,
+    };
+    model.activation = Some(Activation {
+        transport: transport.into(),
+        id,
+        name,
+        step,
+    });
+    pending(model, label, vec![cmd])
+}
+
+fn activate_step(model: &mut Model, device: Device) -> Vec<Cmd> {
+    let cmd = Cmd::ActivateOutput {
+        transport: device.0.into(),
+        device_id: device.1.clone(),
+    };
+    advance(model, device, ActivationStep::Activating, cmd)
 }
 
 /// Send a mixer change, or hold it as the latest value while an earlier
@@ -371,6 +428,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             return match key.code {
                 KeyCode::Esc => {
                     model.modal = Modal::None;
+                    model.activation = None;
                     vec![]
                 }
                 KeyCode::Backspace => {
@@ -388,17 +446,24 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                         return vec![];
                     }
                     *error = None;
-                    let cmd = match target {
-                        PairTarget::Airplay { device_id, .. } => Cmd::PairAirplay {
-                            device_id: device_id.clone(),
-                            pin: input.clone(),
-                        },
-                        PairTarget::Bluetooth { id, .. } => Cmd::PairBluetooth(id.clone()),
+                    let (transport, id, name, cmd) = match target {
+                        PairTarget::Airplay { device_id, name } => (
+                            "airplay",
+                            device_id.clone(),
+                            name.clone(),
+                            Cmd::PairAirplay {
+                                device_id: device_id.clone(),
+                                pin: input.clone(),
+                            },
+                        ),
+                        PairTarget::Bluetooth { id, name } => (
+                            "bluetooth",
+                            id.clone(),
+                            name.clone(),
+                            Cmd::PairBluetooth(id.clone()),
+                        ),
                     };
-                    model.pending = Some(Pending {
-                        label: LABEL_PAIR.into(),
-                    });
-                    vec![cmd]
+                    advance(model, (transport, id, name), ActivationStep::Pairing, cmd)
                 }
                 _ => vec![],
             };
@@ -606,7 +671,30 @@ fn select(model: &mut Model) -> Vec<Cmd> {
             let Some(entry) = model.selected_dest() else {
                 return vec![];
             };
-            if matches!(entry.state, DestState::Pin | DestState::NotPaired) {
+            if let Some(a) = &model.activation {
+                model.notice = Some(format!("Already connecting {}…", a.name));
+                return vec![];
+            }
+            // A retry starts over from the device's real flags.
+            model.failed_output = None;
+            let output_unpaired = model
+                .snapshot
+                .outputs
+                .iter()
+                .find(|o| o.transport == entry.transport && o.id == entry.id)
+                .is_some_and(|o| o.needs_pair && !o.paired);
+            let listed = if entry.transport == "bluetooth" {
+                model.bluetooth_device(&entry.id)
+            } else {
+                None
+            };
+            let needs_pair = match (entry.transport, listed) {
+                ("bluetooth", Some(d)) => !d.paired,
+                _ => output_unpaired,
+            };
+            let connect = listed.is_some_and(|d| d.paired && !d.connected);
+            let device = (entry.transport, entry.id.clone(), entry.name.clone());
+            if needs_pair {
                 let target = if entry.transport == "airplay" {
                     PairTarget::Airplay {
                         device_id: entry.id,
@@ -625,14 +713,11 @@ fn select(model: &mut Model) -> Vec<Cmd> {
                 };
                 return vec![];
             }
-            pending(
-                model,
-                LABEL_OUTPUT,
-                vec![Cmd::ActivateOutput {
-                    transport: entry.transport.to_string(),
-                    device_id: entry.id,
-                }],
-            )
+            if connect {
+                let cmd = Cmd::ConnectBluetooth(entry.id);
+                return advance(model, device, ActivationStep::Connecting, cmd);
+            }
+            activate_step(model, device)
         }
         Pane::Mixer => vec![],
     }
@@ -725,6 +810,7 @@ mod tests {
         ActiveOutput, ActiveOutputView, CdStatus, OutputInfo, OutputPhase, SampleRateResponse,
         SampleRateSide, StatusResponse,
     };
+    use crate::model::DestState;
 
     fn output(id: &str, name: &str, transport: &str, needs_pair: bool, paired: bool) -> OutputInfo {
         OutputInfo {
@@ -1008,31 +1094,231 @@ mod tests {
         assert!(m.pending.is_none());
     }
 
-    #[test]
-    fn a_successful_pairing_closes_the_modal_and_activates_the_output() {
+    fn bt(id: &str, paired: bool, connected: bool) -> crate::api::BluetoothDeviceInfo {
+        crate::api::BluetoothDeviceInfo {
+            id: id.into(),
+            name: id.into(),
+            paired,
+            connected,
+        }
+    }
+
+    fn on_dest(id: &str) -> Model {
         let mut m = model_with_mock_snapshot();
-        m.modal = Modal::Pin {
-            target: PairTarget::Bluetooth {
-                id: "bt-unpaired".into(),
-                name: "New".into(),
-            },
-            input: String::new(),
-            error: None,
-        };
+        m.pane = Pane::Outputs;
+        m.snapshot.bluetooth = Some(vec![
+            bt("bt-speaker", true, true),
+            bt("bt-unpaired", false, false),
+        ]);
+        while m.selected_dest().map(|e| e.id) != Some(id.into()) {
+            update(&mut m, key('j'));
+        }
+        m
+    }
+
+    fn done(label: &str, result: Result<(), String>) -> Msg {
+        Msg::Done {
+            label: label.into(),
+            result,
+        }
+    }
+
+    fn step(m: &Model) -> Option<ActivationStep> {
+        m.activation.as_ref().map(|a| a.step)
+    }
+
+    #[test]
+    fn enter_on_ready_output_activates() {
+        let mut m = on_dest("uuid:mock-sonos");
         assert_eq!(
-            update(
-                &mut m,
-                Msg::Done {
-                    label: "Pairing".into(),
-                    result: Ok(())
-                }
-            ),
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::ActivateOutput {
+                transport: "sonos".into(),
+                device_id: "uuid:mock-sonos".into()
+            }]
+        );
+        assert_eq!(step(&m), Some(ActivationStep::Activating));
+        assert_eq!(m.pending.as_ref().unwrap().label, LABEL_OUTPUT);
+    }
+
+    #[test]
+    fn enter_on_airplay_pin_opens_pin_modal() {
+        let mut m = on_dest("ap-living");
+        m.snapshot.outputs[1].needs_pair = true;
+        m.snapshot.outputs[1].paired = false;
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert!(matches!(
+            &m.modal,
+            Modal::Pin {
+                target: PairTarget::Airplay { .. },
+                ..
+            }
+        ));
+        for c in "1234".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::PairAirplay {
+                device_id: "ap-living".into(),
+                pin: "1234".into()
+            }]
+        );
+        assert_eq!(step(&m), Some(ActivationStep::Pairing));
+        assert_eq!(
+            update(&mut m, done(LABEL_PAIR, Ok(()))),
+            vec![Cmd::ActivateOutput {
+                transport: "airplay".into(),
+                device_id: "ap-living".into()
+            }]
+        );
+        assert_eq!(step(&m), Some(ActivationStep::Activating));
+    }
+
+    #[test]
+    fn enter_on_failed_airplay_row_that_needs_a_pin_reopens_the_modal() {
+        let mut m = on_dest("ap-living");
+        m.snapshot.outputs[1].needs_pair = true;
+        m.snapshot.outputs[1].paired = false;
+        m.failed_output = Some(("airplay".into(), "ap-living".into()));
+        assert_eq!(m.selected_dest().unwrap().state, DestState::Failed);
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert!(matches!(
+            &m.modal,
+            Modal::Pin {
+                target: PairTarget::Airplay { .. },
+                ..
+            }
+        ));
+        assert_eq!(m.failed_output, None);
+    }
+
+    #[test]
+    fn enter_on_unpaired_bluetooth_confirms_then_pairs_connects_activates() {
+        let mut m = on_dest("bt-unpaired");
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert!(matches!(
+            &m.modal,
+            Modal::Pin {
+                target: PairTarget::Bluetooth { .. },
+                ..
+            }
+        ));
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::PairBluetooth("bt-unpaired".into())]
+        );
+        assert_eq!(step(&m), Some(ActivationStep::Pairing));
+        assert_eq!(
+            update(&mut m, done(LABEL_PAIR, Ok(()))),
+            vec![Cmd::ConnectBluetooth("bt-unpaired".into())]
+        );
+        assert_eq!(m.modal, Modal::None);
+        assert_eq!(step(&m), Some(ActivationStep::Connecting));
+        assert_eq!(m.pending.as_ref().unwrap().label, LABEL_CONNECT);
+        assert_eq!(
+            update(&mut m, done(LABEL_CONNECT, Ok(()))),
             vec![Cmd::ActivateOutput {
                 transport: "bluetooth".into(),
                 device_id: "bt-unpaired".into()
             }]
         );
+        assert_eq!(step(&m), Some(ActivationStep::Activating));
+        assert_eq!(
+            update(&mut m, done(LABEL_OUTPUT, Ok(()))),
+            vec![Cmd::Refresh]
+        );
+        assert_eq!(m.activation, None);
+    }
+
+    #[test]
+    fn enter_on_paired_bluetooth_connects_first() {
+        let mut m = on_dest("bt-speaker");
+        m.snapshot.bluetooth = Some(vec![
+            bt("bt-speaker", true, false),
+            bt("bt-unpaired", false, false),
+        ]);
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::ConnectBluetooth("bt-speaker".into())]
+        );
         assert_eq!(m.modal, Modal::None);
+        assert_eq!(step(&m), Some(ActivationStep::Connecting));
+    }
+
+    #[test]
+    fn enter_on_connected_bluetooth_activates() {
+        let mut m = on_dest("bt-speaker");
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::ActivateOutput {
+                transport: "bluetooth".into(),
+                device_id: "bt-speaker".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn second_enter_while_busy_is_refused() {
+        let mut m = on_dest("uuid:mock-sonos");
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, key('j'));
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert_eq!(m.notice.as_deref(), Some("Already connecting Mock Sonos…"));
+    }
+
+    #[test]
+    fn activation_failure_marks_the_row_and_enter_retries() {
+        let mut m = on_dest("uuid:mock-sonos");
+        update(&mut m, code(KeyCode::Enter));
+        assert_eq!(
+            update(&mut m, done(LABEL_OUTPUT, Err("boom".into()))),
+            vec![]
+        );
+        assert_eq!(
+            m.failed_output,
+            Some(("sonos".into(), "uuid:mock-sonos".into()))
+        );
+        assert_eq!(m.activation, None);
+        assert_eq!(m.error.as_deref(), Some("boom"));
+        assert_eq!(m.selected_dest().unwrap().state, DestState::Failed);
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::ActivateOutput {
+                transport: "sonos".into(),
+                device_id: "uuid:mock-sonos".into()
+            }]
+        );
+        assert_eq!(m.failed_output, None);
+    }
+
+    #[test]
+    fn pair_failure_stays_in_the_modal() {
+        let mut m = on_dest("bt-unpaired");
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, done(LABEL_PAIR, Err("no luck".into())));
+        assert!(matches!(&m.modal, Modal::Pin { error: Some(e), .. } if e == "no luck"));
+        update(&mut m, code(KeyCode::Esc));
+        assert_eq!(m.modal, Modal::None);
+        assert_eq!(m.activation, None);
+    }
+
+    #[test]
+    fn done_for_a_vanished_row_clears_state() {
+        let mut m = on_dest("uuid:mock-sonos");
+        update(&mut m, code(KeyCode::Enter));
+        m.snapshot.outputs.remove(0);
+        update(&mut m, done(LABEL_OUTPUT, Err("gone".into())));
+        assert_eq!(m.activation, None);
+        assert_eq!(
+            m.failed_output,
+            Some(("sonos".into(), "uuid:mock-sonos".into()))
+        );
+        assert!(m
+            .dest_rows()
+            .iter()
+            .all(|r| !matches!(r, DestRow::Entry(e) if e.id == "uuid:mock-sonos")));
     }
 
     #[test]
