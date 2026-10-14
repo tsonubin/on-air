@@ -140,11 +140,20 @@ pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) -> Rect {
     rect
 }
 
-/// The core's port, as the LAN addresses are listed with it.
-const PORT: u16 = 47990;
+/// The core's default port, for a base URL that does not parse.
+const DEFAULT_PORT: u16 = 47990;
+
+/// The port the core answers on, from its base URL.
+fn core_port(base: &str) -> u16 {
+    reqwest::Url::parse(base)
+        .ok()
+        .and_then(|url| url.port_or_known_default())
+        .unwrap_or(DEFAULT_PORT)
+}
 
 pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
     let status = model.snapshot.status.as_ref();
+    let port = core_port(&model.base);
     let yes_no = |value: Option<bool>| match value {
         Some(true) => "yes",
         Some(false) => "no",
@@ -157,7 +166,7 @@ pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Re
     };
     let mut lines = vec![
         Line::from(format!(
-            "Version: {}   Port: {PORT}",
+            "Version: {}   Port: {port}",
             status.map_or("unknown", |s| s.version.as_str())
         )),
         Line::from("Addresses:"),
@@ -166,7 +175,7 @@ pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Re
         Some(addresses) if !addresses.is_empty() => lines.extend(
             addresses
                 .iter()
-                .map(|address| Line::from(format!("  {address}:{PORT}"))),
+                .map(|address| Line::from(format!("  {address}:{port}"))),
         ),
         _ => lines.push(Line::from("  none found")),
     }

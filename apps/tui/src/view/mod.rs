@@ -955,4 +955,19 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn status_overlay_uses_the_cores_port() {
+        let mut m = model();
+        m.base = "http://127.0.0.1:47991".into();
+        m.snapshot.status.as_mut().unwrap().lan_addresses = Some(vec!["192.0.2.1".into()]);
+        m.modal = Modal::Status;
+        let t = text(&render(&m, 100, 30));
+        assert!(t.contains("Port: 47991"), "{t}");
+        assert!(t.contains("192.0.2.1:47991"), "{t}");
+        assert!(!t.contains("47990"), "{t}");
+        m.base = String::new();
+        let t = text(&render(&m, 100, 30));
+        assert!(t.contains("Port: 47990"), "falls back:\n{t}");
+    }
 }
