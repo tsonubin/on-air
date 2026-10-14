@@ -1,16 +1,1 @@
-post_install() {
-  cat <<'MSG'
-==> on-air: start the service for your user (it then starts at every login):
-      systemctl --user enable --now on-air-core
-    Then run `on-air`, or open on-air from the app launcher.
-    Omarchy menu, hotkey and bar snippets: /usr/share/doc/on-air/omarchy/
-    Guide: https://github.com/tsonubin/on-air/blob/main/docs/omarchy.md
-MSG
-}
-
-post_upgrade() {
-  cat <<'MSG'
-==> on-air: restart the service to run the new version:
-      systemctl --user restart on-air-core
-MSG
-}
+../on-air/on-air.install

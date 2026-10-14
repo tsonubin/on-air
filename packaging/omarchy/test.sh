@@ -104,7 +104,7 @@ echo "ok $dir/install.sh authentication and failure handling"
 # installs the same files as the source build.
 grep -q '^MIT License' LICENSE 2>/dev/null || fail "LICENSE is not the MIT license"
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' packages/core/Cargo.toml | head -1)
-for recipe in on-air on-air-bin on-air-core on-air-desktop-bin; do
+for recipe in on-air on-air-bin on-air-desktop-bin; do
   pkgbuild=packaging/aur/$recipe/PKGBUILD
   need "$pkgbuild"
   need "packaging/aur/$recipe/.SRCINFO"
@@ -114,17 +114,28 @@ for recipe in on-air on-air-bin on-air-core on-air-desktop-bin; do
   grep -q "pkgver = $version$" "packaging/aur/$recipe/.SRCINFO" || fail "$recipe .SRCINFO pkgver is not $version"
   grep -q 'licenses/' "$pkgbuild" || fail "$pkgbuild does not install the license"
 done
+# One post-install hook: packaging/aur/on-air/on-air.install, which
+# on-air-bin links to.
 for recipe in on-air on-air-bin; do
   grep -q '^install=on-air.install$' "packaging/aur/$recipe/PKGBUILD" || fail "$recipe has no post-install message"
-  cmp -s packaging/omarchy/on-air.install "packaging/aur/$recipe/on-air.install" \
-    || fail "packaging/aur/$recipe/on-air.install differs from packaging/omarchy/on-air.install"
+  cmp -s packaging/aur/on-air/on-air.install "packaging/aur/$recipe/on-air.install" \
+    || fail "packaging/aur/$recipe/on-air.install differs from packaging/aur/on-air/on-air.install"
 done
-sh -n packaging/omarchy/on-air.install || fail "on-air.install syntax"
-grep -q 'systemctl --user enable --now on-air-core' packaging/omarchy/on-air.install || fail "on-air.install does not say how to start the service"
+sh -n packaging/aur/on-air/on-air.install || fail "on-air.install syntax"
+grep -q 'systemctl --user enable --now on-air-core' packaging/aur/on-air/on-air.install || fail "on-air.install does not say how to start the service"
+# The source and prebuilt recipes describe the same package.
+for key in pkgdesc depends optdepends provides; do
+  a=$(sed -n "s/^$key=//p" packaging/aur/on-air/PKGBUILD | sed 's/ (prebuilt)//')
+  b=$(sed -n "s/^$key=//p" packaging/aur/on-air-bin/PKGBUILD | sed 's/ (prebuilt)//')
+  [ "$a" = "$b" ] || fail "on-air and on-air-bin disagree on $key"
+done
+for snippet in packaging/omarchy/snippets/*; do
+  grep -q "$(basename "$snippet")::" packaging/aur/on-air-bin/PKGBUILD || fail "on-air-bin does not fetch $(basename "$snippet")"
+done
 grep -q 'on-air-tui-linux-' packaging/aur/on-air-bin/PKGBUILD || fail "on-air-bin does not fetch the prebuilt terminal UI"
 grep -q 'on-air-core-serve-linux-' packaging/aur/on-air-bin/PKGBUILD || fail "on-air-bin does not fetch the prebuilt core"
 [ -f "$stage/on-air.install" ] || fail "install.sh did not stage on-air.install"
-for recipe in on-air on-air-bin on-air-core on-air-desktop-bin; do
+for recipe in on-air on-air-bin on-air-desktop-bin; do
   bash packaging/aur/srcinfo.sh "packaging/aur/$recipe" | cmp -s - "packaging/aur/$recipe/.SRCINFO" \
     || fail "packaging/aur/$recipe/.SRCINFO is stale; run packaging/aur/srcinfo.sh packaging/aur/$recipe"
 done
@@ -141,6 +152,29 @@ if not paths or len(paths) != len(sums) or bad:
     sys.exit(1)
 PYCHECK
 echo "ok packaging/aur recipes (MIT, $version)"
+
+# Every other recipe and default pins the same version.
+grep -q "^version = \"$version\"" apps/tui/Cargo.toml || fail "apps/tui/Cargo.toml version is not $version"
+grep -q "^Version:        $version$" packaging/rpm/on-air-core.spec || fail "rpm spec version is not $version"
+grep -q "^on-air-core ($version)" packaging/debian/changelog || fail "debian/changelog head is not $version"
+grep -q "^  version \"$version\"" Casks/on-air.rb || fail "cask version is not $version"
+grep -q "tag:      \"v$version\"" Formula/on-air-core.rb || fail "formula tag is not v$version"
+for f in packaging/winget/*.yaml; do
+  grep -q "^PackageVersion: $version$" "$f" || fail "$f PackageVersion is not $version"
+done
+grep -q "^VERSION=\"\${VERSION:-$version}\"" packaging/apt/install.sh || fail "apt/install.sh default version is not $version"
+grep -q "^VERSION=\"\${1:-$version}\"" packaging/update-checksums.sh || fail "update-checksums.sh default version is not $version"
+grep -q "tag: v$version$" packaging/flatpak/com.shay.on-air.yml || fail "flatpak manifest tag is not v$version"
+grep -q "<release version=\"$version\"" packaging/flatpak/com.shay.on-air.metainfo.xml || fail "metainfo has no $version release"
+grep -q '<project_license>MIT</project_license>' packaging/flatpak/com.shay.on-air.metainfo.xml || fail "metainfo license is not MIT"
+if have desktop-file-validate; then
+  desktop-file-validate packaging/flatpak/com.shay.on-air.desktop || fail "desktop GUI entry did not validate"
+fi
+grep -q '^Exec=on-air-desktop$' packaging/flatpak/com.shay.on-air.desktop || fail "desktop GUI Exec"
+[ -L packaging/debian/on-air-core.user.service ] && [ -f packaging/debian/on-air-core.user.service ] || fail "debian user unit link is broken"
+grep -q 'packaging/omarchy/on-air-core.service' packaging/rpm/on-air-core.spec || fail "rpm spec does not ship the user unit"
+bash -n packaging/install.sh || fail "packaging/install.sh syntax"
+echo "ok every recipe pins $version"
 
 # The documented polkit fallback must grant everything the inhibitor asks
 # for: --what=sleep:idle needs both actions.

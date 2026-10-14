@@ -12,8 +12,9 @@ e2e/**/playwright-report
 # OS
 .DS_Store
 
-# Worktrees (SDD task workspaces)
+# Git worktrees checked out inside the repo
 .worktrees/
+.claude/worktrees/
 
 # Nix
 /result
@@ -34,5 +35,11 @@ apps/mobile/dist
 !.env.example
 *.p8
 
-# Claude Code agent worktrees
-.claude/worktrees/
+# Flatpak local builds (packaging/install.sh clones Flathub shared-modules
+# and writes a manifest pointing at the local checkout)
+packaging/flatpak/shared-modules/
+packaging/flatpak/*.local.yml
+packaging/flatpak/build/
+packaging/flatpak/.flatpak-builder/
+.flatpak-builder/
+packaging/dist/

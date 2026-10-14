@@ -15,10 +15,6 @@ log() { printf '==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 setup_toolchain() {
-  local nvm_bin="${HOME}/.config/nvm/versions/node/v24.20.0/bin"
-  if [[ -x "${nvm_bin}/pnpm" ]]; then
-    export PATH="${nvm_bin}:${PATH}"
-  fi
   if [[ -x "${HOME}/.cargo/bin/cargo" ]]; then
     export PATH="${HOME}/.cargo/bin:${PATH}"
   fi
@@ -48,6 +44,8 @@ build_release() {
 sha256_file() { sha256sum "$1" | awk '{print $1}'; }
 
 # Package the binary just built and install it with yay (or makepkg -si).
+# The recipe is written here because it packages a local build, not a
+# release; on-air-desktop-bin under packaging/aur is the published shape.
 install_yay() {
   command -v makepkg >/dev/null 2>&1 || die "makepkg is required (base-devel)"
   build_release
@@ -60,7 +58,8 @@ install_yay() {
   mkdir -p "$DIST"
 
   install -Dm755 "${ROOT}/target/release/on-air-desktop" "${stage}/on-air-desktop"
-  install -Dm644 "${ROOT}/packaging/aur/on-air-desktop/com.shay.on-air.desktop" \
+  install -Dm644 "${ROOT}/LICENSE" "${stage}/LICENSE"
+  install -Dm644 "${ROOT}/packaging/flatpak/com.shay.on-air.desktop" \
     "${stage}/com.shay.on-air.desktop"
   install -Dm644 "${ROOT}/apps/desktop/src-tauri/icons/32x32.png" "${stage}/icon-32.png"
   install -Dm644 "${ROOT}/apps/desktop/src-tauri/icons/128x128.png" "${stage}/icon-128.png"
@@ -74,7 +73,7 @@ pkgrel=1
 pkgdesc='LAN audio streaming to AirPlay, Bluetooth, or Sonos (desktop GUI)'
 arch=('${arch_name}')
 url='https://github.com/tsonubin/on-air'
-license=('custom:unknown')
+license=('MIT')
 depends=(
   'gtk3'
   'webkit2gtk-4.1'
@@ -87,11 +86,12 @@ depends=(
   'bluez-utils'
   'python'
 )
-provides=('on-air')
-conflicts=('on-air' 'on-air-bin')
+provides=('on-air-desktop')
+conflicts=('on-air-desktop-bin')
 options=('!strip' '!debug')
 source=(
   on-air-desktop
+  LICENSE
   com.shay.on-air.desktop
   icon-32.png
   icon-128.png
@@ -100,6 +100,7 @@ source=(
 )
 sha256sums=(
   '$(sha256_file "${stage}/on-air-desktop")'
+  '$(sha256_file "${stage}/LICENSE")'
   '$(sha256_file "${stage}/com.shay.on-air.desktop")'
   '$(sha256_file "${stage}/icon-32.png")'
   '$(sha256_file "${stage}/icon-128.png")'
@@ -109,6 +110,7 @@ sha256sums=(
 
 package() {
   install -Dm755 on-air-desktop "\${pkgdir}/usr/bin/on-air-desktop"
+  install -Dm644 LICENSE "\${pkgdir}/usr/share/licenses/on-air-desktop/LICENSE"
   install -Dm644 com.shay.on-air.desktop "\${pkgdir}/usr/share/applications/${APP_ID}.desktop"
   install -Dm644 icon-32.png "\${pkgdir}/usr/share/icons/hicolor/32x32/apps/${APP_ID}.png"
   install -Dm644 icon-128.png "\${pkgdir}/usr/share/icons/hicolor/128x128/apps/${APP_ID}.png"
@@ -194,7 +196,7 @@ install_user() {
   local dest="${HOME}/.local"
   log "Installing into ${dest}"
   install -Dm755 "${ROOT}/target/release/on-air-desktop" "${dest}/bin/on-air-desktop"
-  install -Dm644 "${ROOT}/packaging/aur/on-air-desktop/com.shay.on-air.desktop" \
+  install -Dm644 "${ROOT}/packaging/flatpak/com.shay.on-air.desktop" \
     "${dest}/share/applications/${APP_ID}.desktop"
   sed -i "s|^Exec=.*|Exec=${dest}/bin/on-air-desktop|" \
     "${dest}/share/applications/${APP_ID}.desktop"
@@ -233,17 +235,6 @@ install_flatpak() {
     log "Cloning Flathub shared-modules for the tray library"
     git clone --depth 1 https://github.com/flathub/shared-modules.git "$shared"
   fi
-  # A symlink to the desktop file breaks inside the builder sandbox.
-  restore_desktop_link() {
-    rm -f "${ROOT}/packaging/flatpak/com.shay.on-air.desktop"
-    ln -s ../aur/on-air-desktop/com.shay.on-air.desktop \
-      "${ROOT}/packaging/flatpak/com.shay.on-air.desktop"
-  }
-  trap restore_desktop_link RETURN
-  rm -f "${ROOT}/packaging/flatpak/com.shay.on-air.desktop"
-  cp -f "${ROOT}/packaging/aur/on-air-desktop/com.shay.on-air.desktop" \
-    "${ROOT}/packaging/flatpak/com.shay.on-air.desktop"
-
   flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
   log "Installing the GNOME 51 SDK and Flatpak builder (user install)"
   flatpak install --user -y --noninteractive flathub \
@@ -257,7 +248,7 @@ install_flatpak() {
   local generated="${ROOT}/packaging/flatpak/com.shay.on-air.local.yml"
   mkdir -p "$DIST"
   sed -E "s|^        url: .*|        url: file://${ROOT}|" "$manifest" \
-    | sed -E "s|^        commit: .*|        commit: ${commit}|" > "$generated"
+    | sed -E "s#^        (tag|commit): .*#        commit: ${commit}#" > "$generated"
 
   local builder=(flatpak-builder --user --install --force-clean --disable-rofiles-fuse)
   local build_dir="${ROOT}/packaging/flatpak/build"

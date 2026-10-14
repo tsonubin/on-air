@@ -1,1 +1,12 @@
-../aur/on-air-desktop/com.shay.on-air.desktop
+[Desktop Entry]
+Type=Application
+Name=on-air desktop
+GenericName=Wireless Audio Streamer
+Comment=Stream desktop audio to AirPlay, Bluetooth, or Sonos
+Exec=on-air-desktop
+Icon=com.shay.on-air
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=AirPlay;Bluetooth;Sonos;Audio;Streaming;
+StartupNotify=true
+StartupWMClass=on-air-desktop

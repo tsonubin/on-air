@@ -105,6 +105,7 @@ jobs:
           check apps/desktop/package.json "$(node -p "require('./apps/desktop/package.json').version")"
           check apps/desktop/src-tauri/Cargo.toml "$(cargo_version apps/desktop/src-tauri/Cargo.toml)"
           check packages/core/Cargo.toml "$(cargo_version packages/core/Cargo.toml)"
+          check apps/tui/Cargo.toml "$(cargo_version apps/tui/Cargo.toml)"
           check apps/mobile/package.json "$(node -p "require('./apps/mobile/package.json').version")"
           check apps/mobile/app.json "$(node -p "require('./apps/mobile/app.json').expo.version")"
           [ "$mismatch" = 0 ] || exit 1

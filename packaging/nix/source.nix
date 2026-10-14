@@ -16,7 +16,7 @@ lib.cleanSourceWith {
       "dist"
       "test-results"
       "result"
-      # Agent and SDD worktrees (.claude/worktrees, .worktrees): whole repo copies.
+      # Git worktrees checked out inside the repo: whole repo copies.
       "worktrees"
       ".worktrees"
     ];

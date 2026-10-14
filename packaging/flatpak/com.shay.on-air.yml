@@ -1,6 +1,7 @@
 # Per-user Flatpak for the on-air desktop app.
 # GNOME 51 supplies WebKitGTK 4.1. Tray support comes from Flathub's
 # libappindicator module (packaging/install.sh clones shared-modules).
+# packaging/install.sh flatpak rewrites the git source to the local checkout.
 # Audio helpers run on the host; see on-air-desktop.sh.
 id: com.shay.on-air
 runtime: org.gnome.Platform
@@ -37,7 +38,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/tsonubin/on-air.git
-        commit: 0c4fdcb0e05711fbebf31e9938c90a4af88bd948
+        tag: v0.2.0
       - type: file
         path: build.sh
       - type: file
