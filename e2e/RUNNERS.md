@@ -57,4 +57,4 @@ Playwright writes traces of failed tests and screenshots under
 
 There is no simulator or Tauri WebDriver suite. Hardware checks (real
 speakers, AirPlay, Bluetooth, CD drives) are manual; see
-`docs/platform-device-support.md`.
+`docs/history/2026-09-16-platform-device-support.md`.

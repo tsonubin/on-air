@@ -1,7 +1,7 @@
 # on-air — Quality overhaul design
 
 **Date:** 2026-10-07
-**Status:** In progress (autonomous session; assumptions are stated, not approved)
+**Status:** Implemented. Design record written before the code; where they disagree, the code is authoritative.
 
 ## Why
 

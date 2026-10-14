@@ -1,7 +1,7 @@
 # on-air — Omarchy-first design: terminal UI over a service
 
 **Date:** 2026-10-13
-**Status:** Approved in conversation; spec under review
+**Status:** Implemented. Design record written before the code; where they disagree, the code is authoritative.
 
 Companion research: the Omarchy repository (`omacom/omarchy`, master, tags
 v3.8.4 and v4.0.4), its agent skill `default/agents/skills/omarchy-app`,
@@ -500,7 +500,7 @@ with the path each belongs in. It edits nothing in `~/.config`.
   `stay-awake` toggle as a manual fallback, Haswell-era Mac notes from the
   research (nouveau + Intel renderer env for the 2013/2014 15" models,
   `omarchy toggle animations off`), and uninstall.
-- `CONTEXT.md`: two definitions: **Control surface** (TUI, Tauri window,
+- `docs/glossary.md`: two definitions: **Control surface** (TUI, Tauri window,
   phone remote: all clients of the same control plane; none owns playback)
   and **Service** (the core process; the thing autostart starts and the
   inhibitor belongs to).

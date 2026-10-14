@@ -1,411 +1,229 @@
 # Install on-air
 
-on-air captures audio on your computer and sends it to **one** wireless output
-at a time — AirPlay, Bluetooth, or Sonos. On Linux the core runs as a user
-service controlled by the `on-air` terminal UI; on macOS and Windows the
-desktop app runs in the tray. Both can start on login and are controllable
-from a companion mobile app on the same LAN. There is no cloud remote: the phone finds the desktop by probing
-port **47990** across its own /24 subnet (or you type the desktop's IP),
-control is HTTP/WebSocket on that port, and LAN clients pair with a PIN. The
-core also advertises `_on-air._tcp` over mDNS, but the phone does not browse
-for it yet.
+on-air captures audio on your computer and sends it to **one** wireless
+output at a time: AirPlay, Bluetooth, or Sonos. On Linux the core runs as a
+user service controlled by the `on-air` terminal UI; on macOS and Windows
+the desktop app runs in the tray. Both start at login and are controllable
+from the phone remote on the same LAN. The phone finds the desktop by
+probing port **47990** across its own /24 subnet (or you type the address),
+control is HTTP/WebSocket on that port, and LAN clients pair with a PIN.
 
-A tagged GitHub Release (`v*`) ships **installers** for both **x86_64** and
-**arm64** — `.dmg` on macOS, `.msi` / NSIS `.exe` / portable `.zip` on
-Windows, `.deb` / `.rpm` / `.AppImage` on Linux. GitHub also attaches an
-automatic source zip/tarball; that is not the install path.
+The latest published release is **v0.1.0**. Everything below that names
+`0.2.0` assets describes what the next tag will produce; until it exists,
+[build from source](#build-from-source) or use an installer that builds
+from a clone.
 
-| Artifact | What it is |
+| Package | What it is |
 | --- | --- |
-| **on-air** (Linux) | Arch package: `on-air-core` service + `on-air` terminal UI (recommended on Linux). |
-| **on-air-desktop** | Tauri 2 tray app (recommended on macOS and Windows). Embeds `on-air-core`. |
-| **on-air-core** | Headless binary. Same control plane, no GUI. |
-
-Package-manager recipes live in this repository (`Casks/`, `Formula/`,
-`flake.nix`, `packaging/`). They pin version **0.2.0**. Binary recipes expect
-the GitHub Release asset names listed in [Expected release assets](#expected-release-assets).
-SHA-256 values are filled by `packaging/update-checksums.sh` after a release
-publishes (the file `SHA256SUMS` is attached to the release by CI).
-
-Until that release exists, or if the GitHub repository is private, use
-[Build from source](#build-from-source).
+| **on-air** (Linux) | Arch package: the `on-air-core` service plus the `on-air` terminal UI. Recommended on Linux. |
+| **on-air-desktop** | Tauri 2 tray app for macOS and Windows (Linux bundles exist too). Embeds the core. |
+| **on-air-core** | Headless binary. Same control plane, no UI. |
 
 ## Omarchy / Arch (recommended on Linux)
 
 The core runs as a systemd user service and the `on-air` terminal UI
-controls it: no WebKit, no GPU toolkit, themed by your terminal. Install
-from a clone (needs Rust and `base-devel`):
+controls it: no WebKit, no GPU toolkit, themed by your terminal. From a
+clone (needs Rust and `base-devel`):
 
 ```bash
 git clone https://github.com/tsonubin/on-air.git && cd on-air
-packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
+packaging/omarchy/install.sh      # makepkg, sudo pacman -U, enable the service, print the snippets
 on-air                            # the terminal UI; `on-air --help` for the subcommands
 ```
 
 It builds your working tree, uncommitted edits included. Rebuilds are
-incremental (only what changed recompiles, in `target/omarchy/`); pass
-`--clean` to rebuild everything.
+incremental (compiled output lives in `target/omarchy/`); pass `--clean` to
+rebuild everything. The launcher entry, the `Super+Shift+Alt+O` hotkey, the
+menu rows, the bar module and the sleep notes are in
+[docs/omarchy.md](docs/omarchy.md).
 
-> **TODO:** the AUR packages (`yay -S on-air-bin`, `yay -S on-air`) are not
-> published yet. Until they are, use the script above.
+The AUR recipes under `packaging/aur/` (`on-air` from source, `on-air-bin`
+prebuilt, `on-air-desktop-bin` for the GUI) are not published to the AUR
+yet. From the tree: `cd packaging/aur/<package> && makepkg -si`.
 
-The launcher entry, the `Super+Shift+Alt+O` hotkey, the menu rows, the
-bar module and the sleep notes are in [docs/omarchy.md](docs/omarchy.md).
-The Linux installers below ship the WebKitGTK desktop window instead; they
-still work, but the terminal UI is the lighter path.
+## Desktop app on Linux
 
-## Desktop GUI
+The WebKitGTK desktop window also runs on Linux for people who want it.
+From a clone, `packaging/install.sh` builds it and installs it the way
+your system prefers:
 
-### macOS — Homebrew
+```bash
+packaging/install.sh            # Arch: a pacman package. Otherwise Flatpak, else ~/.local
+packaging/install.sh yay        # build and install a pacman package (on-air-desktop)
+packaging/install.sh flatpak    # per-user Flatpak, com.shay.on-air (GNOME 51 runtime)
+packaging/install.sh user       # ~/.local/bin and ~/.local/share, no package manager
+```
 
-This repository is a Homebrew tap (`Casks/` + `Formula/` at the repo root).
+The Flatpak runs the GUI in the sandbox and shells out to the host for
+PipeWire, BlueZ and the AirPlay helper. Prebuilt `.deb`, `.rpm` and
+`.AppImage` bundles are on the GitHub Release; see below.
+
+## macOS: Homebrew
+
+This repository is a Homebrew tap (`Casks/` and `Formula/` at the root).
 
 ```bash
 brew tap tsonubin/on-air https://github.com/tsonubin/on-air.git
-brew install --cask on-air
+brew install --cask on-air        # the tray app, from the release .dmg
+brew install on-air-core          # the headless core, built from source
 ```
 
-If the GitHub repo is private, tap with SSH:
+The cask installs `on-air-desktop.app` (`aarch64` on Apple silicon, `x64`
+on Intel). The formula adds a `brew services` entry for the core.
 
-```bash
-brew tap tsonubin/on-air git@github.com:tsonubin/on-air.git
-```
+## Windows: winget
 
-Or install from a local clone:
-
-```bash
-brew tap tsonubin/on-air "$(pwd)"
-brew install --cask on-air
-```
-
-The cask installs `on-air-desktop.app` from the macOS `.dmg`
-(`aarch64` on Apple silicon, `x64` on Intel).
-
-### Windows — winget
-
-From a clone of this repo, once the NSIS installer is on the GitHub Release:
+From a clone, once the NSIS installer is on the GitHub Release:
 
 ```powershell
 winget install --manifest packaging/winget
 ```
 
-After the manifests are accepted into [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs):
+After the manifests are accepted into
+[microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs):
+`winget install Tsonubin.OnAir`. Manual fallback: the `-setup.exe`, `.msi`
+or `-portable.zip` from the release.
 
-```powershell
-winget install Tsonubin.OnAir
-```
+## Debian / Ubuntu: APT
 
-Manual fallback from the GitHub Release:
-
-- NSIS: `on-air-desktop_0.2.0_x64-setup.exe` or `_arm64-setup.exe`
-- MSI: `on-air-desktop_0.2.0_x64_en-US.msi` or `_arm64_en-US.msi`
-- Portable zip: `on-air-desktop_0.2.0_x64-portable.zip` or `_arm64-portable.zip`
-
-### Debian / Ubuntu — APT
-
-Installs the WebKitGTK desktop window. On Linux the terminal UI above is the
-recommended path; this is for distributions without `makepkg`.
-
-Install the Tauri `.deb` from the GitHub Release (`amd64` or `arm64`):
+Install the desktop `.deb` from the GitHub Release (`amd64` or `arm64`):
 
 ```bash
-# helper (downloads + apt install for the host architecture)
-packaging/apt/install.sh
-
-# or by hand — amd64
-VERSION=0.2.0
-curl -fLO "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop_${VERSION}_amd64.deb"
-sudo apt install "./on-air-desktop_${VERSION}_amd64.deb"
-
-# arm64
-curl -fLO "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop_${VERSION}_arm64.deb"
-sudo apt install "./on-air-desktop_${VERSION}_arm64.deb"
+packaging/apt/install.sh          # downloads and apt-installs for this architecture
 ```
 
-To build a **headless** `.deb` of `on-air-core` from this tree (needs
-`cargo`, `debhelper`, `libasound2-dev`, `pkg-config`, `libssl-dev`):
+To build a headless `on-air-core` `.deb` from this tree (needs `cargo`,
+`debhelper`, `libasound2-dev`, `pkg-config`, `libssl-dev`):
 
 ```bash
 packaging/apt/build-deb.sh
 ```
 
-Debian packaging files are in `packaging/debian/`. This is not an official
-Debian/Ubuntu archive; there is no `apt-add-repository` line until a signed
-repo is published.
+It ships the systemd user unit; enable it with
+`systemctl --user enable --now on-air-core`. There is no hosted APT
+repository yet.
 
-### Arch Linux — yay / AUR
+## Fedora / RHEL: RPM
 
-> **TODO:** not published to the AUR yet; the `yay -S` lines below do not
-> work until they are. On Omarchy / Arch use `packaging/omarchy/install.sh`.
-
-Recipes are under `packaging/aur/`; each directory is one AUR package.
-
-| Package | What it installs |
-| --- | --- |
-| `on-air-bin` | Core service + terminal UI, prebuilt (recommended; see [Omarchy / Arch](#omarchy--arch-recommended-on-linux)) |
-| `on-air` | The same, built from source |
-| `on-air-core` | Headless core only, built from source |
-| `on-air-desktop-bin` | The WebKitGTK desktop window, from the release `.deb` |
-
-```bash
-yay -S on-air-bin            # or on-air, on-air-core, on-air-desktop-bin
-```
-
-From the tree instead: `cd packaging/aur/<package> && makepkg -si`.
-
-### Fedora / RHEL — RPM
-
-Installs the WebKitGTK desktop window; on Fedora the headless core plus the
-`on-air-tui-linux-*` release binary is the lighter path.
-
-Install the Tauri-produced RPM from the GitHub Release:
+Install the desktop RPM from the GitHub Release:
 
 ```bash
 VERSION=0.2.0
-# x86_64
-sudo dnf install \
-  "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.x86_64.rpm"
-# aarch64
-sudo dnf install \
-  "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.aarch64.rpm"
+sudo dnf install "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.x86_64.rpm"   # or -1.aarch64.rpm
 ```
 
-Portable (no package manager): `on-air-desktop_${VERSION}_amd64.AppImage` or
-`on-air-desktop_${VERSION}_aarch64.AppImage`, then `chmod +x` and run.
+Portable: the `.AppImage` from the same release, `chmod +x` and run. To
+build the headless core with `rpmbuild` from a source tarball in `SOURCES`:
+`rpmbuild -ba packaging/rpm/on-air-core.spec`. It ships the systemd user
+unit.
 
-To build **on-air-core** from source with `rpmbuild`:
+## Nix
 
-```bash
-# from the repo root, after putting a source tarball in SOURCES
-rpmbuild -ba packaging/rpm/on-air-core.spec
-```
-
-`packaging/rpm/on-air-desktop.spec` rebuilds the GUI package from the
-GitHub `.rpm` (binary spec) for COPR / local `rpmbuild -bb`.
-
-### Nix
-
-`flake.nix` at the repo root builds **on-air-core** from this tree:
+`flake.nix` builds **on-air-core**:
 
 ```bash
 nix run github:tsonubin/on-air            # on-air-core
 nix build github:tsonubin/on-air          # ./result/bin/on-air-core
-nix develop github:tsonubin/on-air        # rustc, cargo, pnpm, linux GUI deps
+nix develop github:tsonubin/on-air        # rustc, cargo, pnpm, Linux GUI deps
+nix build .#on-air-core                   # from a local clone
 ```
 
-From a local clone (works while the GitHub repo is private):
-
-```bash
-nix build .#on-air-core
-nix run .#on-air-core
-```
-
-A NixOS module is exported as `nixosModules.default`:
-
-```nix
-{
-  inputs.on-air.url = "github:tsonubin/on-air";
-  outputs = { nixpkgs, on-air, ... }: {
-    nixosConfigurations.example = nixpkgs.lib.nixosSystem {
-      modules = [
-        on-air.nixosModules.default
-        { services.on-air-core.enable = true; }
-      ];
-    };
-  };
-}
-```
-
-The desktop GUI is not a Nix package yet (it needs the Tauri WebKit stack plus
-release hashes). Use the `.AppImage` / `.deb` from the GitHub Release, or
-build with `pnpm --dir apps/desktop tauri build`.
+A NixOS module is exported as `nixosModules.default`
+(`services.on-air-core.enable = true;`, with `port` and `mock` options).
+The desktop app is not a Nix package; use the `.AppImage` or `.deb`.
 
 ## Headless core
 
-Same Homebrew tap:
+Every package named `on-air-core` installs one binary that listens on all
+interfaces, `0.0.0.0:47990`, so phones and Sonos speakers on the LAN can
+reach it. `BIND=127.0.0.1` keeps it loopback-only, `PORT` changes the
+port, `ON_AIR_MOCK=1` runs it without hardware. Settings and paired
+phones persist in `~/.config/on-air-core/` (`$XDG_CONFIG_HOME/on-air-core`
+when set, or `ON_AIR_CONFIG_DIR`).
 
-```bash
-brew install on-air-core
-```
+Release binaries: `on-air-core-serve-<os>-<arch>` for macOS, Linux and
+Windows, and the Linux terminal UI as `on-air-tui-linux-<arch>` (it talks
+to a core on `127.0.0.1:47990`; `--base` for another address).
 
-Nix, APT (`on-air-core` .deb), AUR (`on-air-core`), and RPM
-(`on-air-core.spec`) all install a binary named `on-air-core` that listens on
-all interfaces, `0.0.0.0:47990`, so phones and Sonos speakers on the LAN can
-reach it. Set `BIND=127.0.0.1` to keep it loopback-only and `PORT` to use
-another port. Mock senders with `ON_AIR_MOCK=1`. Settings and paired phones
-persist in `~/.config/on-air-core/` (`$XDG_CONFIG_HOME/on-air-core` when set,
-or `ON_AIR_CONFIG_DIR` to choose the directory).
-
-Release binaries (when published) keep their original `-serve-` names:
-
-- `on-air-core-serve-macos-aarch64` / `on-air-core-serve-macos-x86_64`
-- `on-air-core-serve-linux-x86_64` / `on-air-core-serve-linux-aarch64`
-- `on-air-core-serve-windows-x86_64.exe` / `on-air-core-serve-windows-aarch64.exe`
-
-The Linux terminal UI is published next to them as
-`on-air-tui-linux-x86_64` / `on-air-tui-linux-aarch64`; it talks to a core
-on `127.0.0.1:47990` (`--base` for another address).
-
-```bash
-chmod +x on-air-core-serve-linux-x86_64
-./on-air-core-serve-linux-x86_64
-```
-
-## GitHub Releases (manual)
+## GitHub Releases
 
 https://github.com/tsonubin/on-air/releases
 
 | Platform | Arch | File |
 | --- | --- | --- |
-| macOS | Apple silicon | `on-air-desktop_0.2.0_aarch64.dmg` |
-| macOS | Intel | `on-air-desktop_0.2.0_x64.dmg` |
-| Linux | x86_64 | `on-air-desktop_0.2.0_amd64.deb`, `on-air-desktop-0.2.0-1.x86_64.rpm`, `on-air-desktop_0.2.0_amd64.AppImage` |
-| Linux | arm64 | `on-air-desktop_0.2.0_arm64.deb`, `on-air-desktop-0.2.0-1.aarch64.rpm`, `on-air-desktop_0.2.0_aarch64.AppImage` |
-| Linux | x86_64, arm64 | `on-air-tui-linux-x86_64`, `on-air-tui-linux-aarch64` (terminal UI; pair with a headless core) |
-| Windows | x64 | `on-air-desktop_0.2.0_x64-setup.exe`, `on-air-desktop_0.2.0_x64_en-US.msi`, `on-air-desktop_0.2.0_x64-portable.zip` |
-| Windows | arm64 | `on-air-desktop_0.2.0_arm64-setup.exe`, `on-air-desktop_0.2.0_arm64_en-US.msi`, `on-air-desktop_0.2.0_arm64-portable.zip` |
+| macOS | Apple silicon | `on-air-desktop_<v>_aarch64.dmg` |
+| macOS | Intel | `on-air-desktop_<v>_x64.dmg` |
+| Linux | x86_64 | `on-air-desktop_<v>_amd64.deb`, `on-air-desktop-<v>-1.x86_64.rpm`, `on-air-desktop_<v>_amd64.AppImage` |
+| Linux | arm64 | `on-air-desktop_<v>_arm64.deb`, `on-air-desktop-<v>-1.aarch64.rpm`, `on-air-desktop_<v>_aarch64.AppImage` |
+| Linux | x86_64, arm64 | `on-air-tui-linux-<arch>`, `on-air-core-serve-linux-<arch>` |
+| Windows | x64, arm64 | `on-air-desktop_<v>_<arch>-setup.exe`, `on-air-desktop_<v>_<arch>_en-US.msi`, `on-air-desktop_<v>_<arch>-portable.zip` |
+
+The full asset list and how the recipes pick their checksums up is in
+[packaging/README.md](packaging/README.md).
 
 ## Build from source
 
-Needs Rust stable, Node 22, pnpm 9.15.0 (`package.json` `packageManager`),
-and on Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libappindicator3-dev`,
-`librsvg2-dev`, `libasound2-dev`, `pkg-config`.
+Needs Rust stable, Node 22, pnpm 9 (`corepack enable` reads the pinned
+version from `package.json`), and on Linux: `libwebkit2gtk-4.1-dev`,
+`libgtk-3-dev`, `libappindicator3-dev`, `librsvg2-dev`, `libasound2-dev`,
+`pkg-config`, `libssl-dev`.
 
 ```bash
 pnpm install
-
-# headless core
-cargo run --locked --release -p on-air-core --bin on-air-core
-
-# terminal UI (Linux)
-cargo build --locked --release -p on-air-tui   # target/release/on-air
-
-# desktop GUI (macOS, Windows; also Linux WebKitGTK)
-pnpm --dir apps/desktop tauri build
+cargo run --locked --release -p on-air-core --bin on-air-core   # headless core
+cargo build --locked --release -p on-air-tui                    # target/release/on-air (Linux UI)
+pnpm --dir apps/desktop tauri build                             # desktop app bundles
 ```
 
-Linux extra packages (Debian/Ubuntu):
+Distro packages for the Linux build deps:
 
 ```bash
-sudo apt-get install -y \
-  libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+# Debian/Ubuntu
+sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
   patchelf libgtk-3-dev libasound2-dev pkg-config libssl-dev
-```
-
-Arch:
-
-```bash
-sudo pacman -S webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg \
-  alsa-lib openssl pkgconf rust
-```
-
-Fedora:
-
-```bash
+# Arch
+sudo pacman -S webkit2gtk-4.1 gtk3 libappindicator-gtk3 librsvg alsa-lib openssl pkgconf rust
+# Fedora
 sudo dnf install webkit2gtk4.1-devel gtk3-devel libappindicator-gtk3-devel \
   librsvg2-devel alsa-lib-devel openssl-devel pkgconf-pkg-config rust cargo
 ```
 
 ## Mobile remote
 
-The iOS/Android app is an **Expo** LAN remote (discovery + PIN pairing + the
-same mixer controls as the Tauri UI). Internal iOS TestFlight uses
-`apps/mobile/scripts/publish-testflight.sh`. From this tree (the running app
-needs a desktop on the LAN to pair with; the tests do not):
+The iOS/Android app is an Expo project under `apps/mobile`. From this tree:
 
 ```bash
 pnpm --filter mobile start          # Expo Go / simulators
 pnpm --filter mobile ios
 pnpm --filter mobile android
-pnpm --filter mobile test
-pnpm --filter @on-air/control-client test
 ```
 
-The phone must be on the same LAN. The app probes port `47990` on every
-address in the phone's /24 subnet; on other network layouts, type the desktop
-IP. Pair with the PIN on the desktop.
-
-The native projects use Expo module autolinking and `@expo/ui` native controls.
-Android release builds are intentionally unsigned until a private production
-keystore is configured; the repository never signs release artifacts with the
-public debug key.
+The phone must be on the same LAN. It probes port `47990` on every address
+in its /24 subnet; on other layouts, type the desktop's IP. Pair with the
+PIN the desktop shows. Internal iOS TestFlight builds use
+`apps/mobile/scripts/publish-testflight.sh`. Android release builds stay
+unsigned until a production keystore is configured.
 
 ## After install
 
-1. Launch **on-air**: on Linux the terminal UI (launcher entry or `on-air`;
-   `a` toggles starting the service at login), elsewhere the tray icon with
-   autostart in the desktop app.
-2. On macOS, AirPlay destination is chosen with the system route picker in
-   the app; Sonos/Bluetooth and volume/EQ remain remote-controllable.
-3. From a phone on the same LAN, open the mobile remote. It scans the phone's
-   /24 subnet for the desktop; otherwise enter the desktop’s LAN IP.
-4. Pair with the PIN shown on the desktop. Subsequent calls use a Bearer
-   token. The desktop window itself, on the same host, needs no pairing.
-5. Pick **one** output. Switching AirPlay / Bluetooth / Sonos tears down the
-   current sender first.
-
-The GUI binds all interfaces on port `47990`. The headless binary does the
-same by default; `BIND` and `PORT` change the address and port.
-
-## Expected release assets
-
-CI (`.github/workflows/release.yml`) builds a draft release with the Tauri
-bundles, the headless `on-air-core` binary (published under the
-`on-air-core-serve-<os>-<arch>` names below) and `SHA256SUMS`, and publishes it
-only when every platform succeeded. Names match Tauri 2 defaults for
-`productName` `on-air-desktop` version `0.2.0`:
-
-```
-# macOS
-on-air-desktop_0.2.0_aarch64.dmg
-on-air-desktop_0.2.0_x64.dmg
-# Linux
-on-air-desktop_0.2.0_amd64.deb
-on-air-desktop_0.2.0_arm64.deb
-on-air-desktop-0.2.0-1.x86_64.rpm
-on-air-desktop-0.2.0-1.aarch64.rpm
-on-air-desktop_0.2.0_amd64.AppImage
-on-air-desktop_0.2.0_aarch64.AppImage
-# Windows
-on-air-desktop_0.2.0_x64-setup.exe
-on-air-desktop_0.2.0_arm64-setup.exe
-on-air-desktop_0.2.0_x64_en-US.msi
-on-air-desktop_0.2.0_arm64_en-US.msi
-on-air-desktop_0.2.0_x64-portable.zip
-on-air-desktop_0.2.0_arm64-portable.zip
-# Headless
-on-air-core-serve-macos-aarch64
-on-air-core-serve-macos-x86_64
-on-air-core-serve-linux-x86_64
-on-air-core-serve-linux-aarch64
-on-air-tui-linux-x86_64
-on-air-tui-linux-aarch64
-on-air-core-serve-windows-x86_64.exe
-on-air-core-serve-windows-aarch64.exe
-SHA256SUMS
-```
-
-After a successful Release run:
-
-```bash
-packaging/update-checksums.sh 0.2.0
-```
-
-That rewrites Homebrew `sha256`, AUR `sha256sums`, winget `InstallerSha256`,
-and documents any still-missing files.
+1. Launch on-air: on Linux the terminal UI (`a` toggles starting the
+   service at login), elsewhere the tray icon with autostart in the app.
+2. On macOS, pick the AirPlay destination with the system route picker in
+   the app; Sonos, Bluetooth, volume and EQ stay phone-controllable.
+3. On the phone, open the remote; it finds the desktop or takes its IP.
+4. Enter the PIN the desktop shows. Later calls use a bearer token. The
+   desktop window itself needs no pairing.
+5. Pick **one** output. Switching tears the current one down first.
 
 ## Packager map
 
 | Manager | Files | User command |
 | --- | --- | --- |
-| Omarchy / Arch | `packaging/omarchy/` | `packaging/omarchy/install.sh` |
-| Homebrew cask | `Casks/on-air.rb` | `brew install --cask on-air` |
-| Homebrew formula | `Formula/on-air-core.rb` | `brew install on-air-core` |
+| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air` | `packaging/omarchy/install.sh` |
+| Desktop on Linux | `packaging/install.sh`, `packaging/flatpak/` | `packaging/install.sh [yay\|flatpak\|user]` |
+| Homebrew | `Casks/on-air.rb`, `Formula/on-air-core.rb` | `brew install --cask on-air` |
 | Nix | `flake.nix`, `packaging/nix/` | `nix run .#on-air-core` |
 | APT | `packaging/debian/`, `packaging/apt/` | `packaging/apt/install.sh` |
-| Arch / yay (TODO: not on the AUR yet) | `packaging/aur/on-air-bin`, `on-air`, `on-air-core`, `on-air-desktop-bin` | `yay -S on-air-bin` |
-| RPM | `packaging/rpm/*.spec` | `dnf install <url>` / `rpmbuild -ba` |
+| AUR (not published yet) | `packaging/aur/{on-air,on-air-bin,on-air-desktop-bin}` | `makepkg -si` |
+| RPM | `packaging/rpm/on-air-core.spec` | `dnf install <url>` / `rpmbuild -ba` |
 | winget | `packaging/winget/` | `winget install --manifest packaging/winget` |
-
-See `packaging/README.md` for how to publish the tap, AUR packages, and
-winget-pkgs PR.

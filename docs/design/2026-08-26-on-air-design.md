@@ -1,7 +1,7 @@
 # on-air — Design Spec
 
 **Date:** 2026-08-26
-**Status:** Approved for planning (revised after first review round)
+**Status:** Implemented. Design record written before the code; where they disagree, the code is authoritative.
 
 ## Purpose
 

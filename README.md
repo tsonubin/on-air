@@ -1,71 +1,113 @@
 # on-air
 
-LAN-only desktop audio streaming to **one** of AirPlay, Bluetooth, or Sonos,
-with login autostart and a mobile remote on the same network. On Linux the
-app is **Omarchy-first**: the core runs as a systemd user service and the
-`on-air` terminal UI controls it, with no browser engine. macOS and Windows
-use the Tauri tray app.
+[![CI](https://github.com/tsonubin/on-air/actions/workflows/ci.yml/badge.svg)](https://github.com/tsonubin/on-air/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Install:** on Omarchy or Arch, clone this repo and run
-`packaging/omarchy/install.sh`. Everything else is in
-[INSTALL.md](INSTALL.md) (Homebrew, winget, APT, RPM, Nix, or source)
-and [docs/omarchy.md](docs/omarchy.md) for the Omarchy integration.
+Stream your computer's audio to **one** wireless speaker at a time, AirPlay,
+Bluetooth or Sonos, and control it from a terminal, a tray app or a phone
+on the same network. Everything stays on your LAN: there is no account and
+no cloud.
 
-Control plane listens on port `47990`. Pair from the LAN with a PIN. Transports
-are exclusive — switching outputs tears down the current sender first.
+- **Sources:** any capture device, the system monitor, or an audio CD.
+- **Outputs:** Sonos (direct UPnP), AirPlay (OwnTone or pyatv on Linux and
+  Windows, the system route picker on macOS), Bluetooth A2DP. Switching
+  outputs tears the previous one down first.
+- **Mixer:** volume, a five-band EQ, input and output sample rates, a level
+  meter, CD transport.
+- **Remote:** the phone app finds the desktop on the LAN, pairs with a PIN
+  and gets the same mixer. Pairing survives restarts on both ends.
+- **Service:** the core keeps streaming when every UI is closed, starts at
+  login, and holds a sleep inhibitor while audio is live.
 
-This is a **pnpm + turbo + Cargo workspace**. The Linux terminal UI is
-ratatui (`apps/tui`); the macOS/Windows desktop is Tauri/React
-(`apps/desktop`); the iOS/Android remote is Expo (`apps/mobile`); they share
-`packages/api-types` and `packages/control-client`. End-to-end suites live in
-`e2e/` (see [e2e/RUNNERS.md](e2e/RUNNERS.md)). None of the checks below need the
-desktop app running; the e2e suites start a mock core themselves.
+## Platforms
 
-```bash
-pnpm install
-pnpm check              # Biome format, lint and import order (CI runs pnpm check:ci)
-pnpm typecheck          # every TypeScript package, tests and e2e included
-pnpm test               # control client, desktop (Vitest), mobile (Jest), core
-cargo clippy --locked --workspace --all-targets -- -D warnings
-cargo test --locked --workspace
-sh packaging/omarchy/test.sh   # Omarchy unit, launcher entry, snippets and PKGBUILD
-pnpm test:mobile:e2e    # phone client against the mock core
-pnpm test:desktop:e2e   # Playwright: HTTP golden paths and the desktop UI
-pnpm --filter mobile start    # Expo remote; scans the LAN or takes the desktop IP
-cargo run -p on-air-tui       # terminal UI against a core on :47990 (ON_AIR_MOCK=1 core for no hardware)
-```
+| Host | What you run | Status |
+| --- | --- | --- |
+| Linux (Omarchy, Arch, any systemd desktop) | `on-air-core` as a systemd user service, the `on-air` terminal UI | Primary target. Sonos, AirPlay and Bluetooth all work. |
+| macOS | The tray app | Sonos and Bluetooth work. AirPlay goes through the system route picker and cannot be driven from the phone. |
+| Windows | The tray app | Sonos works. Bluetooth device detection still has gaps; see [docs/history](docs/history/2026-09-16-platform-device-support.md). |
+| iOS, Android | The Expo remote | Controls whichever host it pairs with. |
 
-Use `pnpm format` to apply Biome formatting across the web, desktop, mobile,
-shared-package, and TypeScript E2E sources. Rust is covered by `cargo fmt` and
-`cargo clippy`.
+## Install
 
-## Service and sleep behavior
-
-On Linux the core is a `systemd --user` service; the terminal UI is a client
-of it and quitting the UI never stops streaming. Inside the TUI, `m` turns the
-monitor (audio capture and streaming) on or off and `a` toggles starting the
-service at login; `i` shows status (version, addresses, monitor) and the mouse
-works too (click rows, drag faders, click the CD progress bar). From a shell:
+On Omarchy or Arch, from a clone (needs Rust and `base-devel`):
 
 ```bash
-on-air                                  # the terminal UI
-on-air monitor on|off|toggle            # audio on or off; the service keeps running
-on-air service start|stop|restart       # the on-air-core systemd user service
-on-air status                           # what is running and where
+git clone https://github.com/tsonubin/on-air.git && cd on-air
+packaging/omarchy/install.sh   # builds, installs, enables the service, prints the Omarchy snippets
+on-air                         # the terminal UI
 ```
 
-On macOS and Windows:
+Every other path, including Homebrew, winget, APT, RPM, Flatpak, Nix and
+building from source, is in [INSTALL.md](INSTALL.md).
 
-Closing the desktop window hides it to the tray; it does not stop the service.
-The tray menu can open the mixer, turn the audio service on or off, or quit.
-Turning the service off stops capture/output work and releases the system sleep
-assertion, while leaving low-cost LAN discovery and health status online so the
-phone can still find the desktop. Turning it back on restores the last source,
-destination, volume, EQ, and sample rates as soon as the saved devices are
-discoverable.
+## Use
 
-While the service is on, the desktop asks macOS, Windows, or systemd-based Linux
-to prevent system/idle sleep while still allowing the display to turn off.
-Laptop firmware and OS lid-close policy can override an application assertion.
-For closed-lid use, configure the OS not to suspend; macOS also requires a
-[supported closed-display setup](https://support.apple.com/en-us/102282).
+On Linux the terminal UI is the control surface. `?` shows the keys; the
+full key and mouse tables, the launcher entry, hotkey, menu rows and bar
+module are in [docs/omarchy.md](docs/omarchy.md). From a shell:
+
+```bash
+on-air                              # the terminal UI
+on-air monitor on|off|toggle        # audio capture and streaming; the service keeps running
+on-air service start|stop|restart   # the on-air-core systemd user service
+on-air status [--json]              # what is running and where
+on-air bar                          # one Waybar-style JSON line for a bar module
+```
+
+On macOS and Windows the tray app does the same: closing the window hides
+it, the tray menu opens the mixer, turns audio on or off, or quits. Turning
+audio off releases the sleep inhibitor but keeps discovery up so the phone
+can still find the desktop.
+
+From a phone on the same Wi-Fi, open the remote. It scans the phone's /24
+subnet for the desktop, or you type the address; then enter the PIN the
+desktop shows.
+
+## How it works
+
+The core is one Rust process. It captures audio, runs it through EQ and a
+rate bridge, publishes PCM on an in-process bus, and owns exactly one
+*sender* at a time. Sonos and AirPlay senders point the speaker at a WAV
+stream the core serves under a per-activation nonce; the Bluetooth sender
+writes to the OS audio sink. A small HTTP and WebSocket control plane on
+port 47990 is the only way in: the terminal UI, the tray window and the
+phone are all clients of it and own no playback. Remote clients pair with
+a PIN and then a bearer token; the local desktop is trusted by origin.
+
+```
+packages/core        the core: capture, DSP, senders, control plane (binary on-air-core)
+packages/api         the control plane's Rust wire types (shared by core and TUI)
+packages/api-types   the same types in TypeScript
+packages/control-client   HTTP/WebSocket client the desktop and phone share
+apps/tui             on-air, the ratatui terminal UI and CLI (Linux)
+apps/desktop         the Tauri tray app: React webview + a Rust shell embedding the core
+apps/mobile          the Expo phone remote
+e2e                  Playwright and node:test suites against the core in mock mode
+packaging            installers and distro recipes
+docs                 the Omarchy guide, a domain glossary, design records
+```
+
+The domain vocabulary (exclusive output, rate bridge, stereo pair, error
+envelope) is in [docs/glossary.md](docs/glossary.md); the design records
+behind each milestone are in [docs/design](docs/design).
+
+## Develop
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the checks CI runs.
+The short version, from the repository root after `pnpm install`:
+
+```bash
+pnpm check:ci && pnpm typecheck && pnpm test
+cargo clippy --locked --workspace --all-targets -- -D warnings && cargo test --locked --workspace
+ON_AIR_MOCK=1 cargo run -p on-air-core --bin on-air-core   # a hardware-free core on :47990
+cargo run -p on-air-tui                                   # the terminal UI against it
+```
+
+The e2e suites ([e2e/RUNNERS.md](e2e/RUNNERS.md)) start that mock core
+themselves, so no audio hardware or speaker is needed to work on any
+client.
+
+## License
+
+[MIT](LICENSE).

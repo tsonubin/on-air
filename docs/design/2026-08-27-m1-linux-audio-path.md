@@ -1,5 +1,7 @@
 # on-air M1 — Linux Audio Path (Design)
 
+**Status:** Implemented. Design record written before the code; where they disagree, the code is authoritative.
+
 Parent spec: [2026-08-26-on-air-design.md](2026-08-26-on-air-design.md) — see its
 "MVP milestones" section for M1's one-line scope: input capture (PipeWire
 monitor) → Sonos sender → volume/EQ → local HTTP/WS API → mDNS advertisement,

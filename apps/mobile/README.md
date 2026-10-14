@@ -42,7 +42,7 @@ pnpm --filter mobile start
 ```
 
 Then open Expo Go on a phone on the same Wi-Fi, or press `i` / `a` for
-simulators. Enter the PIN from the desktop ONAIR chrome.
+simulators. Enter the PIN the desktop app or `on-air status` shows.
 
 ```bash
 pnpm test:mobile          # control-client tests + mobile hook and app tests (Jest)

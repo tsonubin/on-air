@@ -1,7 +1,7 @@
 # on-air — TUI redesign: GUI parity, console layout, mouse
 
 **Date:** 2026-10-14
-**Status:** Approved in conversation; spec under review
+**Status:** Implemented. Design record written before the code; where they disagree, the code is authoritative.
 
 Companion inventory: a read of `apps/desktop/src` (React), its Tauri shell,
 `apps/tui/src` and the core routes in `packages/core/src/lib.rs`. The parity
