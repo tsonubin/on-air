@@ -6,7 +6,7 @@ use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
 use crate::model::{
-    DestRow, DestState, MixerRow, Modal, Model, PairTarget, Pane, Pending, Snapshot,
+    DestRow, DestState, Meter, MixerRow, Modal, Model, PairTarget, Pane, Pending, Snapshot,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
@@ -17,6 +17,8 @@ pub enum Msg {
     Key(KeyEvent),
     Resize(u16, u16),
     Tick,
+    /// The 50 ms frame tick that animates the level meter.
+    Frame,
     Ws(Incoming),
     Snapshot(Result<Box<Snapshot>, String>),
     Done {
@@ -61,6 +63,19 @@ pub const VOLUME_STEP: u8 = 5;
 pub const EQ_STEP_DB: f32 = 1.0;
 pub const EQ_RANGE_DB: (f32, f32) = (-12.0, 12.0);
 
+pub const METER_FLOOR_DB: f32 = -60.0;
+pub const PEAK_HOLD_FRAMES: u8 = 10;
+pub const PEAK_FALL_DB: f32 = 1.5;
+pub const METER_TIMEOUT_FRAMES: u8 = 20;
+
+/// A linear level (`0.0..=1.0`) in dBFS, clamped to the meter scale.
+pub fn level_db(linear: f32) -> f32 {
+    if linear <= 0.0 {
+        return METER_FLOOR_DB;
+    }
+    (20.0 * linear.log10()).clamp(METER_FLOOR_DB, 0.0)
+}
+
 pub const LABEL_SOURCE: &str = "Switching source";
 pub const LABEL_OUTPUT: &str = "Switching output";
 pub const LABEL_STOP: &str = "Stopping";
@@ -81,6 +96,10 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             vec![]
         }
         Msg::Tick => vec![],
+        Msg::Frame => {
+            step_meter(&mut model.meter);
+            vec![]
+        }
         Msg::Ws(Incoming::Connection(connection)) => {
             model.connection = connection;
             if connection == Connection::Open {
@@ -242,7 +261,43 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
         | WsEvent::InputStateChanged { .. }
         | WsEvent::DeviceJoined { .. }
         | WsEvent::DeviceLeft { .. } => vec![Cmd::Refresh],
-        WsEvent::LevelMeter { .. } | WsEvent::Heartbeat | WsEvent::Unknown => vec![],
+        WsEvent::LevelMeter { rms, peak } => {
+            let live = model
+                .snapshot
+                .active_output
+                .as_ref()
+                .is_some_and(|active| active.is_live());
+            if model.locked() || !live {
+                model.meter = Meter::default();
+            } else {
+                let peak_db = level_db(peak);
+                let meter = &mut model.meter;
+                meter.rms_db = level_db(rms);
+                if peak_db >= meter.peak_db {
+                    meter.peak_db = peak_db;
+                    meter.hold = PEAK_HOLD_FRAMES;
+                }
+                meter.quiet = 0;
+            }
+            vec![]
+        }
+        WsEvent::Heartbeat | WsEvent::Unknown => vec![],
+    }
+}
+
+/// One frame of meter decay: the peak holds, then falls; silence for too
+/// long reads zero.
+fn step_meter(meter: &mut Meter) {
+    meter.quiet = meter.quiet.saturating_add(1);
+    if meter.quiet >= METER_TIMEOUT_FRAMES {
+        *meter = Meter {
+            quiet: METER_TIMEOUT_FRAMES,
+            ..Meter::default()
+        };
+    } else if meter.hold > 0 {
+        meter.hold -= 1;
+    } else {
+        meter.peak_db = (meter.peak_db - PEAK_FALL_DB).max(METER_FLOOR_DB);
     }
 }
 
@@ -1297,5 +1352,89 @@ mod tests {
         assert_eq!(m.size, (120, 40));
         update(&mut m, Msg::Accent(Color::Rgb(1, 2, 3)));
         assert_eq!(m.accent, Color::Rgb(1, 2, 3));
+    }
+
+    fn live_model() -> Model {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.active_output = Some(ActiveOutputView {
+            output: ActiveOutput {
+                transport: "sonos".into(),
+                device_id: "uuid:mock-sonos".into(),
+                device_name: "Mock Sonos".into(),
+            },
+            state: Some(OutputPhase::Live),
+        });
+        m
+    }
+
+    fn level(m: &mut Model, rms: f32, peak: f32) {
+        update(
+            m,
+            Msg::Ws(Incoming::Event(WsEvent::LevelMeter { rms, peak })),
+        );
+    }
+
+    #[test]
+    fn level_event_sets_meter() {
+        let mut m = live_model();
+        level(&mut m, 0.5, 1.0);
+        assert!((m.meter.rms_db + 6.02).abs() < 0.01, "{:?}", m.meter);
+        assert_eq!(m.meter.peak_db, 0.0);
+        assert_eq!(m.meter.hold, 10);
+        assert_eq!(m.meter.quiet, 0);
+    }
+
+    #[test]
+    fn level_db_clamps_to_the_scale() {
+        assert_eq!(level_db(0.0), -60.0);
+        assert_eq!(level_db(1e-9), -60.0);
+        assert_eq!(level_db(2.0), 0.0);
+    }
+
+    #[test]
+    fn peak_holds_then_falls() {
+        let mut m = live_model();
+        level(&mut m, 0.5, 1.0);
+        for _ in 0..10 {
+            update(&mut m, Msg::Frame);
+        }
+        assert_eq!(m.meter.peak_db, 0.0);
+        update(&mut m, Msg::Frame);
+        assert_eq!(m.meter.peak_db, -1.5);
+        update(&mut m, Msg::Frame);
+        assert_eq!(m.meter.peak_db, -3.0);
+        // A lower peak does not disturb the falling one; a higher one resets the hold.
+        level(&mut m, 0.5, 0.001);
+        assert_eq!(m.meter.peak_db, -3.0);
+        level(&mut m, 0.5, 1.0);
+        assert_eq!((m.meter.peak_db, m.meter.hold), (0.0, 10));
+    }
+
+    #[test]
+    fn meter_times_out() {
+        let mut m = live_model();
+        level(&mut m, 0.5, 1.0);
+        for _ in 0..20 {
+            update(&mut m, Msg::Frame);
+        }
+        assert_eq!((m.meter.rms_db, m.meter.peak_db), (-60.0, -60.0));
+    }
+
+    #[test]
+    fn meter_reads_zero_when_monitor_off_or_idle() {
+        let mut off = live_model();
+        off.snapshot.status.as_mut().unwrap().service_enabled = false;
+        level(&mut off, 0.5, 1.0);
+        assert_eq!((off.meter.rms_db, off.meter.peak_db), (-60.0, -60.0));
+
+        let mut idle = live_model();
+        idle.snapshot.active_output = None;
+        level(&mut idle, 0.5, 1.0);
+        assert_eq!((idle.meter.rms_db, idle.meter.peak_db), (-60.0, -60.0));
+
+        let mut failed = live_model();
+        failed.snapshot.active_output.as_mut().unwrap().state = Some(OutputPhase::Failed);
+        level(&mut failed, 0.5, 1.0);
+        assert_eq!(failed.meter.peak_db, -60.0);
     }
 }

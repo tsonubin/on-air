@@ -76,7 +76,7 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
 
     source_pane(model, frame, areas.source, &mut hits);
     dest_pane(model, frame, areas.dest, &mut hits);
-    mixer_pane(model, frame, areas.mixer);
+    mixer_pane(model, frame, areas.mixer, &mut hits);
 
     frame.render_widget(hint_line(), areas.hints);
 
@@ -497,18 +497,69 @@ mod tests {
     }
 
     #[test]
-    fn the_mixer_shows_volume_eq_and_rates() {
-        let t = text(&render(&model(), 100, 30));
-        for needle in ["Volume", "80", "EQ 60"] {
+    fn mixer_renders_faders_meter_rates() {
+        let mut m = model();
+        m.snapshot.volume = 72;
+        m.pane = Pane::Mixer;
+        m.mixer_row = crate::model::MixerRow::Eq(2);
+        let (b, hits) = render_hits(&m, 100, 30);
+        let t = text(&b);
+        for needle in [
+            "VOL", "72", "LVL", "60", "250", "1k", "4k", "12k", "In", "Out", "48000 Hz",
+            "44100 Hz", "+2.0 dB",
+        ] {
             assert!(t.contains(needle), "{needle} missing:\n{t}");
         }
+        let find = |target: Target| {
+            (0..30)
+                .flat_map(|y| (0..100).map(move |x| (x, y)))
+                .find_map(|(x, y)| hits.hit(x, y).filter(|(t, _)| *t == target))
+                .map(|(_, rect)| rect)
+        };
+        for target in [
+            Target::Fader(crate::model::MixerRow::Volume),
+            Target::Fader(crate::model::MixerRow::Eq(2)),
+        ] {
+            let rect = find(target).unwrap_or_else(|| panic!("{target:?} missing"));
+            assert!(rect.height >= 3, "{target:?} {rect:?}");
+        }
+        for target in [
+            Target::Rate(crate::model::MixerRow::InputRate),
+            Target::Rate(crate::model::MixerRow::OutputRate),
+        ] {
+            assert!(find(target).is_some(), "{target:?} missing");
+        }
+    }
+
+    #[test]
+    fn the_focused_band_alone_shows_its_db() {
         let mut m = model();
         m.pane = Pane::Mixer;
-        m.mixer_row = crate::model::MixerRow::OutputRate;
+        m.mixer_row = crate::model::MixerRow::Eq(2);
+        assert!(text(&render(&m, 100, 30)).contains("+2.0 dB"));
+        m.mixer_row = crate::model::MixerRow::Volume;
+        assert!(!text(&render(&m, 100, 30)).contains("+2.0 dB"));
+    }
+
+    #[test]
+    fn the_meter_draws_the_rms_bar() {
+        let mut m = model();
+        m.meter.rms_db = -6.0;
+        m.meter.peak_db = -6.0;
         let t = text(&render(&m, 100, 30));
-        for needle in ["EQ 12k", "+2.0 dB", "In 48000", "Out 44100"] {
-            assert!(t.contains(needle), "{needle} missing:\n{t}");
-        }
+        assert!(t.contains("█"), "{t}");
+    }
+
+    #[test]
+    fn compact_mixer_below_24_rows() {
+        let mut m = model();
+        m.pane = Pane::Mixer;
+        let t = text(&render(&m, 100, 22));
+        assert!(t.contains("Volume") && t.contains("█"), "{t}");
+        assert!(!t.contains("VOL"), "{t}");
+        m.mixer_row = crate::model::MixerRow::Eq(2);
+        let t = text(&render(&m, 100, 22));
+        assert!(t.contains("> EQ 1k") && t.contains("+2.0 dB"), "{t}");
     }
 
     #[test]
@@ -617,15 +668,6 @@ mod tests {
         m.output_index = m.dest_rows().len() - 1;
         let t = text(&render(&m, 100, 20));
         assert!(t.contains("> Speaker 29"), "{t}");
-    }
-
-    #[test]
-    fn the_mixer_scrolls_in_a_short_stacked_window() {
-        let mut m = model();
-        m.pane = Pane::Mixer;
-        m.mixer_row = crate::model::MixerRow::OutputRate;
-        let t = text(&render(&m, 60, 24));
-        assert!(t.contains("> Out 44100"), "{t}");
     }
 
     #[test]

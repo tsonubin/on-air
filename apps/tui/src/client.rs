@@ -623,4 +623,18 @@ mod tests {
         );
         assert_eq!(ws_url("https://host"), "wss://host/api/ws");
     }
+
+    #[test]
+    fn level_meter_frame_decodes() {
+        let event =
+            serde_json::from_str::<WsEvent>(r#"{"type":"LevelMeter","rms":0.25,"peak":0.5}"#)
+                .unwrap();
+        assert_eq!(
+            event,
+            WsEvent::LevelMeter {
+                rms: 0.25,
+                peak: 0.5
+            }
+        );
+    }
 }

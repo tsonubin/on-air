@@ -154,6 +154,29 @@ pub const TRANSPORTS: [(&str, &str); 3] = [
     ("bluetooth", "Bluetooth"),
 ];
 
+/// The level meter: RMS and held peak in dBFS, and the frame counters that
+/// drive the peak fall and the timeout.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Meter {
+    pub rms_db: f32,
+    pub peak_db: f32,
+    /// Frames left before the peak starts to fall.
+    pub hold: u8,
+    /// Frames since the last level event.
+    pub quiet: u8,
+}
+
+impl Default for Meter {
+    fn default() -> Self {
+        Meter {
+            rms_db: crate::update::METER_FLOOR_DB,
+            peak_db: crate::update::METER_FLOOR_DB,
+            hold: 0,
+            quiet: 0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub connection: Connection,
@@ -163,6 +186,7 @@ pub struct Model {
     /// Index into `dest_rows()`; never a header once there is a device.
     pub output_index: usize,
     pub mixer_row: MixerRow,
+    pub meter: Meter,
     pub activation: Option<Activation>,
     /// The (transport, id) whose last activation failed.
     pub failed_output: Option<(String, String)>,
@@ -194,6 +218,7 @@ impl Model {
             source_index: 0,
             output_index: 1,
             mixer_row: MixerRow::Volume,
+            meter: Meter::default(),
             activation: None,
             failed_output: None,
             placeholders: Vec::new(),
