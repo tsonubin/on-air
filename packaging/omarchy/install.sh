@@ -67,6 +67,10 @@ command -v makepkg >/dev/null 2>&1 || {
   echo "makepkg not found: this installer is for Omarchy and Arch Linux." >&2
   exit 1
 }
+command -v sudo >/dev/null 2>&1 || {
+  echo "sudo not found: it is required to install the built package." >&2
+  exit 1
+}
 
 if [ -n "$(git -C "$root" status --porcelain --untracked-files=no)" ]; then
   echo "note: building the working tree, including uncommitted changes" >&2
@@ -78,8 +82,25 @@ fi
 # makepkg --noextract skips prepare(), which is where the recipe fetches.
 (cd "$root" && cargo fetch --locked)
 
-echo "== Building and installing the on-air package from $root (makepkg -si)"
-(cd "$build" && makepkg --noextract --force -si)
+echo "== Building the on-air package from $root"
+# Run the test suite separately during development and CI, not installation.
+(cd "$build" && makepkg --noextract --force --syncdeps --nocheck)
+
+# makepkg -i invokes sudo -k, forcing authentication again. Install directly
+# so normal terminal authentication and any cached sudo credentials work.
+# Ask makepkg for the path to honor PKGDEST, PKGEXT and the package version.
+pkgfile=$(cd "$build" && makepkg --packagelist)
+[ -f "$pkgfile" ] || {
+  echo "Built package not found: $pkgfile" >&2
+  exit 1
+}
+echo "== Installing the on-air package (sudo pacman -U)"
+if ! sudo pacman -U -- "$pkgfile"; then
+  echo "Installation failed; the built package is still available at:" >&2
+  echo "  $pkgfile" >&2
+  echo "Retry installing this file with sudo pacman -U." >&2
+  exit 1
+fi
 
 echo "== Enabling the on-air-core user service"
 systemctl --user daemon-reload

@@ -97,6 +97,8 @@ linked=$(ls -d "$stage"/src/on-air-*)
 [ -L "$linked" ] && [ "$(cd "$linked" && pwd -P)" = "$(pwd -P)" ] || fail "staged source is not a link to this checkout"
 sh "$dir/install.sh" --bogus >/dev/null 2>&1 && fail "install.sh accepted an unknown option"
 echo "ok $dir/install.sh builds the checkout"
+python3 "$dir/test-install.py" || fail "install.sh installation flow"
+echo "ok $dir/install.sh authentication and failure handling"
 
 # Release recipes: one MIT license, one version, and the prebuilt package
 # installs the same files as the source build.

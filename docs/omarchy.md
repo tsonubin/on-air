@@ -22,12 +22,19 @@ packaging/omarchy/install.sh
 on-air status
 ```
 
-That builds the `on-air` package from your checkout, installs it with
-`makepkg -si`, enables the service, and prints the snippets below with the
+That builds the `on-air` package from your checkout with `makepkg`, installs
+it with `sudo pacman -U`, enables the service, and prints the snippets below with the
 path each belongs in. It edits nothing under `~/.config`. It builds the
 working tree, uncommitted edits included, and keeps compiled output in
 `target/omarchy/`, so later runs only recompile what changed. Run
 `packaging/omarchy/install.sh --clean` to rebuild everything.
+Installation skips the Rust test suite. For development, run
+`cargo test --locked -p on-air-core -p on-air-tui` separately.
+
+Run the installer as your normal user in a terminal. The install step uses
+your normal sudo authentication and preserves cached credentials. If
+installation fails, it prints the saved package path so you can retry with
+`sudo pacman -U -- "/path/to/package.pkg.tar.zst"` without rebuilding.
 
 > **TODO:** AUR packages (`yay -S on-air-bin` prebuilt, `yay -S on-air` from
 > source) are on hold and not published yet.
