@@ -760,12 +760,13 @@ mod tests {
         }
         let narrow = text(&render(&m, 80, 24));
         let flat = narrow.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(
-            flat.contains(
-                "Capture and streaming are stopped. Discovery and the phone remote stay online."
-            ),
-            "{narrow}"
-        );
+        for line in [
+            "Monitor is off.",
+            "Capture and streaming are stopped. Discovery and the phone remote stay online.",
+            "Press m to turn it on.",
+        ] {
+            assert!(flat.contains(line), "{line} missing at 80x24:\n{narrow}");
+        }
         assert!(!t.contains("Source"), "{t}");
         assert!(!t.contains("Destination"), "{t}");
         assert!(!t.contains("Mock Sonos "), "{t}");
@@ -788,6 +789,11 @@ mod tests {
         let (x, y) = cell_of(&b, "Living Room AirPlay");
         assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
         let (x, y) = cell_of(&b, "VOL");
+        assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
+        m.meter.rms_db = -6.0;
+        m.meter.peak_db = -6.0;
+        let b = render(&m, 100, 30);
+        let (x, y) = cell_of(&b, "█");
         assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     }
 
