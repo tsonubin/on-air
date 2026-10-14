@@ -18,8 +18,6 @@ const VOLUME_CELLS: usize = 10;
 /// Pane height (with borders) below which the compact form is used.
 const COMPACT_BELOW_HEIGHT: u16 = 7;
 const FADER_ROW: u16 = 1;
-const FADER_HEIGHT: u16 = 3;
-const VALUE_ROW: u16 = FADER_ROW + FADER_HEIGHT;
 const VOLUME_WIDTH: u16 = 5;
 const BAND_WIDTH: u16 = 5;
 /// Wide enough for "-12.0 dB", centred on the fader.
@@ -126,6 +124,9 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
     let snapshot = &model.snapshot;
     frame.render_widget(pane_block("Mixer", focused, model.accent), area);
     let inner = ratatui::widgets::Block::bordered().inner(area);
+    // The faders take every row between the label row and the value row.
+    let fader_height = inner.height.saturating_sub(2).max(1);
+    let value_row = FADER_ROW + fader_height;
     let is_focus = |row: MixerRow| focused && row == model.mixer_row;
     let label_style = |row: MixerRow| {
         locked_style(
@@ -159,9 +160,9 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
         Line::styled(" VOL ", label_style(MixerRow::Volume)),
     );
     let filled =
-        (f32::from(snapshot.volume.min(100)) / 100.0 * f32::from(FADER_HEIGHT)).round() as u16;
-    for row in 0..FADER_HEIGHT {
-        let on = FADER_HEIGHT - row <= filled;
+        (f32::from(snapshot.volume.min(100)) / 100.0 * f32::from(fader_height)).round() as u16;
+    for row in 0..fader_height {
+        let on = fader_height - row <= filled;
         let glyph = if on { "┃" } else { "│" };
         put(
             frame,
@@ -176,7 +177,7 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
         frame,
         inner,
         x,
-        VALUE_ROW,
+        value_row,
         VOLUME_WIDTH,
         Line::styled(
             format!("{:^5}", snapshot.volume),
@@ -185,7 +186,7 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
     );
     if let Some(rect) = clipped(
         inner,
-        Rect::new(x, inner.y + FADER_ROW, VOLUME_WIDTH, FADER_HEIGHT),
+        Rect::new(x, inner.y + FADER_ROW, VOLUME_WIDTH, fader_height),
     ) {
         hits.push(rect, Target::Fader(MixerRow::Volume));
     }
@@ -234,9 +235,9 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
             BAND_WIDTH,
             Line::styled(format!("{name:^5}"), label_style(row)),
         );
-        let centre = (FADER_HEIGHT - 1) / 2;
-        let position = fader_offset(gain, FADER_HEIGHT, lo, hi);
-        for line in 0..FADER_HEIGHT {
+        let centre = (fader_height - 1) / 2;
+        let position = fader_offset(gain, fader_height, lo, hi);
+        for line in 0..fader_height {
             let lit = (position.min(centre)..=position.max(centre)).contains(&line);
             let glyph = if line == centre {
                 "┼"
@@ -264,14 +265,14 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
                 frame,
                 inner,
                 x.saturating_sub(2).max(inner.x),
-                VALUE_ROW,
+                value_row,
                 DB_LABEL_WIDTH,
                 Line::styled(format!("{gain:+.1} dB"), fader_style(row)).centered(),
             );
         }
         if let Some(rect) = clipped(
             inner,
-            Rect::new(x, inner.y + FADER_ROW, BAND_WIDTH, FADER_HEIGHT),
+            Rect::new(x, inner.y + FADER_ROW, BAND_WIDTH, fader_height),
         ) {
             hits.push(rect, Target::Fader(row));
         }

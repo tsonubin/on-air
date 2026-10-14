@@ -1,6 +1,6 @@
 //! Layout helpers shared by the panes: text truncation, pane chrome, centring.
 
-use super::{COMPACT_BELOW_ROWS, STACK_BELOW_COLUMNS};
+use super::{COMPACT_BELOW_ROWS, STACK_BELOW_COLUMNS, TALL_FADERS_FROM_ROWS};
 use crate::model::Model;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -46,10 +46,13 @@ pub(super) struct Areas {
 /// Destination (side by side, or stacked when narrow), the mixer, hints.
 pub(super) fn areas(model: &Model, area: Rect) -> Areas {
     let cd_rows = u16::from(model.snapshot.cd.as_ref().is_some_and(|cd| cd.present));
+    // Borders, the label and value rows, and the faders between them.
     let mixer_rows = if area.height < COMPACT_BELOW_ROWS {
         4
-    } else {
+    } else if area.height < TALL_FADERS_FROM_ROWS {
         7
+    } else {
+        9
     };
     let [header, cd, error, notice, route, mixer, hints] = Layout::vertical([
         Constraint::Length(1),

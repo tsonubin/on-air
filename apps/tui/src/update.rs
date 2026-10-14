@@ -849,13 +849,16 @@ fn on_mouse(
             select(model)
         }
         Target::Fader(mixer_row) => {
+            let focused = model.pane == Pane::Mixer && model.mixer_row == mixer_row;
             model.pane = Pane::Mixer;
             model.mixer_row = mixer_row;
             if wheel != 0 {
                 return adjust(model, -wheel, true);
             }
-            // A one-row fader is the compact mixer's line: a click only focuses it.
-            if rect.height <= 1 {
+            // The first click on a fader focuses it; the next one, or a drag
+            // from it, sets it. A one-row fader is the compact mixer's line:
+            // a click only focuses it.
+            if (click && !focused) || rect.height <= 1 {
                 return vec![];
             }
             let offset = row.saturating_sub(rect.y);
@@ -2627,6 +2630,11 @@ mod tests {
         let fader = Target::Fader(MixerRow::Eq(2));
         assert_eq!(
             update(&mut m, mouse(fader, rect, 31, rect.y, MouseKind::Down)),
+            vec![],
+            "the first click focuses"
+        );
+        assert_eq!(
+            update(&mut m, mouse(fader, rect, 31, rect.y, MouseKind::Down)),
             vec![Cmd::SetEq([0.0, 0.0, 12.0, 0.0, 0.0])]
         );
         assert_eq!(m.snapshot.eq[2], 12.0);
@@ -2644,6 +2652,8 @@ mod tests {
         );
 
         let volume = Target::Fader(MixerRow::Volume);
+        update(&mut m, mouse(volume, rect, 31, rect.y, MouseKind::Down));
+        assert_eq!(m.snapshot.volume, 50);
         assert_eq!(
             update(&mut m, mouse(volume, rect, 31, rect.y + 2, MouseKind::Down)),
             vec![],
@@ -3028,5 +3038,31 @@ mod tests {
         );
         update(&mut m, Msg::Snapshot(Err("Core unreachable".into())));
         assert!(m.core_down);
+    }
+
+    #[test]
+    fn a_click_on_an_unfocused_fader_only_focuses_it() {
+        let mut m = model_with_mock_snapshot();
+        let rect = Rect::new(30, 8, 5, 5);
+        let volume = Target::Fader(MixerRow::Volume);
+        assert_eq!(
+            update(&mut m, mouse(volume, rect, 31, rect.y, MouseKind::Down)),
+            vec![]
+        );
+        assert_eq!((m.pane, m.mixer_row), (Pane::Mixer, MixerRow::Volume));
+        assert_eq!(m.snapshot.volume, 50);
+        assert_eq!(
+            update(&mut m, mouse(volume, rect, 31, rect.y, MouseKind::Down)),
+            vec![Cmd::SetVolume(100)]
+        );
+
+        let band = Target::Fader(MixerRow::Eq(1));
+        assert_eq!(
+            update(&mut m, mouse(band, rect, 31, rect.y, MouseKind::Down)),
+            vec![],
+            "another fader is unfocused again"
+        );
+        assert_eq!(m.mixer_row, MixerRow::Eq(1));
+        assert_eq!(m.snapshot.eq, [0.0; 5]);
     }
 }

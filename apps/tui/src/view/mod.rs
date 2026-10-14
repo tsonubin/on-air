@@ -34,6 +34,8 @@ pub const MIN_SIZE: (u16, u16) = (40, 10);
 pub const STACK_BELOW_COLUMNS: u16 = 90;
 /// Below this many rows the mixer shrinks to its compact form.
 pub const COMPACT_BELOW_ROWS: u16 = 24;
+/// From this many rows the mixer grows so its faders are five cells tall.
+pub const TALL_FADERS_FROM_ROWS: u16 = 30;
 
 pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
     let mut hits = HitMap::default();
@@ -910,5 +912,47 @@ mod tests {
         let header = rows(&render(&m, 100, 30))[0].clone();
         assert!(header.contains("✗ core unreachable"), "{header}");
         assert!(!header.contains("reconnecting"), "{header}");
+    }
+
+    /// The rect of the first hit for `target`.
+    fn hit_rect(hits: &HitMap, w: u16, h: u16, target: Target) -> ratatui::layout::Rect {
+        (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .find_map(|(x, y)| hits.hit(x, y).filter(|(t, _)| *t == target))
+            .map(|(_, rect)| rect)
+            .unwrap_or_else(|| panic!("{target:?} missing"))
+    }
+
+    #[test]
+    fn faders_grow_at_100x30_and_hits_match_what_is_drawn() {
+        let mut m = model();
+        m.pane = Pane::Mixer;
+        let fader_glyph = |b: &Buffer, rect: ratatui::layout::Rect, y: u16| {
+            (rect.x..rect.right()).any(|x| matches!(b[(x, y)].symbol(), "│" | "┃" | "┼"))
+        };
+        for (h, min) in [(30, 5), (24, 3)] {
+            let (b, hits) = render_hits(&m, 100, h);
+            for target in [
+                Target::Fader(crate::model::MixerRow::Volume),
+                Target::Fader(crate::model::MixerRow::Eq(2)),
+            ] {
+                let rect = hit_rect(&hits, 100, h, target);
+                assert!(rect.height >= min, "{target:?} {rect:?} at 100x{h}");
+                for y in rect.y..rect.bottom() {
+                    assert!(
+                        fader_glyph(&b, rect, y),
+                        "{target:?} row {y}:\n{}",
+                        text(&b)
+                    );
+                }
+                for y in [rect.y - 1, rect.bottom()] {
+                    assert!(
+                        !fader_glyph(&b, rect, y),
+                        "{target:?} row {y}:\n{}",
+                        text(&b)
+                    );
+                }
+            }
+        }
     }
 }
