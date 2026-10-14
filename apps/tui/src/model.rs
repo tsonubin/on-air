@@ -223,6 +223,10 @@ pub struct Model {
     pub failed_output: Option<(String, String)>,
     /// (transport, id, name) of devices shown before discovery lists them.
     pub placeholders: Vec<(String, String, String)>,
+    /// Frames until a debounced refresh; set by core events.
+    pub refresh_in: Option<u8>,
+    /// Frames since the last snapshot.
+    pub since_refresh: u16,
     pub modal: Modal,
     pub pending: Option<Pending>,
     pub error: Option<String>,
@@ -258,6 +262,8 @@ impl Model {
             activation: None,
             failed_output: None,
             placeholders: Vec::new(),
+            refresh_in: None,
+            since_refresh: 0,
             modal: Modal::None,
             pending: None,
             error: None,
@@ -327,10 +333,14 @@ impl Model {
                         placeholder: false,
                     }));
                 }
+                self.push_placeholders(transport, &mut rows);
                 if self.snapshot.bluetooth.is_none() {
                     rows.push(DestRow::Empty("Bluetooth list unavailable"));
                     continue;
                 }
+            }
+            if transport != "bluetooth" {
+                self.push_placeholders(transport, &mut rows);
             }
             if rows.len() == start {
                 rows.push(DestRow::Empty(match transport {
@@ -360,6 +370,31 @@ impl Model {
     }
 
     /// The state of one device; the first rule that matches wins.
+    /// Devices announced by the core before the next snapshot lists them.
+    fn push_placeholders(&self, transport: &'static str, rows: &mut Vec<DestRow>) {
+        let listed = |id: &str| {
+            self.snapshot
+                .outputs
+                .iter()
+                .any(|o| o.transport == transport && o.id == id)
+                || (transport == "bluetooth"
+                    && self.snapshot.bluetooth.iter().flatten().any(|d| d.id == id))
+        };
+        for (_, id, name) in self.placeholders.iter().filter(|p| p.0 == transport) {
+            if listed(id) {
+                continue;
+            }
+            rows.push(DestRow::Entry(DestEntry {
+                transport,
+                id: id.clone(),
+                name: name.clone(),
+                pair_badge: false,
+                state: DestState::Idle,
+                placeholder: true,
+            }));
+        }
+    }
+
     fn dest_state(
         &self,
         transport: &str,

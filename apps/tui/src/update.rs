@@ -81,6 +81,10 @@ pub const EQ_RANGE_DB: (f32, f32) = (-12.0, 12.0);
 pub const PEAK_HOLD_FRAMES: u8 = 10;
 pub const PEAK_FALL_DB: f32 = 1.5;
 pub const METER_TIMEOUT_FRAMES: u8 = 20;
+/// Core events settle for this many frames before one refresh.
+pub const REFRESH_DEBOUNCE_FRAMES: u8 = 6;
+/// A refresh while connected, as a safety net for missed events.
+pub const BACKGROUND_REFRESH_FRAMES: u16 = 300;
 
 /// A linear level (`0.0..=1.0`) in dBFS, clamped to the meter scale.
 pub fn level_db(linear: f32) -> f32 {
@@ -150,6 +154,21 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Tick => vec![],
         Msg::Frame => {
             step_meter(&mut model.meter);
+            if let Some(left) = model.refresh_in {
+                if left <= 1 {
+                    model.refresh_in = None;
+                    model.since_refresh = 0;
+                    return vec![Cmd::Refresh];
+                }
+                model.refresh_in = Some(left - 1);
+            }
+            if model.connection == Connection::Open {
+                model.since_refresh = model.since_refresh.saturating_add(1);
+                if model.since_refresh >= BACKGROUND_REFRESH_FRAMES {
+                    model.since_refresh = 0;
+                    return vec![Cmd::Refresh];
+                }
+            }
             vec![]
         }
         Msg::Ws(Incoming::Connection(connection)) => {
@@ -163,6 +182,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Ws(Incoming::Event(event)) => on_event(model, event),
         Msg::Snapshot(Ok(snapshot)) => {
             model.snapshot = *snapshot;
+            model.placeholders.clear();
+            model.since_refresh = 0;
             model.core_down = false;
             close_cd_modals_without_disc(model);
             model.notice = sleep_notice(&model.snapshot);
@@ -367,13 +388,19 @@ fn on_written(model: &mut Model, control: MixerControl, result: Result<(), Strin
     }
 }
 
+/// Core events arrive in bursts; they settle into one refresh.
+fn schedule_refresh(model: &mut Model) -> Vec<Cmd> {
+    model.refresh_in.get_or_insert(REFRESH_DEBOUNCE_FRAMES);
+    vec![]
+}
+
 fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
     match event {
         WsEvent::ServiceStateChanged { enabled } => {
             if let Some(status) = &mut model.snapshot.status {
                 status.service_enabled = enabled;
             }
-            vec![Cmd::Refresh]
+            schedule_refresh(model)
         }
         WsEvent::CdStateChanged {
             present,
@@ -411,12 +438,47 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
             ..
         } => {
             model.error = Some(crate::error_copy::INPUT_STOPPED_COPY.to_string());
-            vec![Cmd::Refresh]
+            schedule_refresh(model)
         }
-        WsEvent::OutputStateChanged { .. }
-        | WsEvent::InputStateChanged { .. }
-        | WsEvent::DeviceJoined { .. }
-        | WsEvent::DeviceLeft { .. } => vec![Cmd::Refresh],
+        WsEvent::OutputStateChanged { .. } | WsEvent::InputStateChanged { .. } => {
+            schedule_refresh(model)
+        }
+        WsEvent::DeviceJoined {
+            transport,
+            id,
+            name,
+        } => {
+            let listed = model
+                .snapshot
+                .outputs
+                .iter()
+                .any(|o| o.transport == transport && o.id == id);
+            if !listed
+                && !model
+                    .placeholders
+                    .iter()
+                    .any(|p| p.0 == transport && p.1 == id)
+            {
+                model.placeholders.push((transport, id, name));
+            }
+            schedule_refresh(model)
+        }
+        WsEvent::DeviceLeft { transport, id } => {
+            model
+                .snapshot
+                .outputs
+                .retain(|o| !(o.transport == transport && o.id == id));
+            if transport == "bluetooth" {
+                if let Some(devices) = &mut model.snapshot.bluetooth {
+                    devices.retain(|d| d.id != id);
+                }
+            }
+            model
+                .placeholders
+                .retain(|p| !(p.0 == transport && p.1 == id));
+            clamp_selection(model);
+            schedule_refresh(model)
+        }
         WsEvent::LevelMeter { rms, peak } => {
             let live = model
                 .snapshot
@@ -1954,26 +2016,90 @@ mod tests {
         );
     }
 
+    fn ev(e: WsEvent) -> Msg {
+        Msg::Ws(Incoming::Event(e))
+    }
+
+    fn output_changed() -> Msg {
+        ev(WsEvent::OutputStateChanged {
+            transport: "sonos".into(),
+            device_name: "Mock Sonos".into(),
+            active: true,
+        })
+    }
+
+    fn frames(m: &mut Model, n: usize) -> Vec<Cmd> {
+        (0..n).flat_map(|_| update(m, Msg::Frame)).collect()
+    }
+
     #[test]
-    fn ws_events_refresh_or_patch_the_snapshot() {
+    fn events_debounce_into_one_refresh() {
         let mut m = model_with_mock_snapshot();
-        let ev = |e| Msg::Ws(Incoming::Event(e));
-        assert_eq!(
-            update(
-                &mut m,
-                ev(WsEvent::OutputStateChanged {
-                    transport: "sonos".into(),
-                    device_name: "Mock Sonos".into(),
-                    active: true
-                })
-            ),
-            vec![Cmd::Refresh]
+        for _ in 0..3 {
+            assert_eq!(update(&mut m, output_changed()), vec![]);
+        }
+        assert_eq!(m.refresh_in, Some(6));
+        assert_eq!(frames(&mut m, 5), vec![]);
+        assert_eq!(update(&mut m, Msg::Frame), vec![Cmd::Refresh]);
+        assert_eq!(m.refresh_in, None);
+        assert_eq!(frames(&mut m, 5), vec![]);
+    }
+
+    #[test]
+    fn device_joined_adds_placeholder_now() {
+        let mut m = model_with_mock_snapshot();
+        update(
+            &mut m,
+            ev(WsEvent::DeviceJoined {
+                transport: "sonos".into(),
+                id: "uuid:new".into(),
+                name: "New".into(),
+            }),
         );
-        assert_eq!(
-            update(&mut m, ev(WsEvent::ServiceStateChanged { enabled: false })),
-            vec![Cmd::Refresh]
+        let placeholder = |m: &Model| {
+            m.dest_rows()
+                .into_iter()
+                .any(|row| matches!(row, DestRow::Entry(e) if e.name == "New" && e.placeholder))
+        };
+        assert!(placeholder(&m));
+        let snapshot = m.snapshot.clone();
+        update(&mut m, Msg::Snapshot(Ok(Box::new(snapshot))));
+        assert!(m.placeholders.is_empty());
+        assert!(!placeholder(&m));
+    }
+
+    #[test]
+    fn device_left_removes_row_now() {
+        let mut m = model_with_mock_snapshot();
+        update(
+            &mut m,
+            ev(WsEvent::DeviceLeft {
+                transport: "sonos".into(),
+                id: "uuid:mock-sonos".into(),
+            }),
         );
-        assert!(!m.service_on());
+        assert!(!m
+            .dest_rows()
+            .iter()
+            .any(|row| matches!(row, DestRow::Entry(e) if e.id == "uuid:mock-sonos")));
+        assert_eq!(m.refresh_in, Some(6));
+    }
+
+    #[test]
+    fn background_refresh_every_15s() {
+        let mut m = model_with_mock_snapshot();
+        m.connection = Connection::Reconnecting;
+        assert_eq!(frames(&mut m, 300), vec![]);
+        m.connection = Connection::Open;
+        m.since_refresh = 0;
+        assert_eq!(frames(&mut m, 299), vec![]);
+        assert_eq!(update(&mut m, Msg::Frame), vec![Cmd::Refresh]);
+        assert_eq!(m.since_refresh, 0);
+    }
+
+    #[test]
+    fn cd_and_monitor_events_unchanged() {
+        let mut m = model_with_mock_snapshot();
         assert_eq!(
             update(
                 &mut m,
@@ -1991,27 +2117,13 @@ mod tests {
             vec![]
         );
         assert_eq!(m.snapshot.cd.as_ref().map(|cd| cd.track), Some(2));
+        assert_eq!(m.refresh_in, None);
         assert_eq!(
-            update(
-                &mut m,
-                ev(WsEvent::DeviceJoined {
-                    transport: "sonos".into(),
-                    id: "x".into(),
-                    name: "X".into()
-                })
-            ),
-            vec![Cmd::Refresh]
+            update(&mut m, ev(WsEvent::ServiceStateChanged { enabled: false })),
+            vec![]
         );
-        assert_eq!(
-            update(
-                &mut m,
-                ev(WsEvent::DeviceLeft {
-                    transport: "sonos".into(),
-                    id: "x".into()
-                })
-            ),
-            vec![Cmd::Refresh]
-        );
+        assert!(!m.service_on());
+        assert_eq!(m.refresh_in, Some(6));
         assert_eq!(
             update(
                 &mut m,
@@ -2062,8 +2174,9 @@ mod tests {
                     error: Some("parec exited".into()),
                 }))
             ),
-            vec![Cmd::Refresh]
+            vec![]
         );
+        assert_eq!(m.refresh_in, Some(6));
         assert_eq!(
             m.error.as_deref(),
             Some("The source stopped unexpectedly. Choose it again to restart.")

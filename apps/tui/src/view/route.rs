@@ -126,6 +126,8 @@ pub(super) fn dest_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &mut
                 }
                 let style = if selected {
                     selection_style(model)
+                } else if entry.placeholder {
+                    Style::new().add_modifier(Modifier::DIM)
                 } else {
                     Style::new()
                 };
