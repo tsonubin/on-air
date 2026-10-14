@@ -147,6 +147,7 @@ impl Client {
             rates,
             cd,
             airplay_mode,
+            bluetooth,
         ) = tokio::join!(
             self.status(),
             self.pin(),
@@ -159,6 +160,7 @@ impl Client {
             self.sample_rate(),
             self.cd(),
             self.airplay_mode(),
+            self.bluetooth_devices(),
         );
         let mut failures: Vec<String> = Vec::new();
         let paused = matches!(&status, Ok(status) if !status.service_enabled);
@@ -174,6 +176,8 @@ impl Client {
             rates: take_part(rates, paused, &mut failures),
             cd: take_part(cd, paused, &mut failures),
             airplay_mode: take_part(airplay_mode, paused, &mut failures),
+            // The list is optional: a failure shows as a line in the pane.
+            bluetooth: bluetooth.ok(),
         };
         (snapshot, failures)
     }

@@ -7,7 +7,7 @@
 
 use crate::keys::{HINTS, KEYS};
 use crate::labels::input_labels;
-use crate::model::{MixerRow, Modal, Model, OutputRow, Pane};
+use crate::model::{DestRow, DestState, MixerRow, Modal, Model, Pane};
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -295,35 +295,34 @@ fn outputs_pane(model: &Model, frame: &mut Frame, area: Rect) {
     let focused = model.pane == Pane::Outputs;
     let block = pane_block("Outputs", focused, model.accent);
     let inner_width = area.width.saturating_sub(4) as usize;
-    let live_id = model
-        .snapshot
-        .active_output
-        .as_ref()
-        .map(|a| (a.output.transport.as_str(), a.output.device_id.as_str()));
     let items: Vec<ListItem> = model
-        .output_rows()
+        .dest_rows()
         .into_iter()
         .enumerate()
         .map(|(row_index, row)| match row {
-            OutputRow::Header(label) => {
+            DestRow::Header(label) => {
                 ListItem::new(Line::from(Span::styled(label, Style::new().bold())))
                     .style(locked_style(model, Style::new()))
             }
-            OutputRow::Device(index) => {
-                let output = &model.snapshot.outputs[index];
+            DestRow::Empty(text) => ListItem::new(Line::from(Span::styled(
+                format!("  {}", truncate(text, inner_width.saturating_sub(2))),
+                Style::new().add_modifier(Modifier::DIM),
+            )))
+            .style(locked_style(model, Style::new())),
+            DestRow::Entry(entry) => {
                 let selected = focused && row_index == model.output_index;
                 let marker = if selected { "> " } else { "  " };
-                let suffix = if output.needs_pair && !output.paired {
+                let suffix = if matches!(entry.state, DestState::Pin | DestState::NotPaired) {
                     " (pair)"
                 } else {
                     ""
                 };
-                let is_live = live_id == Some((output.transport.as_str(), output.id.as_str()));
+                let is_live = entry.state == DestState::Live;
                 let budget =
                     inner_width.saturating_sub(2 + suffix.len() + if is_live { 7 } else { 0 });
                 let mut spans = vec![
                     Span::raw(marker),
-                    Span::raw(format!("{}{suffix}", truncate(&output.name, budget))),
+                    Span::raw(format!("{}{suffix}", truncate(&entry.name, budget))),
                 ];
                 if is_live {
                     spans.push(Span::styled(" ● live", Style::new().fg(Color::Green)));
@@ -577,6 +576,7 @@ mod tests {
             }),
             cd: None,
             airplay_mode: Some("owntone".into()),
+            bluetooth: None,
         };
         model
     }
@@ -800,8 +800,9 @@ mod tests {
                 true,
             ));
         }
+        m.snapshot.bluetooth = Some(vec![]);
         m.pane = Pane::Outputs;
-        m.output_index = m.output_rows().len() - 1;
+        m.output_index = m.dest_rows().len() - 1;
         let t = text(&render(&m, 100, 20));
         assert!(t.contains("> Speaker 29"), "{t}");
     }

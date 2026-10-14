@@ -245,3 +245,11 @@ async fn a_tui_started_while_paused_still_gets_live_events() {
     assert!(enabled);
     handle.abort();
 }
+
+#[tokio::test]
+async fn snapshot_includes_the_bluetooth_list() {
+    let c = mock_core().await;
+    let (snapshot, _) = c.load_snapshot().await;
+    let list = snapshot.bluetooth.expect("the list loaded");
+    assert!(list.iter().any(|d| d.id == "bt-unpaired"), "{list:?}");
+}

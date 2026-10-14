@@ -5,7 +5,9 @@ use crate::api::{CdAction, WsEvent};
 use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
-use crate::model::{MixerRow, Modal, Model, OutputRow, PairTarget, Pane, Pending, Snapshot};
+use crate::model::{
+    DestRow, DestState, MixerRow, Modal, Model, PairTarget, Pane, Pending, Snapshot,
+};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
 
@@ -424,25 +426,25 @@ fn move_selection(model: &mut Model, delta: i32) {
             model.source_index = step(model.source_index, delta, len);
         }
         Pane::Outputs => {
-            let rows = model.output_rows();
+            let rows = model.dest_rows();
             let len = rows.len();
             if len == 0 {
                 model.output_index = 0;
                 return;
             }
             let mut index = model.output_index.min(len - 1);
-            // Skip headers; a list that is only headers stays put.
+            // Only entries hold the cursor; a list without any stays put.
             for _ in 0..len {
                 let next = step(index, delta, len);
                 if next == index {
                     break;
                 }
                 index = next;
-                if matches!(rows[index], OutputRow::Device(_)) {
+                if matches!(rows[index], DestRow::Entry(_)) {
                     break;
                 }
             }
-            if matches!(rows[index], OutputRow::Device(_)) {
+            if matches!(rows[index], DestRow::Entry(_)) {
                 model.output_index = index;
             }
         }
@@ -469,16 +471,13 @@ fn step(index: usize, delta: i32, len: usize) -> usize {
 fn clamp_selection(model: &mut Model) {
     let sources = input_labels(&model.snapshot.inputs).len();
     model.source_index = model.source_index.min(sources.saturating_sub(1));
-    let rows = model.output_rows();
+    let rows = model.dest_rows();
     if rows.is_empty() {
         model.output_index = 0;
     } else {
         model.output_index = model.output_index.min(rows.len() - 1);
-        if matches!(rows[model.output_index], OutputRow::Header(_)) {
-            if let Some(first) = rows
-                .iter()
-                .position(|row| matches!(row, OutputRow::Device(_)))
-            {
+        if !matches!(rows[model.output_index], DestRow::Entry(_)) {
+            if let Some(first) = rows.iter().position(|row| matches!(row, DestRow::Entry(_))) {
                 model.output_index = first;
             }
         }
@@ -495,21 +494,19 @@ fn select(model: &mut Model) -> Vec<Cmd> {
             None => vec![],
         },
         Pane::Outputs => {
-            let rows = model.output_rows();
-            let Some(OutputRow::Device(index)) = rows.get(model.output_index) else {
+            let Some(entry) = model.selected_dest() else {
                 return vec![];
             };
-            let output = model.snapshot.outputs[*index].clone();
-            if output.needs_pair && !output.paired {
-                let target = if output.transport == "airplay" {
+            if matches!(entry.state, DestState::Pin | DestState::NotPaired) {
+                let target = if entry.transport == "airplay" {
                     PairTarget::Airplay {
-                        device_id: output.id,
-                        name: output.name,
+                        device_id: entry.id,
+                        name: entry.name,
                     }
                 } else {
                     PairTarget::Bluetooth {
-                        id: output.id,
-                        name: output.name,
+                        id: entry.id,
+                        name: entry.name,
                     }
                 };
                 model.modal = Modal::Pin {
@@ -523,8 +520,8 @@ fn select(model: &mut Model) -> Vec<Cmd> {
                 model,
                 LABEL_OUTPUT,
                 vec![Cmd::ActivateOutput {
-                    transport: output.transport,
-                    device_id: output.id,
+                    transport: entry.transport.to_string(),
+                    device_id: entry.id,
                 }],
             )
         }
@@ -676,6 +673,7 @@ mod tests {
             }),
             cd: None,
             airplay_mode: Some("owntone".into()),
+            bluetooth: None,
         };
         model.autostart = Some(false);
         model
@@ -732,19 +730,21 @@ mod tests {
     fn j_and_k_skip_output_headers() {
         let mut m = model_with_mock_snapshot();
         m.pane = Pane::Outputs;
-        let rows = m.output_rows();
-        assert!(matches!(rows[0], OutputRow::Header("Sonos")));
-        assert!(matches!(rows[m.output_index], OutputRow::Device(0)));
+        let id = |m: &Model| m.selected_dest().map(|e| e.id);
+        assert!(matches!(m.dest_rows()[0], DestRow::Header("Sonos")));
+        assert_eq!(id(&m).as_deref(), Some("uuid:mock-sonos"));
         update(&mut m, key('j'));
-        assert!(
-            matches!(rows[m.output_index], OutputRow::Device(1)),
+        assert_eq!(
+            id(&m).as_deref(),
+            Some("ap-living"),
             "skips the AirPlay header"
         );
         update(&mut m, key('k'));
-        assert!(matches!(rows[m.output_index], OutputRow::Device(0)));
+        assert_eq!(id(&m).as_deref(), Some("uuid:mock-sonos"));
         update(&mut m, key('k'));
-        assert!(
-            matches!(rows[m.output_index], OutputRow::Device(0)),
+        assert_eq!(
+            id(&m).as_deref(),
+            Some("uuid:mock-sonos"),
             "never lands on a header"
         );
     }
