@@ -33,21 +33,19 @@ Until that release exists, or if the GitHub repository is private, use
 ## Omarchy / Arch (recommended on Linux)
 
 The core runs as a systemd user service and the `on-air` terminal UI
-controls it: no WebKit, no GPU toolkit, themed by your terminal. From the
-AUR (Omarchy ships `yay`; its menu also has Install > AUR):
+controls it: no WebKit, no GPU toolkit, themed by your terminal. Install
+from a clone (needs Rust and `base-devel`):
 
 ```bash
-yay -S on-air-bin                 # prebuilt; no compiler needed
-systemctl --user enable --now on-air-core
+git clone https://github.com/tsonubin/on-air.git && cd on-air
+packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
 on-air                            # the terminal UI; `on-air --help` for the subcommands
 ```
 
-`yay -S on-air` builds the same thing from source instead (needs Rust; slow
-on older laptops). To build the commit you have checked out in a clone:
+It builds the checked-out commit; commit local changes first.
 
-```bash
-packaging/omarchy/install.sh      # makepkg -si, enable the service, print the snippets
-```
+> **TODO:** the AUR packages (`yay -S on-air-bin`, `yay -S on-air`) are not
+> published yet. Until they are, use the script above.
 
 The launcher entry, the `Super+Shift+Alt+O` hotkey, the menu rows, the
 bar module and the sleep notes are in [docs/omarchy.md](docs/omarchy.md).
@@ -134,6 +132,9 @@ Debian/Ubuntu archive; there is no `apt-add-repository` line until a signed
 repo is published.
 
 ### Arch Linux — yay / AUR
+
+> **TODO:** not published to the AUR yet; the `yay -S` lines below do not
+> work until they are. On Omarchy / Arch use `packaging/omarchy/install.sh`.
 
 Recipes are under `packaging/aur/`; each directory is one AUR package.
 
@@ -395,12 +396,12 @@ and documents any still-missing files.
 
 | Manager | Files | User command |
 | --- | --- | --- |
-| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air-bin` | `yay -S on-air-bin` |
+| Omarchy / Arch | `packaging/omarchy/` | `packaging/omarchy/install.sh` |
 | Homebrew cask | `Casks/on-air.rb` | `brew install --cask on-air` |
 | Homebrew formula | `Formula/on-air-core.rb` | `brew install on-air-core` |
 | Nix | `flake.nix`, `packaging/nix/` | `nix run .#on-air-core` |
 | APT | `packaging/debian/`, `packaging/apt/` | `packaging/apt/install.sh` |
-| Arch / yay | `packaging/aur/on-air-bin`, `on-air`, `on-air-core`, `on-air-desktop-bin` | `yay -S on-air-bin` |
+| Arch / yay (TODO: not on the AUR yet) | `packaging/aur/on-air-bin`, `on-air`, `on-air-core`, `on-air-desktop-bin` | `yay -S on-air-bin` |
 | RPM | `packaging/rpm/*.spec` | `dnf install <url>` / `rpmbuild -ba` |
 | winget | `packaging/winget/` | `winget install --manifest packaging/winget` |
 

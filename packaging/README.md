@@ -46,6 +46,10 @@ A dedicated `homebrew-on-air` repo is optional later; copy `Casks/` and
 
 ### Omarchy / AUR (yay)
 
+> **TODO:** AUR publishing is on hold. The recipes below are kept current,
+> but nothing is pushed to aur.archlinux.org yet; users install with
+> `packaging/omarchy/install.sh`.
+
 `packaging/aur/on-air` is the Omarchy-first package: the core service plus
 the terminal UI, built from source, with the files under `packaging/omarchy/`
 (unit, launcher entry, icon, snippets). `sh packaging/omarchy/test.sh`
