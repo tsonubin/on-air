@@ -18,23 +18,24 @@ pub use layout::truncate;
 
 use crate::model::{Modal, Model};
 use cd::cd_line;
-use header::{header_line, hint_line};
+use header::{hint_line, render_header};
 use mixer::mixer_pane;
 use overlay::{help_overlay, pin_overlay};
-use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
-use route::{outputs_pane, sources_pane};
+use route::{dest_pane, source_pane};
 
 /// Below this the screen only asks for a larger window.
 pub const MIN_SIZE: (u16, u16) = (40, 10);
-/// Below this many columns the three panes stack vertically.
-pub const STACK_BELOW_COLUMNS: u16 = 80;
+/// Below this many columns Source stacks above Destination.
+pub const STACK_BELOW_COLUMNS: u16 = 90;
+/// Below this many rows the mixer shrinks to its compact form.
+pub const COMPACT_BELOW_ROWS: u16 = 24;
 
 pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
-    let hits = HitMap::default();
+    let mut hits = HitMap::default();
     let area = frame.area();
     if area.width < MIN_SIZE.0 || area.height < MIN_SIZE.1 {
         let notice = Paragraph::new(format!(
@@ -45,62 +46,39 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
         frame.render_widget(notice, area);
         return hits;
     }
-    let cd_rows = u16::from(model.snapshot.cd.as_ref().is_some_and(|cd| cd.present));
-    let error_rows = u16::from(model.error.is_some());
-    let notice_rows = u16::from(model.notice.is_some());
-    let [header, cd, error, notice, panes, hints] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(cd_rows),
-        Constraint::Length(error_rows),
-        Constraint::Length(notice_rows),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let areas = layout::areas(model, area);
 
-    frame.render_widget(header_line(model), header);
-    if cd_rows == 1 {
-        frame.render_widget(cd_line(model), cd);
+    render_header(model, frame, areas.header, &mut hits);
+    if areas.cd.height == 1 {
+        frame.render_widget(cd_line(model), areas.cd);
     }
     if let Some(copy) = &model.error {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ✗ ", Style::new().fg(Color::Red)),
-                Span::raw(truncate(copy, error.width.saturating_sub(4) as usize)),
+                Span::raw(truncate(copy, areas.error.width.saturating_sub(4) as usize)),
             ])),
-            error,
+            areas.error,
         );
     }
     if let Some(copy) = &model.notice {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ! ", Style::new().fg(Color::Yellow)),
-                Span::raw(truncate(copy, notice.width.saturating_sub(4) as usize)),
+                Span::raw(truncate(
+                    copy,
+                    areas.notice.width.saturating_sub(4) as usize,
+                )),
             ])),
-            notice,
+            areas.notice,
         );
     }
 
-    let pane_areas: [Rect; 3] = if area.width < STACK_BELOW_COLUMNS {
-        Layout::vertical([
-            Constraint::Percentage(30),
-            Constraint::Percentage(35),
-            Constraint::Percentage(35),
-        ])
-        .areas(panes)
-    } else {
-        Layout::horizontal([
-            Constraint::Percentage(25),
-            Constraint::Percentage(35),
-            Constraint::Percentage(40),
-        ])
-        .areas(panes)
-    };
-    sources_pane(model, frame, pane_areas[0]);
-    outputs_pane(model, frame, pane_areas[1]);
-    mixer_pane(model, frame, pane_areas[2]);
+    source_pane(model, frame, areas.source, &mut hits);
+    dest_pane(model, frame, areas.dest, &mut hits);
+    mixer_pane(model, frame, areas.mixer);
 
-    frame.render_widget(hint_line(), hints);
+    frame.render_widget(hint_line(), areas.hints);
 
     match &model.modal {
         Modal::None => {}
@@ -118,12 +96,12 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
 mod tests {
     use super::*;
     use crate::api::{
-        ActiveOutput, ActiveOutputView, CdStatus, OutputInfo, OutputPhase, SampleRateResponse,
-        SampleRateSide, StatusResponse,
+        ActiveOutput, ActiveOutputView, BluetoothDeviceInfo, CdStatus, OutputInfo, OutputPhase,
+        SampleRateResponse, SampleRateSide, StatusResponse,
     };
     use crate::client::Connection;
     use crate::keys::KEYS;
-    use crate::model::{Modal, Model, PairTarget, Pane, Snapshot};
+    use crate::model::{Activation, ActivationStep, Modal, Model, PairTarget, Pane, Snapshot};
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::style::Color;
@@ -204,13 +182,49 @@ mod tests {
     }
 
     fn render(model: &Model, w: u16, h: u16) -> Buffer {
+        render_hits(model, w, h).0
+    }
+
+    fn render_hits(model: &Model, w: u16, h: u16) -> (Buffer, HitMap) {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal
-            .draw(|frame| {
-                let _ = view(model, frame);
-            })
-            .unwrap();
-        terminal.backend().buffer().clone()
+        let mut hits = HitMap::default();
+        terminal.draw(|frame| hits = view(model, frame)).unwrap();
+        (terminal.backend().buffer().clone(), hits)
+    }
+
+    /// The cell where `needle` starts, searching below the header line.
+    fn cell_of(buffer: &Buffer, needle: &str) -> (u16, u16) {
+        let area = buffer.area;
+        for y in 1..area.height {
+            for x in 0..area.width {
+                let rest: String = (x..area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect();
+                if rest.starts_with(needle) {
+                    return (x, y);
+                }
+            }
+        }
+        panic!("{needle:?} not rendered:\n{}", text(buffer));
+    }
+
+    fn dest_index(model: &Model, id: &str) -> usize {
+        model
+            .dest_rows()
+            .iter()
+            .position(|row| matches!(row, crate::model::DestRow::Entry(e) if e.id == id))
+            .unwrap()
+    }
+
+    fn check_hits(model: &Model, w: u16, h: u16) {
+        let (b, hits) = render_hits(model, w, h);
+        let (x, y) = cell_of(&b, "Built-in mic");
+        assert_eq!(hits.hit(x, y).map(|(t, _)| t), Some(Target::SourceRow(1)));
+        let (x, y) = cell_of(&b, "Mock Bluetooth Speaker");
+        let want = Target::DestRow(dest_index(model, "bt-speaker"));
+        assert_eq!(hits.hit(x, y).map(|(t, _)| t), Some(want));
+        let (x, y) = cell_of(&b, "Sonos");
+        assert_eq!(hits.hit(x, y).map(|(t, _)| t), None, "headers are inert");
     }
 
     fn rows(buffer: &Buffer) -> Vec<String> {
@@ -242,7 +256,7 @@ mod tests {
     #[test]
     fn the_header_shows_live_output_pin_and_monitor() {
         let t = text(&render(&model(), 100, 30));
-        assert!(t.contains("● live"), "{t}");
+        assert!(t.contains("● ON AIR"), "{t}");
         assert!(t.contains("Mock Sonos"), "{t}");
         assert!(t.contains("PIN 123456"), "{t}");
         assert!(t.contains("10.0.0.12"), "{t}");
@@ -271,6 +285,179 @@ mod tests {
         assert_eq!(row_of(&b, "sleep not inhibited"), 1, "{}", text(&b));
         let t = text(&render(&model(), 100, 30));
         assert!(!t.contains("sleep not inhibited"), "{t}");
+    }
+
+    fn with_phase(phase: Option<OutputPhase>) -> Model {
+        let mut m = model();
+        m.snapshot.active_output.as_mut().unwrap().state = phase;
+        m
+    }
+
+    #[test]
+    fn lamp_states() {
+        let mut idle = model();
+        idle.snapshot.active_output = None;
+        let t = text(&render(&idle, 100, 30));
+        assert!(t.contains("○ idle"), "{t}");
+        let t = text(&render(&with_phase(Some(OutputPhase::Starting)), 100, 30));
+        assert!(t.contains("◌ connecting"), "{t}");
+        let t = text(&render(&with_phase(Some(OutputPhase::Live)), 100, 30));
+        assert!(t.contains("● ON AIR"), "{t}");
+        assert!(t.contains("Sonos · Mock Sonos"), "{t}");
+        let t = text(&render(&with_phase(Some(OutputPhase::Failed)), 100, 30));
+        assert!(t.contains("✗ failed"), "{t}");
+        assert!(!t.contains("ON AIR"), "{t}");
+    }
+
+    #[test]
+    fn header_right_side() {
+        let mut m = model();
+        m.autostart = Some(true);
+        let (b, hits) = render_hits(&m, 100, 30);
+        let first = rows(&b)[0].clone();
+        for needle in ["PIN 123456", "10.0.0.12", "monitor on", "login ✓"] {
+            assert!(first.contains(needle), "{needle} missing: {first}");
+        }
+        assert!(first.trim_end().ends_with("login ✓"), "{first}");
+        let column = |needle: &str| first[..first.find(needle).unwrap()].chars().count() as u16;
+        assert_eq!(
+            hits.hit(column("monitor on"), 0).map(|(t, _)| t),
+            Some(Target::MonitorTag)
+        );
+        assert_eq!(
+            hits.hit(column("PIN"), 0).map(|(t, _)| t),
+            Some(Target::StatusTag)
+        );
+        assert_eq!(
+            hits.hit(column("10.0.0.12"), 0).map(|(t, _)| t),
+            Some(Target::StatusTag)
+        );
+    }
+
+    fn tagged_model() -> Model {
+        let mut m = model();
+        m.snapshot.outputs = vec![
+            OutputInfo {
+                kind: "pair".into(),
+                member_count: 2,
+                ..output("uuid:mock-sonos", "Mock Sonos", "sonos", false, true)
+            },
+            output("ap-pin", "Pin HomePod", "airplay", true, false),
+            output("ap-bad", "Broken HomePod", "airplay", false, true),
+            output("bt-conn", "Connected Speaker", "bluetooth", false, true),
+            output("bt-paired", "Paired Speaker", "bluetooth", false, true),
+            output("bt-new", "New Speaker", "bluetooth", true, false),
+        ];
+        m.snapshot.bluetooth = Some(vec![
+            BluetoothDeviceInfo {
+                id: "bt-conn".into(),
+                name: "Connected Speaker".into(),
+                paired: true,
+                connected: true,
+            },
+            BluetoothDeviceInfo {
+                id: "bt-paired".into(),
+                name: "Paired Speaker".into(),
+                paired: true,
+                connected: false,
+            },
+            BluetoothDeviceInfo {
+                id: "bt-new".into(),
+                name: "New Speaker".into(),
+                paired: false,
+                connected: false,
+            },
+        ]);
+        m.failed_output = Some(("airplay".into(), "ap-bad".into()));
+        m
+    }
+
+    fn row_text(b: &Buffer, needle: &str) -> String {
+        rows(b)[row_of(b, needle)].clone()
+    }
+
+    #[test]
+    fn dest_tags() {
+        let b = render(&tagged_model(), 100, 30);
+        let tag = |name: &str, want: &str| {
+            let row = row_text(&b, name);
+            assert!(row.contains(want), "{name}: {want:?} missing in {row}");
+        };
+        tag("Mock Sonos", "⚇ pair");
+        tag("Mock Sonos", "live");
+        tag("Pin HomePod", "pin");
+        tag("Broken HomePod", "✗ failed");
+        tag("Connected Speaker", "connected");
+        tag("Paired Speaker", "paired");
+        tag("New Speaker", "not paired");
+        let t = text(&b);
+        assert!(!t.contains("not paired  not"), "{t}");
+
+        let mut m = tagged_model();
+        m.activation = Some(Activation {
+            transport: "airplay".into(),
+            id: "ap-pin".into(),
+            name: "Pin HomePod".into(),
+            step: ActivationStep::Pairing,
+        });
+        let row = row_text(&render(&m, 100, 30), "Pin HomePod");
+        assert!(row.contains("◌ pairing…"), "{row}");
+        m.activation.as_mut().unwrap().step = ActivationStep::Connecting;
+        let row = row_text(&render(&m, 100, 30), "Pin HomePod");
+        assert!(row.contains("◌ connecting…"), "{row}");
+        m.snapshot.active_output.as_mut().unwrap().state = Some(OutputPhase::Failed);
+        let row = row_text(&render(&m, 100, 30), "Mock Sonos");
+        assert!(row.contains("✗ failed"), "{row}");
+        assert!(row.contains("⚇ pair"), "{row}");
+        // The tag sits at the right edge of the Destination block.
+        assert!(row.trim_end().ends_with("✗ failed│"), "{row}");
+    }
+
+    #[test]
+    fn empty_state_lines() {
+        let mut m = model();
+        m.snapshot.inputs.clear();
+        m.snapshot.active_input = None;
+        m.snapshot.outputs.clear();
+        m.snapshot.active_output = None;
+        m.snapshot.bluetooth = Some(vec![]);
+        let t = text(&render(&m, 200, 30));
+        for copy in [
+            "No capture devices found. Check PipeWire, then press r.",
+            "None found on this network — press r to rescan",
+            "None found — AirPlay needs OwnTone or pyatv",
+            "None paired — press b for Bluetooth settings",
+        ] {
+            assert!(t.contains(copy), "{copy} missing:\n{t}");
+        }
+    }
+
+    #[test]
+    fn layout_100x30_side_by_side() {
+        let m = model();
+        let b = render(&m, 100, 30);
+        let row = row_of(&b, "Source");
+        assert_eq!(row, row_of(&b, "Destination"));
+        let line: Vec<char> = rows(&b)[row].chars().collect();
+        let second = line.iter().rposition(|c| *c == '┌').unwrap();
+        let width = 100 - second;
+        assert!((55..=65).contains(&width), "destination width {width}");
+        check_hits(&m, 100, 30);
+    }
+
+    #[test]
+    fn layout_80x24_stacks() {
+        let m = model();
+        let b = render(&m, 80, 24);
+        assert!(row_of(&b, "Source") < row_of(&b, "Destination"));
+        assert!(row_of(&b, "Destination") < row_of(&b, "Mixer"));
+        check_hits(&m, 80, 24);
+    }
+
+    #[test]
+    fn the_hint_line_offers_info() {
+        let b = render(&model(), 100, 30);
+        assert!(rows(&b).last().unwrap().contains("i info"));
     }
 
     #[test]
@@ -306,21 +493,20 @@ mod tests {
         assert!(row_of(&b, "AirPlay") < row_of(&b, "Living Room AirPlay"));
         assert!(row_of(&b, "Bluetooth") < row_of(&b, "Mock Bluetooth Speaker"));
         let t = text(&b);
-        assert!(t.contains("New Bluetooth Speaker (pair)"), "{t}");
+        assert!(t.contains("New Bluetooth Speaker"), "{t}");
     }
 
     #[test]
     fn the_mixer_shows_volume_eq_and_rates() {
         let t = text(&render(&model(), 100, 30));
-        for needle in [
-            "Volume",
-            "80",
-            "EQ 60",
-            "EQ 12k",
-            "+2.0 dB",
-            "In 48000",
-            "Out 44100",
-        ] {
+        for needle in ["Volume", "80", "EQ 60"] {
+            assert!(t.contains(needle), "{needle} missing:\n{t}");
+        }
+        let mut m = model();
+        m.pane = Pane::Mixer;
+        m.mixer_row = crate::model::MixerRow::OutputRate;
+        let t = text(&render(&m, 100, 30));
+        for needle in ["EQ 12k", "+2.0 dB", "In 48000", "Out 44100"] {
             assert!(t.contains(needle), "{needle} missing:\n{t}");
         }
     }
@@ -359,14 +545,14 @@ mod tests {
     fn below_min_size_only_the_resize_notice_renders() {
         let t = text(&render(&model(), 30, 5));
         assert!(t.contains("resize"), "{t}");
-        assert!(!t.contains("Sources"), "{t}");
+        assert!(!t.contains("Source"), "{t}");
     }
 
     #[test]
     fn narrow_terminals_stack_the_panes() {
         let b = render(&model(), 60, 40);
-        let sources = row_of(&b, "Sources");
-        let outputs = row_of(&b, "Outputs");
+        let sources = row_of(&b, "Source");
+        let outputs = row_of(&b, "Destination");
         let mixer = row_of(&b, "Mixer");
         assert!(sources < outputs && outputs < mixer, "{}", text(&b));
         for row in [sources, outputs, mixer] {

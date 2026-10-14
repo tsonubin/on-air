@@ -129,6 +129,7 @@ pub const HINTS: &[(&str, &str)] = &[
     ("h/l", "adjust"),
     ("+/-", "volume"),
     ("m", "monitor"),
+    ("i", "info"),
     ("?", "help"),
     ("q", "quit"),
 ];
