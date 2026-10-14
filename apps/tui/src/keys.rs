@@ -15,6 +15,8 @@ pub enum Action {
     Select,
     AdjustUp,
     AdjustDown,
+    FineUp,
+    FineDown,
     VolumeUp,
     VolumeDown,
     ResetBand,
@@ -58,6 +60,11 @@ pub const KEYS: &[Binding] = &[
         keys: "h / l, ← / →",
         action: Action::AdjustDown,
         help: "Mixer: adjust the focused row",
+    },
+    Binding {
+        keys: "H / L",
+        action: Action::FineDown,
+        help: "Fine adjust (volume ±1, EQ ±0.5 dB)",
     },
     Binding {
         keys: "+ / -",
@@ -152,6 +159,8 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             'k' => Action::Up,
             'l' => Action::AdjustUp,
             'h' => Action::AdjustDown,
+            'L' => Action::FineUp,
+            'H' => Action::FineDown,
             '+' | '=' => Action::VolumeUp,
             '-' | '_' => Action::VolumeDown,
             '0' => Action::ResetBand,
@@ -191,6 +200,11 @@ mod tests {
         );
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 16);
+        assert_eq!(KEYS.len(), 17);
+        assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
+        assert_eq!(
+            action_for(&press(KeyCode::Char('H'))),
+            Some(Action::FineDown)
+        );
     }
 }

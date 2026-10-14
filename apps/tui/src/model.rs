@@ -7,6 +7,7 @@ use crate::api::{
     StatusResponse,
 };
 use crate::client::Connection;
+use crate::update::Cmd;
 use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,6 +38,23 @@ impl MixerRow {
         MixerRow::InputRate,
         MixerRow::OutputRate,
     ];
+}
+
+/// A mixer control with its own write slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MixerControl {
+    Volume,
+    Eq,
+    InputRate,
+    OutputRate,
+}
+
+/// Where a control's write stands. While one is in flight, a change only
+/// replaces `queued`, so the core sees the latest value, in order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum WriteSlot {
+    Idle,
+    InFlight { queued: Option<Cmd> },
 }
 
 /// What the pairing modal is pairing.
@@ -189,6 +207,8 @@ pub struct Model {
     /// Index into `dest_rows()`; never a header once there is a device.
     pub output_index: usize,
     pub mixer_row: MixerRow,
+    /// Indexed by `MixerControl as usize`.
+    pub writes: [WriteSlot; 4],
     pub meter: Meter,
     pub activation: Option<Activation>,
     /// The (transport, id) whose last activation failed.
@@ -221,6 +241,7 @@ impl Model {
             source_index: 0,
             output_index: 1,
             mixer_row: MixerRow::Volume,
+            writes: [const { WriteSlot::Idle }; 4],
             meter: Meter::default(),
             activation: None,
             failed_output: None,

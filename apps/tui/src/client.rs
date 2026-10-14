@@ -10,7 +10,7 @@ use crate::api::{
     ServiceResponse, StatusResponse,
 };
 use crate::error_copy;
-use crate::model::Snapshot;
+use crate::model::{MixerControl, Snapshot};
 use crate::update::{self, Cmd, Msg};
 use futures_util::StreamExt;
 use reqwest::Method;
@@ -192,6 +192,12 @@ impl Client {
                 result: result.map_err(|error| error_copy::copy(&error)),
             }]
         };
+        let written = |control: MixerControl, result: Result<(), ClientError>| {
+            vec![Msg::Written {
+                control,
+                result: result.map_err(|error| error_copy::copy(&error)),
+            }]
+        };
         match cmd {
             Cmd::Quit => vec![],
             Cmd::Refresh => {
@@ -222,15 +228,24 @@ impl Client {
                 self.activate_output(&transport, &device_id).await,
             ),
             Cmd::DeactivateOutput => done(update::LABEL_STOP, self.deactivate_output().await),
-            Cmd::SetVolume(volume) => done(update::LABEL_MIXER, self.set_volume(volume).await),
-            Cmd::SetEq(gains) => done(update::LABEL_MIXER, self.set_eq(gains).await),
+            Cmd::SetVolume(volume) => written(MixerControl::Volume, self.set_volume(volume).await),
+            Cmd::SetEq(gains) => written(MixerControl::Eq, self.set_eq(gains).await),
             Cmd::SetSampleRate {
                 input_hz,
                 output_hz,
-            } => done(
-                update::LABEL_MIXER,
-                self.set_sample_rate(input_hz, output_hz).await,
-            ),
+            } => {
+                let control = if input_hz.is_some() {
+                    MixerControl::InputRate
+                } else {
+                    MixerControl::OutputRate
+                };
+                written(control, self.set_sample_rate(input_hz, output_hz).await)
+            }
+            Cmd::LoadRates => vec![Msg::Rates(
+                self.sample_rate()
+                    .await
+                    .map_err(|error| error_copy::copy(&error)),
+            )],
             Cmd::ControlCd(action) => done(update::LABEL_CD, self.control_cd(action).await),
             Cmd::PairAirplay { device_id, pin } => done(
                 update::LABEL_PAIR,

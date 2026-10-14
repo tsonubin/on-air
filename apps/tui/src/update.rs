@@ -1,13 +1,13 @@
 //! The pure half of the UI: `update(model, msg) -> commands`. No I/O lives
 //! here, so every key, event and reply can be tested without a core.
 
-use crate::api::{CdAction, WsEvent};
+use crate::api::{CdAction, SampleRateResponse, WsEvent};
 use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
 use crate::model::{
-    DestRow, DestState, Meter, MixerRow, Modal, Model, PairTarget, Pane, Pending, Snapshot,
-    METER_FLOOR_DB,
+    DestRow, DestState, Meter, MixerControl, MixerRow, Modal, Model, PairTarget, Pane, Pending,
+    Snapshot, WriteSlot, METER_FLOOR_DB,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
@@ -26,6 +26,12 @@ pub enum Msg {
         label: String,
         result: Result<(), String>,
     },
+    /// A mixer write finished; see `write`.
+    Written {
+        control: MixerControl,
+        result: Result<(), String>,
+    },
+    Rates(Result<SampleRateResponse, String>),
     Autostart(Result<bool, String>),
     Accent(Color),
 }
@@ -42,6 +48,8 @@ pub enum Cmd {
     DeactivateOutput,
     SetVolume(u8),
     SetEq([f32; 5]),
+    /// Re-read both sides' rates after one changed.
+    LoadRates,
     SetSampleRate {
         input_hz: Option<u32>,
         output_hz: Option<u32>,
@@ -62,6 +70,8 @@ pub enum Cmd {
 
 pub const VOLUME_STEP: u8 = 5;
 pub const EQ_STEP_DB: f32 = 1.0;
+pub const VOLUME_FINE_STEP: u8 = 1;
+pub const EQ_FINE_STEP_DB: f32 = 0.5;
 pub const EQ_RANGE_DB: (f32, f32) = (-12.0, 12.0);
 
 pub const PEAK_HOLD_FRAMES: u8 = 10;
@@ -85,7 +95,6 @@ pub const LABEL_MONITOR: &str = "Changing monitor";
 pub const LABEL_REFRESH: &str = "Refreshing";
 pub const LABEL_AUTOSTART: &str = "Changing autostart";
 pub const LABEL_SETTINGS: &str = "Opening Bluetooth settings";
-pub const LABEL_MIXER: &str = "Adjusting";
 pub const LABEL_CD: &str = "Disc";
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
@@ -132,6 +141,15 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             vec![]
         }
         Msg::Done { label, result } => on_done(model, &label, result),
+        Msg::Written { control, result } => on_written(model, control, result),
+        Msg::Rates(Ok(rates)) => {
+            model.snapshot.rates = Some(rates);
+            vec![]
+        }
+        Msg::Rates(Err(copy)) => {
+            model.error = Some(copy);
+            vec![]
+        }
         Msg::Autostart(Ok(enabled)) => {
             model.autostart = Some(enabled);
             if matches!(
@@ -188,7 +206,7 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
                     }];
                 }
             }
-            if label == LABEL_SETTINGS || label == LABEL_MIXER {
+            if label == LABEL_SETTINGS {
                 vec![]
             } else {
                 vec![Cmd::Refresh]
@@ -201,13 +219,47 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
             } else {
                 model.error = Some(copy);
             }
-            // Mixer changes are shown before the core confirms them; on a
-            // failure, reload the core's real values over the optimistic ones.
-            if label == LABEL_MIXER {
-                vec![Cmd::Refresh]
-            } else {
-                vec![]
+            vec![]
+        }
+    }
+}
+
+/// Send a mixer change, or hold it as the latest value while an earlier
+/// write to the same control is still in flight.
+fn write(model: &mut Model, control: MixerControl, cmd: Cmd) -> Vec<Cmd> {
+    match &mut model.writes[control as usize] {
+        slot @ WriteSlot::Idle => {
+            *slot = WriteSlot::InFlight { queued: None };
+            vec![cmd]
+        }
+        WriteSlot::InFlight { queued } => {
+            *queued = Some(cmd);
+            vec![]
+        }
+    }
+}
+
+fn on_written(model: &mut Model, control: MixerControl, result: Result<(), String>) -> Vec<Cmd> {
+    let slot = std::mem::replace(&mut model.writes[control as usize], WriteSlot::Idle);
+    match result {
+        Ok(()) => {
+            model.error = None;
+            match slot {
+                WriteSlot::InFlight { queued: Some(cmd) } => {
+                    model.writes[control as usize] = WriteSlot::InFlight { queued: None };
+                    vec![cmd]
+                }
+                _ if matches!(control, MixerControl::InputRate | MixerControl::OutputRate) => {
+                    vec![Cmd::LoadRates]
+                }
+                _ => vec![],
             }
+        }
+        // The queued value is dropped: reload the core's real values over
+        // the optimistic ones instead of sending on top of a failure.
+        Err(copy) => {
+            model.error = Some(copy);
+            vec![Cmd::Refresh]
         }
     }
 }
@@ -408,10 +460,12 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             vec![]
         }
         Action::Select => select(model),
-        Action::AdjustUp => adjust(model, 1),
-        Action::AdjustDown => adjust(model, -1),
-        Action::VolumeUp => set_volume(model, 1),
-        Action::VolumeDown => set_volume(model, -1),
+        Action::AdjustUp => adjust(model, 1, false),
+        Action::AdjustDown => adjust(model, -1, false),
+        Action::FineUp => adjust(model, 1, true),
+        Action::FineDown => adjust(model, -1, true),
+        Action::VolumeUp => set_volume(model, VOLUME_STEP as i32),
+        Action::VolumeDown => set_volume(model, -(VOLUME_STEP as i32)),
         Action::ResetBand => match (model.pane, model.mixer_row) {
             (Pane::Mixer, MixerRow::Eq(band)) => set_eq_band(model, band, 0.0),
             _ => vec![],
@@ -584,14 +638,18 @@ fn select(model: &mut Model) -> Vec<Cmd> {
     }
 }
 
-fn adjust(model: &mut Model, direction: i32) -> Vec<Cmd> {
+fn adjust(model: &mut Model, direction: i32, fine: bool) -> Vec<Cmd> {
     if model.pane != Pane::Mixer {
         return vec![];
     }
     match model.mixer_row {
-        MixerRow::Volume => set_volume(model, direction),
+        MixerRow::Volume => {
+            let step = if fine { VOLUME_FINE_STEP } else { VOLUME_STEP };
+            set_volume(model, step as i32 * direction)
+        }
         MixerRow::Eq(band) => {
-            let gain = model.snapshot.eq[band] + EQ_STEP_DB * direction as f32;
+            let step = if fine { EQ_FINE_STEP_DB } else { EQ_STEP_DB };
+            let gain = model.snapshot.eq[band] + step * direction as f32;
             set_eq_band(model, band, gain)
         }
         MixerRow::InputRate | MixerRow::OutputRate => {
@@ -612,18 +670,19 @@ fn adjust(model: &mut Model, direction: i32) -> Vec<Cmd> {
                 return vec![];
             }
             side.sample_rate_hz = next;
-            let cmd = if model.mixer_row == MixerRow::InputRate {
-                Cmd::SetSampleRate {
+            if input {
+                let cmd = Cmd::SetSampleRate {
                     input_hz: Some(next),
                     output_hz: None,
-                }
+                };
+                write(model, MixerControl::InputRate, cmd)
             } else {
-                Cmd::SetSampleRate {
+                let cmd = Cmd::SetSampleRate {
                     input_hz: None,
                     output_hz: Some(next),
-                }
-            };
-            pending(model, LABEL_MIXER, vec![cmd])
+                };
+                write(model, MixerControl::OutputRate, cmd)
+            }
         }
     }
 }
@@ -639,14 +698,13 @@ fn next_in_catalog(catalog: &[u32], current: u32, direction: i32) -> Option<u32>
     Some(catalog[next])
 }
 
-fn set_volume(model: &mut Model, direction: i32) -> Vec<Cmd> {
-    let current = model.snapshot.volume as i32;
-    let next = (current + VOLUME_STEP as i32 * direction).clamp(0, 100) as u8;
+fn set_volume(model: &mut Model, delta: i32) -> Vec<Cmd> {
+    let next = (model.snapshot.volume as i32 + delta).clamp(0, 100) as u8;
     if next == model.snapshot.volume {
         return vec![];
     }
     model.snapshot.volume = next;
-    pending(model, LABEL_MIXER, vec![Cmd::SetVolume(next)])
+    write(model, MixerControl::Volume, Cmd::SetVolume(next))
 }
 
 /// Set one band, show it at once, and send the whole curve.
@@ -656,7 +714,8 @@ fn set_eq_band(model: &mut Model, band: usize, gain_db: f32) -> Vec<Cmd> {
         return vec![];
     }
     model.snapshot.eq[band] = gain_db;
-    pending(model, LABEL_MIXER, vec![Cmd::SetEq(model.snapshot.eq)])
+    let cmd = Cmd::SetEq(model.snapshot.eq);
+    write(model, MixerControl::Eq, cmd)
 }
 
 #[cfg(test)]
@@ -732,6 +791,22 @@ mod tests {
         };
         model.autostart = Some(false);
         model
+    }
+
+    /// Acknowledge every mixer write, dropping what the acks send.
+    fn settle(m: &mut Model) {
+        for control in [
+            MixerControl::Volume,
+            MixerControl::Eq,
+            MixerControl::InputRate,
+            MixerControl::OutputRate,
+        ] {
+            m.writes[control as usize] = WriteSlot::Idle;
+        }
+    }
+
+    fn written(control: MixerControl, result: Result<(), String>) -> Msg {
+        Msg::Written { control, result }
     }
 
     fn key(c: char) -> Msg {
@@ -969,6 +1044,7 @@ mod tests {
             m.snapshot.volume, 55,
             "the mixer shows the new value at once"
         );
+        settle(&mut m);
         assert_eq!(update(&mut m, key('h')), vec![Cmd::SetVolume(50)]);
         m.snapshot.volume = 100;
         assert_eq!(update(&mut m, key('l')), vec![], "never above 100");
@@ -981,6 +1057,7 @@ mod tests {
             vec![Cmd::SetEq([0.0, 0.0, 1.0, 0.0, 0.0])]
         );
         assert_eq!(m.snapshot.eq, [0.0, 0.0, 1.0, 0.0, 0.0]);
+        settle(&mut m);
         m.snapshot.eq = [0.0, 0.0, 12.0, 0.0, 0.0];
         assert_eq!(
             update(&mut m, key('l')),
@@ -1002,6 +1079,7 @@ mod tests {
             44100
         );
         m.mixer_row = MixerRow::OutputRate;
+        settle(&mut m);
         assert_eq!(
             update(&mut m, key('l')),
             vec![Cmd::SetSampleRate {
@@ -1012,27 +1090,135 @@ mod tests {
     }
 
     #[test]
+    fn first_write_sends_and_marks_in_flight() {
+        let mut m = model_with_mock_snapshot();
+        m.pane = Pane::Mixer;
+        assert_eq!(update(&mut m, key('l')), vec![Cmd::SetVolume(55)]);
+        assert_eq!(
+            m.writes[MixerControl::Volume as usize],
+            WriteSlot::InFlight { queued: None }
+        );
+        assert!(m.pending.is_none(), "mixer writes show no pending label");
+    }
+
+    #[test]
+    fn latest_value_wins() {
+        let mut m = model_with_mock_snapshot();
+        m.pane = Pane::Mixer;
+        update(&mut m, key('l'));
+        for _ in 0..3 {
+            assert_eq!(update(&mut m, key('l')), vec![]);
+        }
+        assert_eq!(
+            m.writes[MixerControl::Volume as usize],
+            WriteSlot::InFlight {
+                queued: Some(Cmd::SetVolume(70))
+            }
+        );
+        assert_eq!(
+            update(&mut m, written(MixerControl::Volume, Ok(()))),
+            vec![Cmd::SetVolume(70)]
+        );
+        assert_eq!(
+            m.writes[MixerControl::Volume as usize],
+            WriteSlot::InFlight { queued: None }
+        );
+        assert_eq!(
+            update(&mut m, written(MixerControl::Volume, Ok(()))),
+            vec![]
+        );
+        assert_eq!(m.writes[MixerControl::Volume as usize], WriteSlot::Idle);
+    }
+
+    #[test]
+    fn failure_drops_the_queued_value() {
+        let mut m = model_with_mock_snapshot();
+        m.writes[MixerControl::Volume as usize] = WriteSlot::InFlight {
+            queued: Some(Cmd::SetVolume(70)),
+        };
+        assert_eq!(
+            update(&mut m, written(MixerControl::Volume, Err("x".into()))),
+            vec![Cmd::Refresh]
+        );
+        assert_eq!(m.writes[MixerControl::Volume as usize], WriteSlot::Idle);
+        assert_eq!(m.error.as_deref(), Some("x"));
+    }
+
+    #[test]
+    fn rate_success_reloads_rates() {
+        let mut m = model_with_mock_snapshot();
+        m.writes[MixerControl::InputRate as usize] = WriteSlot::InFlight { queued: None };
+        assert_eq!(
+            update(&mut m, written(MixerControl::InputRate, Ok(()))),
+            vec![Cmd::LoadRates]
+        );
+        let mut fresh = m.snapshot.rates.clone().unwrap();
+        fresh.output.supported_hz = vec![96000];
+        update(&mut m, Msg::Rates(Ok(fresh.clone())));
+        assert_eq!(m.snapshot.rates, Some(fresh));
+    }
+
+    #[test]
+    fn fine_steps() {
+        let mut m = model_with_mock_snapshot();
+        m.pane = Pane::Mixer;
+        assert_eq!(update(&mut m, key('L')), vec![Cmd::SetVolume(51)]);
+        settle(&mut m);
+        assert_eq!(update(&mut m, key('H')), vec![Cmd::SetVolume(50)]);
+        m.mixer_row = MixerRow::Eq(1);
+        assert_eq!(
+            update(&mut m, key('L')),
+            vec![Cmd::SetEq([0.0, 0.5, 0.0, 0.0, 0.0])]
+        );
+        settle(&mut m);
+        assert_eq!(
+            update(&mut m, key('H')),
+            vec![Cmd::SetEq([0.0, 0.0, 0.0, 0.0, 0.0])]
+        );
+    }
+
+    #[test]
+    fn controls_are_independent() {
+        let mut m = model_with_mock_snapshot();
+        m.pane = Pane::Mixer;
+        update(&mut m, key('l'));
+        m.mixer_row = MixerRow::Eq(0);
+        assert_eq!(
+            update(&mut m, key('l')),
+            vec![Cmd::SetEq([1.0, 0.0, 0.0, 0.0, 0.0])]
+        );
+    }
+
+    #[test]
     fn plus_and_minus_change_volume_from_any_pane() {
         let mut m = model_with_mock_snapshot();
         assert_eq!(m.pane, Pane::Sources);
         assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(55)]);
-        assert_eq!(update(&mut m, key('-')), vec![Cmd::SetVolume(50)]);
-        assert_eq!(update(&mut m, key('=')), vec![Cmd::SetVolume(55)]);
-        assert_eq!(update(&mut m, key('_')), vec![Cmd::SetVolume(50)]);
+        update(&mut m, key('-'));
+        update(&mut m, key('='));
+        update(&mut m, key('_'));
+        assert_eq!(m.snapshot.volume, 50);
     }
 
     #[test]
     fn repeated_presses_accumulate() {
         let mut m = model_with_mock_snapshot();
         assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(55)]);
-        assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(60)]);
-        assert_eq!(update(&mut m, key('+')), vec![Cmd::SetVolume(65)]);
+        assert_eq!(update(&mut m, key('+')), vec![]);
+        assert_eq!(update(&mut m, key('+')), vec![]);
         assert_eq!(m.snapshot.volume, 65);
         m.pane = Pane::Mixer;
         m.mixer_row = MixerRow::Eq(4);
         update(&mut m, key('l'));
+        assert_eq!(update(&mut m, key('l')), vec![]);
         assert_eq!(
-            update(&mut m, key('l')),
+            update(
+                &mut m,
+                Msg::Written {
+                    control: MixerControl::Eq,
+                    result: Ok(())
+                }
+            ),
             vec![Cmd::SetEq([0.0, 0.0, 0.0, 0.0, 2.0])]
         );
     }
@@ -1044,8 +1230,8 @@ mod tests {
         assert_eq!(
             update(
                 &mut m,
-                Msg::Done {
-                    label: "Adjusting".into(),
+                Msg::Written {
+                    control: MixerControl::Volume,
                     result: Err("Nothing is playing yet. Pick a speaker first.".into())
                 }
             ),
