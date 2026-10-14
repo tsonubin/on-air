@@ -29,7 +29,7 @@ pub use crate::session::ActiveOutput;
 
 type BluetoothDeviceCache = Option<(Instant, Vec<BluetoothDevice>)>;
 
-/// Tunables that used to be `cfg!(test)` branches.
+/// Timing tunables; tests shorten them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CoreConfig {
     /// How long a freshly started core waits before restoring the saved
@@ -61,14 +61,6 @@ impl BackgroundTasks {
 
     pub fn set_mdns(&mut self, daemon: Option<mdns_sd::ServiceDaemon>) {
         self.mdns = daemon;
-    }
-
-    pub fn len(&self) -> usize {
-        self.handles.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.handles.is_empty()
     }
 
     /// Cancel every task and stop the mDNS responder.
@@ -322,10 +314,6 @@ impl CoreState {
         self.mock = mock;
         self.output.set_manage_local_sink(!mock);
         self.input.set_mock(mock);
-    }
-
-    pub fn is_mock(&self) -> bool {
-        self.mock
     }
 
     // ---- sessions -------------------------------------------------------
@@ -863,9 +851,9 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
-    /// Audit finding #1: the restore used to check `still_current()` before
-    /// waiting for `config_lock`, so a user activation that completed while
-    /// it waited was overwritten by the saved output.
+    /// The restore must re-check `still_current()` after waiting for
+    /// `config_lock`: a user activation that completed while it waited must
+    /// not be overwritten by the saved output.
     #[tokio::test]
     async fn a_user_activation_during_restore_wins_over_the_saved_output() {
         let path = settings_test_path("restore-race");

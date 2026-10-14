@@ -1,11 +1,11 @@
 use reqwest::Client;
 use std::time::Duration;
 
-pub const SOAP_TIMEOUT: Duration = Duration::from_secs(5);
+pub const SOAP_TIMEOUT: Duration = crate::net::DEVICE_HTTP_TIMEOUT;
 
 /// SOAP client with the LAN rules from [`crate::net::lan_http_client`].
 pub fn http_client() -> Client {
-    crate::net::lan_http_client(SOAP_TIMEOUT)
+    crate::net::device_http_client()
 }
 
 #[derive(Debug)]

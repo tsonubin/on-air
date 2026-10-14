@@ -54,7 +54,6 @@ pub fn snap_rate(preferred_hz: u32, supported: &[u32]) -> u32 {
         .unwrap_or(&supported[0])
 }
 
-/// Default output rate for a transport from its supported list.
 /// Intersect a device-advertised range list with a transport catalog.
 /// `device_ranges` is `(min_hz, max_hz)` per config; empty means "unknown,
 /// use the catalog as-is".

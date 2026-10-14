@@ -2,11 +2,9 @@
 name = "on-air-desktop"
 version = "0.2.0"
 description = "on-air desktop: LAN audio streaming to AirPlay, Bluetooth or Sonos"
-authors = ["tsonubin"]
 edition = "2021"
 license = "MIT"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+repository = "https://github.com/tsonubin/on-air"
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary

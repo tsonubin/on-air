@@ -44,7 +44,7 @@ pub struct Binding {
     pub help: &'static str,
 }
 
-/// One row per line of the key table in the design spec, in that order.
+/// The key table, in the order the help overlay shows it.
 pub const KEYS: &[Binding] = &[
     Binding {
         keys: "Tab / Shift-Tab",

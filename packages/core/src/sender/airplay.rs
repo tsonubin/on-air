@@ -51,7 +51,7 @@ impl AirPlaySender {
             base_url: base_url.into().trim_end_matches('/').to_string(),
             stream_url: String::new(),
             host: String::new(),
-            http: crate::sender::sonos::soap::http_client(),
+            http: crate::net::device_http_client(),
             child: None,
             active_backend: None,
             volume: 50,
@@ -483,7 +483,7 @@ struct OwnToneOutput {
 }
 
 pub async fn fetch_owntone_outputs(base: &str) -> Result<Vec<CatalogDevice>, SenderError> {
-    let http = crate::sender::sonos::soap::http_client();
+    let http = crate::net::device_http_client();
     fetch_owntone_outputs_with_client(&http, base).await
 }
 
@@ -531,7 +531,7 @@ pub(crate) async fn fetch_owntone_outputs_with_client(
 }
 
 pub async fn pair_owntone(base: &str, device_id: &str, pin: &str) -> Result<(), SenderError> {
-    let http = crate::sender::sonos::soap::http_client();
+    let http = crate::net::device_http_client();
     let pin_body = serde_json::json!({ "pin": pin, "pairing_code": pin });
     for path in ["/api/pairing", "/api/pair"] {
         let response = http

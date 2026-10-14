@@ -10,7 +10,7 @@ pub struct InputDeviceInfo {
     pub name: String,
 }
 
-/// Loopback-oriented capture backend for the current OS (M5).
+/// Whether a capture device name looks like a loopback/monitor source on the current OS.
 pub fn is_loopback_device_name(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     n.contains("monitor")

@@ -1,35 +1,8 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use on_air_core::state::CoreState;
-use tower::ServiceExt;
-
-async fn mock_app() -> (axum::Router, CoreState) {
-    let state = CoreState::new_mock().await;
-    (on_air_core::build_router(state.clone()), state)
-}
-
-async fn send(app: axum::Router, req: Request<Body>) -> (StatusCode, serde_json::Value) {
-    let response = app.oneshot(req).await.unwrap();
-    let status = response.status();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let value = if body.is_empty() {
-        serde_json::Value::Null
-    } else {
-        serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null)
-    };
-    (status, value)
-}
-
-fn post_json(uri: &str, body: &str) -> Request<Body> {
-    Request::builder()
-        .method("POST")
-        .uri(uri)
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
-}
+mod common;
+use common::*;
 
 #[tokio::test]
 async fn empty_deck_is_not_present() {

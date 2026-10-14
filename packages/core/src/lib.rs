@@ -24,9 +24,6 @@ pub mod state;
 
 use state::CoreState;
 
-/// The pairing extractors live with the HTTP layer; re-exported at the old path.
-pub use api::auth;
-
 // Keep in sync with DEFAULT_PORT in packages/api-types/src/index.ts
 pub const DEFAULT_PORT: u16 = 47990;
 

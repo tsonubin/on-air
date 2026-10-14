@@ -56,7 +56,7 @@ export type ApiErrorCode =
   | "method_not_allowed" // 405
   | "conflict" // 409: exclusivity / switching conflict
   | "not_ready" // 409: the chosen device or source is not ready (unpaired, disconnected, no disc)
-  | "stream_busy" // 409
+  | "stream_busy" // 503: the Sonos stream is already being served
   | "pin_lockout" // 429
   | "transport_unreachable" // 502
   | "service_paused" // 503
@@ -78,6 +78,8 @@ export interface StatusResponse {
   status: string;
   version: string;
   service_enabled: boolean;
+  /** Whether a platform sleep inhibitor is held; absent on cores older than 0.2. */
+  sleep_inhibited?: boolean;
   /**
    * LAN addresses the core is reachable on, so the desktop can show what the
    * phone must type. Optional on the TypeScript side because cores older than

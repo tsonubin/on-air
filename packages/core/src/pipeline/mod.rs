@@ -236,20 +236,6 @@ impl CaptureHandle {
         }
     }
 
-    pub fn with_cleanup(
-        processing: ProcessingTaskHandle,
-        device_name: String,
-        on_stop: Box<dyn FnOnce() + Send>,
-    ) -> Self {
-        CaptureHandle {
-            _stream: None,
-            pulse: None,
-            on_stop: Some(on_stop),
-            processing,
-            device_name,
-        }
-    }
-
     /// Blocking: stops the capture stream and joins the processing thread.
     /// From async code, call this inside `tokio::task::spawn_blocking`.
     pub fn stop(self) {

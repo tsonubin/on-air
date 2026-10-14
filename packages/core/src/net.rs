@@ -50,6 +50,14 @@ pub fn lan_addresses() -> Vec<String> {
 /// HTTP client for LAN peers (SOAP, OwnTone, device descriptions). It must
 /// not follow `HTTP_PROXY`: a system proxy would intercept 192.168.x UPnP
 /// and ZoneGroupTopology traffic.
+/// Default timeout for one control-plane request to a speaker (SOAP, OwnTone).
+pub const DEVICE_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// [`lan_http_client`] with [`DEVICE_HTTP_TIMEOUT`].
+pub fn device_http_client() -> Client {
+    lan_http_client(DEVICE_HTTP_TIMEOUT)
+}
+
 pub fn lan_http_client(timeout: Duration) -> Client {
     Client::builder()
         .timeout(timeout)

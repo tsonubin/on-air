@@ -1,6 +1,6 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use on_air_core::auth::authorize;
+use on_air_core::api::auth::authorize;
 use on_air_core::pairing::{PairingState, VerifyError, MOCK_PIN};
 use on_air_core::state::CoreState;
 use std::net::SocketAddr;
@@ -149,9 +149,9 @@ async fn pairing_pin_is_for_loopback_desktop_only() {
     assert_eq!(json["code"], "forbidden");
 }
 
-/// Audit finding #5: without `ConnectInfo` the extractor used to assume
-/// loopback. A production core must fail closed; only the mock core (used
-/// by in-process tests) may treat a missing peer address as the desktop.
+/// Without `ConnectInfo` a production core must fail closed; only the mock
+/// core (used by in-process tests) may treat a missing peer address as the
+/// desktop.
 #[tokio::test]
 async fn production_core_rejects_requests_without_token_or_peer_address() {
     let app = on_air_core::build_router(CoreState::new());
