@@ -239,6 +239,8 @@ pub struct Model {
     pub base: String,
     pub accent: Color,
     pub size: (u16, u16),
+    /// Whether the terminal granted mouse capture.
+    pub mouse: bool,
     pub quit: bool,
 }
 
@@ -273,6 +275,7 @@ impl Model {
             base: String::new(),
             accent: Color::Cyan,
             size: (0, 0),
+            mouse: true,
             quit: false,
         }
     }

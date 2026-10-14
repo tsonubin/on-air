@@ -2,17 +2,19 @@
 //! subcommands for Omarchy's bar module and menu rows. All of it is a client
 //! of the `on-air-core` service; quitting never stops streaming.
 
-use crossterm::event::{Event, EventStream};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream};
 use futures_util::StreamExt;
 use on_air_tui::client::{spawn_events, Client, DEFAULT_BASE};
 use on_air_tui::model::Model;
 use on_air_tui::service::{self, ServiceVerb};
 use on_air_tui::theme::Theme;
 use on_air_tui::update::{update, Cmd, Msg};
-use on_air_tui::view::view;
+use on_air_tui::view::{view, HitMap};
 use on_air_tui::{cli, error_copy};
 use std::path::PathBuf;
 use std::time::Duration;
+
+mod input;
 use tokio::sync::mpsc;
 
 const USAGE: &str = "usage: on-air [--base URL]                 the terminal UI
@@ -131,15 +133,17 @@ async fn run_tui(client: Client) {
     // A panic must not leave the terminal in raw mode on the alternate screen.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        ratatui::restore();
+        restore();
         default_hook(info);
     }));
     let mut terminal = ratatui::init();
+    let mouse = crossterm::execute!(std::io::stdout(), EnableMouseCapture).is_ok();
 
     let mut theme = Theme::load(&home());
     let mut model = Model::new();
     model.accent = theme.accent;
     model.base = client.base().to_string();
+    model.mouse = mouse;
     if let Ok(size) = terminal.size() {
         model.size = (size.width, size.height);
     }
@@ -150,6 +154,8 @@ async fn run_tui(client: Client) {
     let mut keys = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut frame_tick = tokio::time::interval(FRAME);
+    frame_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     let dispatch = |model: &mut Model, msg: Msg| -> bool {
         let cmds = update(model, msg);
@@ -181,13 +187,20 @@ async fn run_tui(client: Client) {
         });
     }
 
-    let _ = terminal.draw(|frame| {
-        let _ = view(&model, frame);
-    });
+    let mut hits = HitMap::default();
+    let mut draw = |model: &Model, hits: &mut HitMap| {
+        terminal.draw(|frame| *hits = view(model, frame)).is_ok()
+    };
+    // The frame interval fires at once, so this is the first draw.
+    let mut dirty = true;
     loop {
         let msg = tokio::select! {
             event = keys.next() => match event {
                 Some(Ok(Event::Key(key))) => Msg::Key(key),
+                Some(Ok(Event::Mouse(event))) => match input::mouse_msg(&hits, event) {
+                    Some(msg) => msg,
+                    None => continue,
+                },
                 Some(Ok(Event::Resize(w, h))) => Msg::Resize(w, h),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) | None => break,
@@ -200,6 +213,7 @@ async fn run_tui(client: Client) {
                 Some(reply) => reply,
                 None => break,
             },
+            _ = frame_tick.tick() => Msg::Frame,
             _ = tick.tick() => {
                 if theme.refresh() {
                     Msg::Accent(theme.accent)
@@ -208,20 +222,34 @@ async fn run_tui(client: Client) {
                 }
             }
         };
+        // Keys and clicks draw at once; everything else waits for the next
+        // frame, so a burst of level events costs one draw.
+        let now = matches!(msg, Msg::Key(_) | Msg::Mouse { .. });
+        let frame = msg == Msg::Frame;
+        let level = (model.meter.rms_db, model.meter.peak_db);
         if dispatch(&mut model, msg) {
             break;
         }
-        if terminal
-            .draw(|frame| {
-                let _ = view(&model, frame);
-            })
-            .is_err()
-        {
-            break;
+        dirty |= !frame || level != (model.meter.rms_db, model.meter.peak_db);
+        if now || (frame && dirty) {
+            dirty = false;
+            if !draw(&model, &mut hits) {
+                break;
+            }
         }
     }
 
     events.abort();
+    restore();
+}
+
+/// One frame of the level meter's animation and of redraw throttling.
+const FRAME: Duration = Duration::from_millis(50);
+
+/// Hand the terminal back: mouse capture off before raw mode and the
+/// alternate screen.
+fn restore() {
+    let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
     ratatui::restore();
 }
 

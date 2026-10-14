@@ -9,28 +9,45 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-pub(super) fn help_overlay(frame: &mut Frame, area: Rect) {
+/// The key table, then the mouse rows, so the help still fits 100×30.
+pub(super) fn help_overlay(frame: &mut Frame, area: Rect, mouse: bool) -> Rect {
+    let row = |keys: &str, help: Span<'static>| {
+        Line::from(vec![
+            Span::styled(format!(" {keys:<16} "), Style::new().bold()),
+            help,
+        ])
+    };
+    let mut lines: Vec<Line> = KEYS
+        .iter()
+        .map(|binding| row(binding.keys, Span::raw(binding.help)))
+        .collect();
+    lines.push(row(
+        "Mouse",
+        if mouse {
+            Span::raw("Click rows, buttons and tags; drag or wheel faders")
+        } else {
+            Span::styled("mouse off", Style::new().dim())
+        },
+    ));
+    if mouse {
+        lines.push(row(
+            "",
+            Span::raw("Hold Shift while dragging to select text."),
+        ));
+    }
+    lines.push(Line::from(Span::styled(
+        " any key or a click outside closes ",
+        Style::new().dim(),
+    )));
     let width = area.width.min(80);
-    let height = (KEYS.len() as u16 + 3).min(area.height);
+    let height = (lines.len() as u16 + 2).min(area.height);
     let rect = centered(area, width, height);
     frame.render_widget(Clear, rect);
-    let lines: Vec<Line> = KEYS
-        .iter()
-        .map(|binding| {
-            Line::from(vec![
-                Span::styled(format!(" {:<16} ", binding.keys), Style::new().bold()),
-                Span::raw(binding.help),
-            ])
-        })
-        .chain(std::iter::once(Line::from(Span::styled(
-            " any key closes ",
-            Style::new().dim(),
-        ))))
-        .collect();
     frame.render_widget(
         Paragraph::new(lines).block(Block::bordered().title(" Keys ")),
         rect,
     );
+    rect
 }
 
 pub(super) fn pin_overlay(
@@ -39,7 +56,7 @@ pub(super) fn pin_overlay(
     target: &crate::model::PairTarget,
     input: &str,
     error: Option<&str>,
-) {
+) -> Rect {
     let width = area.width.min(60);
     let rect = centered(area, width, 7);
     frame.render_widget(Clear, rect);
@@ -69,9 +86,15 @@ pub(super) fn pin_overlay(
             .block(Block::bordered().title(format!(" Pair {} ", target.name()))),
         rect,
     );
+    rect
 }
 
-pub(super) fn track_overlay(frame: &mut Frame, area: Rect, input: &str, error: Option<&str>) {
+pub(super) fn track_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    input: &str,
+    error: Option<&str>,
+) -> Rect {
     let rect = centered(area, area.width.min(44), 6);
     frame.render_widget(Clear, rect);
     let mut lines = vec![
@@ -93,9 +116,10 @@ pub(super) fn track_overlay(frame: &mut Frame, area: Rect, input: &str, error: O
             .block(Block::bordered().title(" Go to track ")),
         rect,
     );
+    rect
 }
 
-pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) {
+pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) -> Rect {
     let rect = centered(area, area.width.min(36), 5);
     frame.render_widget(Clear, rect);
     frame.render_widget(
@@ -106,12 +130,13 @@ pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) {
         .block(Block::bordered().title(" Eject ")),
         rect,
     );
+    rect
 }
 
 /// The core's port, as the LAN addresses are listed with it.
 const PORT: u16 = 47990;
 
-pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) {
+pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
     let status = model.snapshot.status.as_ref();
     let yes_no = |value: Option<bool>| match value {
         Some(true) => "yes",
@@ -166,4 +191,5 @@ pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) {
         Paragraph::new(lines).block(Block::bordered().title(" Status ")),
         rect,
     );
+    rect
 }

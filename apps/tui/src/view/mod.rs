@@ -15,6 +15,7 @@ mod route;
 
 pub use hit::{CdButton, HitMap, Target};
 pub use layout::truncate;
+pub use mixer::fader_value;
 
 use crate::model::{Modal, Model};
 use cd::cd_strip;
@@ -84,19 +85,23 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
 
     frame.render_widget(hint_line(), areas.hints);
 
-    match &model.modal {
-        Modal::None => {}
-        Modal::Help => help_overlay(frame, area),
+    let overlay = match &model.modal {
+        Modal::None => None,
+        Modal::Help => Some(help_overlay(frame, area, model.mouse)),
         Modal::Pin {
             target,
             input,
             error,
-        } => pin_overlay(frame, area, target, input, error.as_deref()),
+        } => Some(pin_overlay(frame, area, target, input, error.as_deref())),
         Modal::TrackPrompt { input, error } => {
-            track_overlay(frame, area, input, error.as_deref());
+            Some(track_overlay(frame, area, input, error.as_deref()))
         }
-        Modal::ConfirmEject => eject_overlay(frame, area),
-        Modal::Status => status_overlay(model, frame, area),
+        Modal::ConfirmEject => Some(eject_overlay(frame, area)),
+        Modal::Status => Some(status_overlay(model, frame, area)),
+    };
+    if let Some(rect) = overlay {
+        hits.push(area, Target::OverlayOutside);
+        hits.push(rect, Target::Overlay);
     }
     hits
 }
@@ -719,6 +724,40 @@ mod tests {
         for binding in KEYS {
             assert!(t.contains(binding.help), "{} missing:\n{t}", binding.help);
         }
+    }
+
+    #[test]
+    fn help_has_mouse_section() {
+        let mut m = model();
+        m.modal = Modal::Help;
+        let t = text(&render(&m, 100, 30));
+        assert!(t.contains("Mouse"), "{t}");
+        assert!(
+            t.contains("Hold Shift while dragging to select text."),
+            "{t}"
+        );
+        assert!(!t.contains("mouse off"), "{t}");
+        assert!(
+            t.contains(KEYS[KEYS.len() - 1].help),
+            "fits at 100×30:\n{t}"
+        );
+        m.mouse = false;
+        let t = text(&render(&m, 100, 30));
+        assert!(t.contains("mouse off"), "{t}");
+    }
+
+    #[test]
+    fn overlays_record_inside_and_outside() {
+        let mut m = model();
+        m.modal = Modal::Help;
+        let (b, hits) = render_hits(&m, 100, 30);
+        let (x, y) = cell_of(&b, KEYS[0].help);
+        assert_eq!(hits.hit(x, y).map(|(t, _)| t), Some(Target::Overlay));
+        assert_eq!(
+            hits.hit(0, 29).map(|(t, _)| t),
+            Some(Target::OverlayOutside)
+        );
+        assert_eq!(hits.hit(0, 0).map(|(t, _)| t), Some(Target::OverlayOutside));
     }
 
     #[test]

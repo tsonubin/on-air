@@ -9,13 +9,33 @@ use crate::model::{
     Activation, ActivationStep, DestRow, Meter, MixerControl, MixerRow, Modal, Model, PairTarget,
     Pane, Pending, Snapshot, WriteSlot, METER_FLOOR_DB,
 };
+use crate::view::{fader_value, CdButton, Target};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Rect;
 use ratatui::style::Color;
+
+/// The mouse gestures the UI acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseKind {
+    Down,
+    Drag,
+    ScrollUp,
+    ScrollDown,
+}
 
 /// Everything that can happen to the model.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Msg {
     Key(KeyEvent),
+    /// A left click, left drag or wheel turn over `target`, whose screen
+    /// region is `rect`.
+    Mouse {
+        target: Target,
+        rect: Rect,
+        column: u16,
+        row: u16,
+        kind: MouseKind,
+    },
     Resize(u16, u16),
     Tick,
     /// The 50 ms frame tick that animates the level meter.
@@ -147,6 +167,15 @@ fn gated(model: &mut Model, input: impl FnOnce(&mut Model) -> Vec<Cmd>) -> Vec<C
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
         Msg::Key(key) => gated(model, |model| on_key(model, key)),
+        Msg::Mouse {
+            target,
+            rect,
+            column,
+            row,
+            kind,
+        } => gated(model, |model| {
+            on_mouse(model, target, rect, (column, row), kind)
+        }),
         Msg::Resize(w, h) => {
             model.size = (w, h);
             vec![]
@@ -710,17 +739,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                 vec![]
             }
         }
-        Action::PlayPause => {
-            let playing = model.snapshot.cd.as_ref().is_some_and(|cd| cd.playing);
-            cd_action(
-                model,
-                if playing {
-                    CdAction::Pause
-                } else {
-                    CdAction::Play
-                },
-            )
-        }
+        Action::PlayPause => play_pause(model),
         Action::SeekBack => cd_seek(model, -CD_SEEK_MS),
         Action::SeekForward => cd_seek(model, CD_SEEK_MS),
         Action::GotoTrack => {
@@ -751,6 +770,144 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             unreachable!("handled above")
         }
     }
+}
+
+fn on_mouse(
+    model: &mut Model,
+    target: Target,
+    rect: Rect,
+    (column, row): (u16, u16),
+    kind: MouseKind,
+) -> Vec<Cmd> {
+    let click = kind == MouseKind::Down;
+    if model.modal != Modal::None {
+        if click && target == Target::OverlayOutside {
+            close_modal(model);
+        }
+        return vec![];
+    }
+    match target {
+        Target::MonitorTag if click => {
+            let enabled = !model.service_on();
+            return pending(model, LABEL_MONITOR, vec![Cmd::SetService(enabled)]);
+        }
+        Target::StatusTag if click => {
+            model.modal = Modal::Status;
+            return vec![];
+        }
+        _ => {}
+    }
+    if model.locked() {
+        return vec![];
+    }
+    let wheel = match kind {
+        MouseKind::ScrollUp => -1,
+        MouseKind::ScrollDown => 1,
+        MouseKind::Down | MouseKind::Drag => 0,
+    };
+    match target {
+        Target::SourceRow(index) | Target::DestRow(index) => {
+            model.pane = if matches!(target, Target::SourceRow(_)) {
+                Pane::Sources
+            } else {
+                Pane::Outputs
+            };
+            if wheel != 0 {
+                move_selection(model, wheel);
+                return vec![];
+            }
+            if !click {
+                return vec![];
+            }
+            if model.pane == Pane::Sources {
+                model.source_index = index;
+            } else if matches!(model.dest_rows().get(index), Some(DestRow::Entry(_))) {
+                model.output_index = index;
+            } else {
+                return vec![];
+            }
+            select(model)
+        }
+        Target::Fader(mixer_row) => {
+            model.pane = Pane::Mixer;
+            model.mixer_row = mixer_row;
+            if wheel != 0 {
+                return adjust(model, -wheel, true);
+            }
+            // A one-row fader is the compact mixer's line: a click only focuses it.
+            if rect.height <= 1 {
+                return vec![];
+            }
+            let offset = row.saturating_sub(rect.y);
+            match mixer_row {
+                MixerRow::Volume => {
+                    let value =
+                        fader_value(offset, rect.height, 0.0, 100.0, f32::from(VOLUME_FINE_STEP));
+                    let delta = value as i32 - model.snapshot.volume as i32;
+                    set_volume(model, delta)
+                }
+                MixerRow::Eq(band) => {
+                    let (min, max) = EQ_RANGE_DB;
+                    let value = fader_value(offset, rect.height, min, max, EQ_FINE_STEP_DB);
+                    set_eq_band(model, band, value)
+                }
+                MixerRow::InputRate | MixerRow::OutputRate => vec![],
+            }
+        }
+        Target::Rate(mixer_row) => {
+            if kind == MouseKind::Drag {
+                return vec![];
+            }
+            model.pane = Pane::Mixer;
+            model.mixer_row = mixer_row;
+            adjust(model, if click { 1 } else { -wheel }, false)
+        }
+        Target::CdButton(button) if click => match button {
+            CdButton::Prev => cd_action(model, CdAction::Prev),
+            CdButton::Next => cd_action(model, CdAction::Next),
+            CdButton::PlayPause => play_pause(model),
+            CdButton::Eject => {
+                if has_disc(model) {
+                    model.modal = Modal::ConfirmEject;
+                }
+                vec![]
+            }
+        },
+        Target::CdProgress if click => {
+            let Some(cd) = model.snapshot.cd.as_ref().filter(|cd| cd.present) else {
+                return vec![];
+            };
+            let width = u64::from(rect.width.max(1));
+            let offset = u64::from(column.saturating_sub(rect.x)).min(width);
+            let cmd = Cmd::ControlCd {
+                action: CdAction::Seek,
+                position_ms: Some(cd.duration_ms * offset / width),
+                track: None,
+            };
+            pending(model, LABEL_CD, vec![cmd])
+        }
+        _ => vec![],
+    }
+}
+
+/// What Esc does to an open overlay.
+fn close_modal(model: &mut Model) {
+    if matches!(model.modal, Modal::Pin { .. }) {
+        model.activation = None;
+    }
+    model.modal = Modal::None;
+}
+
+fn play_pause(model: &mut Model) -> Vec<Cmd> {
+    let playing = model.snapshot.cd.as_ref().is_some_and(|cd| cd.playing);
+    cd_action(
+        model,
+        if playing {
+            CdAction::Pause
+        } else {
+            CdAction::Play
+        },
+    )
 }
 
 fn pending(model: &mut Model, label: &str, cmds: Vec<Cmd>) -> Vec<Cmd> {
@@ -2363,5 +2520,342 @@ mod tests {
         failed.snapshot.active_output.as_mut().unwrap().state = Some(OutputPhase::Failed);
         level(&mut failed, 0.5, 1.0);
         assert_eq!(failed.meter.peak_db, -60.0);
+    }
+
+    fn mouse(target: Target, rect: Rect, column: u16, row: u16, kind: MouseKind) -> Msg {
+        Msg::Mouse {
+            target,
+            rect,
+            column,
+            row,
+            kind,
+        }
+    }
+
+    fn click(target: Target) -> Msg {
+        mouse(target, Rect::new(0, 0, 10, 1), 0, 0, MouseKind::Down)
+    }
+
+    fn wheel(target: Target, kind: MouseKind) -> Msg {
+        mouse(target, Rect::new(0, 0, 10, 1), 0, 0, kind)
+    }
+
+    #[test]
+    fn click_source_row_selects_and_activates() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.inputs = vec!["Mock Monitor".into(), "Built-in mic".into()];
+        m.pane = Pane::Mixer;
+        assert_eq!(
+            update(&mut m, click(Target::SourceRow(1))),
+            vec![Cmd::ActivateInput("Built-in mic".into())]
+        );
+        assert_eq!(m.pane, Pane::Sources);
+        assert_eq!(m.source_index, 1);
+        assert_eq!(m.pending.as_ref().unwrap().label, LABEL_SOURCE);
+    }
+
+    #[test]
+    fn click_dest_row_runs_enter_flow() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.bluetooth = Some(vec![
+            bt("bt-speaker", true, true),
+            bt("bt-unpaired", false, false),
+        ]);
+        let index = |m: &Model, id: &str| {
+            m.dest_rows()
+                .iter()
+                .position(|row| matches!(row, DestRow::Entry(e) if e.id == id))
+                .unwrap()
+        };
+        let sonos = index(&m, "uuid:mock-sonos");
+        assert_eq!(
+            update(&mut m, click(Target::DestRow(sonos))),
+            vec![Cmd::ActivateOutput {
+                transport: "sonos".into(),
+                device_id: "uuid:mock-sonos".into()
+            }]
+        );
+        assert_eq!(m.pane, Pane::Outputs);
+        assert_eq!(m.output_index, sonos);
+        assert_eq!(step(&m), Some(ActivationStep::Activating));
+
+        let unpaired = index(&m, "bt-unpaired");
+        assert_eq!(update(&mut m, click(Target::DestRow(unpaired))), vec![]);
+        assert_eq!(
+            m.notice.as_deref(),
+            Some("Already connecting Mock Sonos…"),
+            "the busy guard applies to clicks too"
+        );
+
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.bluetooth = Some(vec![bt("bt-unpaired", false, false)]);
+        let unpaired = index(&m, "bt-unpaired");
+        assert_eq!(update(&mut m, click(Target::DestRow(unpaired))), vec![]);
+        assert!(matches!(m.modal, Modal::Pin { .. }));
+    }
+
+    #[test]
+    fn drag_on_eq_fader_sets_value_through_write() {
+        let mut m = model_with_mock_snapshot();
+        let rect = Rect::new(30, 8, 3, 5);
+        let fader = Target::Fader(MixerRow::Eq(2));
+        assert_eq!(
+            update(&mut m, mouse(fader, rect, 31, rect.y, MouseKind::Down)),
+            vec![Cmd::SetEq([0.0, 0.0, 12.0, 0.0, 0.0])]
+        );
+        assert_eq!(m.snapshot.eq[2], 12.0);
+        assert_eq!((m.pane, m.mixer_row), (Pane::Mixer, MixerRow::Eq(2)));
+        assert_eq!(
+            update(&mut m, mouse(fader, rect, 31, rect.y + 4, MouseKind::Drag)),
+            vec![]
+        );
+        assert_eq!(m.snapshot.eq[2], -12.0);
+        assert_eq!(
+            m.writes[MixerControl::Eq as usize],
+            WriteSlot::InFlight {
+                queued: Some(Cmd::SetEq([0.0, 0.0, -12.0, 0.0, 0.0]))
+            }
+        );
+
+        let volume = Target::Fader(MixerRow::Volume);
+        assert_eq!(
+            update(&mut m, mouse(volume, rect, 31, rect.y + 2, MouseKind::Down)),
+            vec![],
+            "the middle cell is already 50: nothing to send"
+        );
+        assert_eq!(
+            update(&mut m, mouse(volume, rect, 31, rect.y + 1, MouseKind::Down)),
+            vec![Cmd::SetVolume(75)]
+        );
+    }
+
+    #[test]
+    fn a_one_row_fader_click_only_focuses_it() {
+        let mut m = model_with_mock_snapshot();
+        let fader = Target::Fader(MixerRow::Eq(1));
+        assert_eq!(update(&mut m, click(fader)), vec![]);
+        assert_eq!((m.pane, m.mixer_row), (Pane::Mixer, MixerRow::Eq(1)));
+        assert_eq!(m.snapshot.eq, [0.0; 5]);
+    }
+
+    #[test]
+    fn wheel_on_fader_fine_steps() {
+        let mut m = model_with_mock_snapshot();
+        assert_eq!(
+            update(
+                &mut m,
+                wheel(Target::Fader(MixerRow::Volume), MouseKind::ScrollUp)
+            ),
+            vec![Cmd::SetVolume(51)]
+        );
+        settle(&mut m);
+        assert_eq!(
+            update(
+                &mut m,
+                wheel(Target::Fader(MixerRow::Eq(0)), MouseKind::ScrollDown)
+            ),
+            vec![Cmd::SetEq([-0.5, 0.0, 0.0, 0.0, 0.0])]
+        );
+    }
+
+    #[test]
+    fn wheel_on_list_moves_cursor() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.inputs = vec!["Mock Monitor".into(), "Built-in mic".into()];
+        m.pane = Pane::Mixer;
+        assert_eq!(
+            update(&mut m, wheel(Target::SourceRow(0), MouseKind::ScrollDown)),
+            vec![]
+        );
+        assert_eq!((m.pane, m.source_index), (Pane::Sources, 1));
+        update(&mut m, wheel(Target::SourceRow(1), MouseKind::ScrollUp));
+        assert_eq!(m.source_index, 0);
+
+        let before = m.output_index;
+        update(
+            &mut m,
+            wheel(Target::DestRow(before), MouseKind::ScrollDown),
+        );
+        assert_eq!(m.pane, Pane::Outputs);
+        assert!(m.output_index > before, "{} > {before}", m.output_index);
+    }
+
+    #[test]
+    fn click_rate_cycles() {
+        let mut m = model_with_mock_snapshot();
+        assert_eq!(
+            update(&mut m, click(Target::Rate(MixerRow::InputRate))),
+            vec![Cmd::SetSampleRate {
+                input_hz: Some(44100),
+                output_hz: None
+            }]
+        );
+        assert_eq!(
+            m.writes[MixerControl::InputRate as usize],
+            WriteSlot::InFlight { queued: None }
+        );
+        assert_eq!(
+            update(
+                &mut m,
+                wheel(Target::Rate(MixerRow::OutputRate), MouseKind::ScrollUp)
+            ),
+            vec![Cmd::SetSampleRate {
+                input_hz: None,
+                output_hz: Some(48000)
+            }]
+        );
+        settle(&mut m);
+        assert_eq!(
+            update(
+                &mut m,
+                wheel(Target::Rate(MixerRow::OutputRate), MouseKind::ScrollDown)
+            ),
+            vec![Cmd::SetSampleRate {
+                input_hz: None,
+                output_hz: Some(44100)
+            }]
+        );
+    }
+
+    #[test]
+    fn click_cd_controls() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.cd = Some(disc(false));
+        assert_eq!(
+            update(&mut m, click(Target::CdButton(CdButton::PlayPause))),
+            control(CdAction::Play, None, None)
+        );
+        assert_eq!(
+            update(&mut m, click(Target::CdButton(CdButton::Next))),
+            control(CdAction::Next, None, None)
+        );
+        assert_eq!(
+            update(&mut m, click(Target::CdButton(CdButton::Prev))),
+            control(CdAction::Prev, None, None)
+        );
+        assert_eq!(
+            update(&mut m, click(Target::CdButton(CdButton::Eject))),
+            vec![]
+        );
+        assert_eq!(m.modal, Modal::ConfirmEject);
+        m.modal = Modal::None;
+
+        let rect = Rect::new(20, 1, 40, 1);
+        let cmds = update(
+            &mut m,
+            mouse(
+                Target::CdProgress,
+                rect,
+                rect.x + rect.width / 2,
+                1,
+                MouseKind::Down,
+            ),
+        );
+        let duration = 270_000;
+        let column = duration / u64::from(rect.width);
+        match cmds.as_slice() {
+            [Cmd::ControlCd {
+                action: CdAction::Seek,
+                position_ms: Some(position),
+                track: None,
+            }] => assert!(
+                position.abs_diff(duration / 2) <= column,
+                "{position} is not near {}",
+                duration / 2
+            ),
+            other => panic!("{other:?}"),
+        }
+
+        m.snapshot.cd = None;
+        assert_eq!(update(&mut m, click(Target::CdProgress)), vec![]);
+        assert_eq!(
+            update(&mut m, click(Target::CdButton(CdButton::Eject))),
+            vec![]
+        );
+        assert_eq!(m.modal, Modal::None);
+    }
+
+    #[test]
+    fn click_header_tags() {
+        let mut m = model_with_mock_snapshot();
+        assert_eq!(
+            update(&mut m, click(Target::MonitorTag)),
+            vec![Cmd::SetService(false)]
+        );
+        assert_eq!(m.pending.as_ref().unwrap().label, LABEL_MONITOR);
+        assert_eq!(update(&mut m, click(Target::StatusTag)), vec![]);
+        assert_eq!(m.modal, Modal::Status);
+    }
+
+    #[test]
+    fn click_outside_overlay_closes_it() {
+        let mut m = model_with_mock_snapshot();
+        m.modal = Modal::Help;
+        assert_eq!(update(&mut m, click(Target::Overlay)), vec![]);
+        assert_eq!(m.modal, Modal::Help, "a click inside keeps it open");
+        assert_eq!(
+            update(&mut m, wheel(Target::OverlayOutside, MouseKind::ScrollDown)),
+            vec![]
+        );
+        assert_eq!(m.modal, Modal::Help, "the wheel does not close it");
+        assert_eq!(update(&mut m, click(Target::OverlayOutside)), vec![]);
+        assert_eq!(m.modal, Modal::None);
+
+        let mut m = on_dest("bt-unpaired");
+        update(&mut m, code(KeyCode::Enter));
+        assert!(matches!(m.modal, Modal::Pin { .. }));
+        update(&mut m, click(Target::OverlayOutside));
+        assert_eq!(m.modal, Modal::None);
+        assert_eq!(m.activation, None, "same as Esc");
+    }
+
+    #[test]
+    fn mouse_respects_lock_and_core_down() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.status.as_mut().unwrap().service_enabled = false;
+        m.snapshot.cd = Some(disc(false));
+        assert!(m.locked());
+        for target in [
+            Target::SourceRow(0),
+            Target::DestRow(1),
+            Target::Fader(MixerRow::Volume),
+            Target::Rate(MixerRow::InputRate),
+            Target::CdButton(CdButton::PlayPause),
+            Target::CdProgress,
+        ] {
+            assert_eq!(update(&mut m, click(target)), vec![], "{target:?}");
+            assert_eq!(
+                update(&mut m, wheel(target, MouseKind::ScrollUp)),
+                vec![],
+                "{target:?}"
+            );
+        }
+        assert_eq!(m.pane, Pane::Sources);
+        assert_eq!(m.snapshot.volume, 50);
+        assert_eq!(update(&mut m, click(Target::StatusTag)), vec![]);
+        assert_eq!(m.modal, Modal::Status);
+        update(&mut m, click(Target::OverlayOutside));
+        assert_eq!(m.modal, Modal::None);
+        assert_eq!(
+            update(&mut m, click(Target::MonitorTag)),
+            vec![Cmd::SetService(true)]
+        );
+
+        let mut m = model_with_mock_snapshot();
+        m.core_down = true;
+        m.pane = Pane::Mixer;
+        assert_eq!(update(&mut m, click(Target::SourceRow(0))), vec![]);
+        assert_eq!(m.notice.as_deref(), Some(CORE_DOWN_COPY));
+        assert_eq!(m.pane, Pane::Mixer, "the click is undone");
+        assert_eq!(
+            update(
+                &mut m,
+                wheel(Target::Fader(MixerRow::Volume), MouseKind::ScrollUp)
+            ),
+            vec![]
+        );
+        assert_eq!(m.snapshot.volume, 50);
+        assert_eq!(update(&mut m, click(Target::StatusTag)), vec![]);
+        assert_eq!(m.modal, Modal::Status);
     }
 }

@@ -50,7 +50,6 @@ pub(super) fn eq_band(gain_db: f32) -> String {
 
 /// The value under row `offset` of a vertical fader `extent` cells tall:
 /// the top is `max`, the bottom `min`, rounded to the nearest `step`.
-#[cfg_attr(not(test), allow(dead_code))] // the mouse handler will use it
 pub fn fader_value(offset: u16, extent: u16, min: f32, max: f32, step: f32) -> f32 {
     if extent <= 1 {
         return max;
