@@ -30,7 +30,7 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
     let captured = Captured::default();
     let app = Router::new()
         .route("/api/outputs", axum::routing::get(capture))
-        .route("/api/outputs/:id", put(capture))
+        .route("/api/outputs/{id}", put(capture))
         .route("/api/player/play", put(capture))
         .route("/api/player/stop", put(capture))
         .route("/api/player/volume", put(capture))

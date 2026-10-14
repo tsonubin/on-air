@@ -48,7 +48,7 @@ pub fn build_router(state: CoreState) -> Router {
     ];
     let mut router = Router::new()
         .route("/api/status", get(status_handler))
-        .route("/stream/:nonce/audio.wav", get(api::stream::stream_audio))
+        .route("/stream/{nonce}/audio.wav", get(api::stream::stream_audio))
         .route("/api/cd", get(api::cd::get_cd))
         .route("/api/cd/control", post(api::cd::control_cd))
         .route("/api/inputs", get(api::inputs::list_inputs))

@@ -80,7 +80,7 @@ pub fn browse_blocking<K, T>(
     service_type: &str,
     duration: Duration,
     max: usize,
-    parse: impl Fn(&mdns_sd::ServiceInfo) -> Option<(K, T)>,
+    parse: impl Fn(&mdns_sd::ResolvedService) -> Option<(K, T)>,
 ) -> Vec<T>
 where
     K: Eq + Hash,
@@ -117,7 +117,7 @@ pub async fn browse<K, T>(
     service_type: &'static str,
     duration: Duration,
     max: usize,
-    parse: impl Fn(&mdns_sd::ServiceInfo) -> Option<(K, T)> + Send + 'static,
+    parse: impl Fn(&mdns_sd::ResolvedService) -> Option<(K, T)> + Send + 'static,
 ) -> Vec<T>
 where
     K: Eq + Hash + Send + 'static,

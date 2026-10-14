@@ -23,13 +23,13 @@ pub async fn get_pin(
 /// request extractors are never stalled behind an fsync.
 pub async fn verify_pin(
     State(state): State<CoreState>,
-    peer: Option<ConnectInfo<SocketAddr>>,
+    peer: Result<ConnectInfo<SocketAddr>, axum::extract::rejection::ExtensionRejection>,
     JsonBody(req): JsonBody<VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, ApiError> {
     if !state.service_enabled.load(Ordering::Acquire) {
         return Err(ApiError::service_paused());
     }
-    let peer_ip = peer.map(|ConnectInfo(addr)| addr.ip());
+    let peer_ip = peer.ok().map(|ConnectInfo(addr)| addr.ip());
     let _serialised = state.pairing_verify_lock.lock().await;
     let prepared = state.pairing.lock().begin_verify(&req.pin, peer_ip)?;
     if let Some(path) = prepared.storage_path.clone() {

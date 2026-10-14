@@ -391,15 +391,15 @@ pub fn device_from_mdns_fields(uuid: &str, location: &str, ip: IpAddr) -> SonosD
     SonosDevice::discovered(usn, location, ip, ip.to_string())
 }
 
-fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<SonosDevice> {
+fn device_from_mdns_info(info: &mdns_sd::ResolvedService) -> Option<SonosDevice> {
     let location = info.get_property_val_str("location")?.to_string();
     let location_ip = ip_from_http_location(&location)?;
     let uuid = info.get_property_val_str("uuid").unwrap_or("");
     let ip = info
         .get_addresses()
         .iter()
-        .copied()
         .find(|ip| ip.is_ipv4())
+        .map(|ip| ip.to_ip_addr())
         .unwrap_or(location_ip);
     Some(device_from_mdns_fields(uuid, &location, ip))
 }

@@ -82,7 +82,6 @@ fn peer_is_loopback(parts: &Parts, allow_missing: bool) -> bool {
 /// service back on; everything else uses [`Paired`].
 pub struct Authorized;
 
-#[async_trait::async_trait]
 impl FromRequestParts<CoreState> for Authorized {
     type Rejection = ApiError;
 
@@ -94,7 +93,6 @@ impl FromRequestParts<CoreState> for Authorized {
     }
 }
 
-#[async_trait::async_trait]
 impl FromRequestParts<CoreState> for Paired {
     type Rejection = ApiError;
 
@@ -143,7 +141,6 @@ fn authorize_parts(parts: &Parts, state: &CoreState) -> Result<(), ApiError> {
 /// from another LAN host, even if that host already has a control token.
 pub struct LocalClient;
 
-#[async_trait::async_trait]
 impl FromRequestParts<CoreState> for LocalClient {
     type Rejection = ApiError;
 

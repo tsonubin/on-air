@@ -7,6 +7,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use subtle::ConstantTimeEq;
 
+/// Lowercase hex SHA-256, the form tokens are stored in on disk.
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
 pub const MOCK_PIN: &str = "123456";
 const MAX_FAILED_ATTEMPTS: u8 = 5;
 const LOCKOUT_DURATION: Duration = Duration::from_secs(30);
@@ -215,7 +223,7 @@ impl PairingState {
         if tokens.len() == MAX_PAIRED_TOKENS {
             tokens.pop_front();
         }
-        tokens.push_back(format!("{:x}", Sha256::digest(token.as_bytes())));
+        tokens.push_back(sha256_hex(token.as_bytes()));
         Ok(PreparedPairing {
             token,
             tokens,
@@ -249,7 +257,7 @@ impl PairingState {
     }
 
     pub fn token_valid(&self, token: &str) -> bool {
-        let digest = format!("{:x}", Sha256::digest(token.as_bytes()));
+        let digest = sha256_hex(token.as_bytes());
         self.tokens
             .iter()
             .any(|candidate| bool::from(candidate.as_bytes().ct_eq(digest.as_bytes())))

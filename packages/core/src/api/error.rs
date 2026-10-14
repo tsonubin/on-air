@@ -205,7 +205,6 @@ impl From<JsonRejection> for ApiError {
 /// axum's plain-text 400/415/422 replies.
 pub struct JsonBody<T>(pub T);
 
-#[async_trait::async_trait]
 impl<T, S> FromRequest<S> for JsonBody<T>
 where
     axum::Json<T>: FromRequest<S, Rejection = JsonRejection>,

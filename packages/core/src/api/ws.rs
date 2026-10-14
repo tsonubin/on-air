@@ -61,5 +61,8 @@ async fn send_event(socket: &mut WebSocket, event: &WsEvent) -> Result<(), ()> {
     let Ok(text) = serde_json::to_string(event) else {
         return Ok(());
     };
-    socket.send(Message::Text(text)).await.map_err(|_| ())
+    socket
+        .send(Message::Text(text.into()))
+        .await
+        .map_err(|_| ())
 }

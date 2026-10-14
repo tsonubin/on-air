@@ -207,17 +207,17 @@ fn model_label(model: &str) -> String {
     }
 }
 
-fn txt<'a>(info: &'a mdns_sd::ServiceInfo, key: &str) -> &'a str {
+fn txt<'a>(info: &'a mdns_sd::ResolvedService, key: &str) -> &'a str {
     info.get_property_val_str(key).unwrap_or("")
 }
 
-fn device_from_mdns_info(info: &mdns_sd::ServiceInfo) -> Option<AirPlayDevice> {
+fn device_from_mdns_info(info: &mdns_sd::ResolvedService) -> Option<AirPlayDevice> {
     let ip = info
         .get_addresses()
         .iter()
-        .copied()
         .find(|ip| ip.is_ipv4())
-        .or_else(|| info.get_addresses().iter().copied().next())?;
+        .or_else(|| info.get_addresses().iter().next())?
+        .to_ip_addr();
     let instance = info.get_fullname();
     device_from_txt(
         instance,

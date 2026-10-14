@@ -20,6 +20,10 @@ Notable changes to on-air. The format follows
   user unit shipped by the Debian and RPM core packages too; the
   unpublished `on-air-desktop` and `on-air-core` AUR recipes and the
   desktop RPM re-wrap are gone.
+- Dependencies: axum 0.8, tower-http 0.7, reqwest 0.13, mdns-sd 0.21,
+  sha2 0.11, getrandom 0.4, if-addrs 0.15; Vite 8, Vitest 5, React 19.3
+  on the desktop; Jest 30 on the phone; TypeScript 7, Biome 2.5.15,
+  Turbo 2.11, Playwright 1.64. Expo SDK 57 pins stay as Expo expects them.
 
 ## [0.2.0] - unreleased
 

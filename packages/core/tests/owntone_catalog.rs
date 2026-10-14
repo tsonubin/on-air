@@ -104,7 +104,7 @@ async fn player_action(
 async fn spawn_owntone(state: OwnToneCapture) -> std::net::SocketAddr {
     let app = Router::new()
         .route("/api/outputs", get(catalog))
-        .route("/api/outputs/:id", put(select_output))
+        .route("/api/outputs/{id}", put(select_output))
         .route("/api/queue/items/add", post(add_queue_item))
         .route("/api/queue/clear", put(clear_queue))
         .route("/api/player/play", put(player_action))

@@ -21,8 +21,8 @@
     "typecheck:web": "pnpm --filter @on-air/api-types typecheck && pnpm --filter @on-air/control-client typecheck && pnpm --filter desktop typecheck && pnpm --filter mobile typecheck && pnpm --filter @on-air/e2e typecheck"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.11",
-    "turbo": "^2.3.0"
+    "@biomejs/biome": "2.5.15",
+    "turbo": "^2.11.8"
   },
   "packageManager": "pnpm@9.15.0"
 }

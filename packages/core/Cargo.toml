@@ -15,27 +15,27 @@ path = "src/bin/on-air-core.rs"
 
 [dependencies]
 on-air-api = { path = "../api" }
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
+sha2 = "0.11"
 rubato = "5.0.0"
 audioadapter-buffers = "5.2.0"
 async-trait = "0.1.92"
 bytes = "1"
-getrandom = "0.3"
+getrandom = "0.4"
 ringbuf = "0.5.1"
 tokio-stream = { version = "0.1.19", features = ["sync", "time"] }
 cpal = "0.18.2"
-reqwest = { version = "0.12", features = ["json", "stream"] }
-mdns-sd = "0.13"
-tower-http = { version = "0.6", features = ["cors"] }
+reqwest = { version = "0.13", features = ["json", "stream"] }
+mdns-sd = "0.21"
+tower-http = { version = "0.7", features = ["cors"] }
 thiserror = "2"
 parking_lot = "0.12"
 subtle = "2"
 gethostname = "1"
-if-addrs = "0.13"
+if-addrs = "0.15"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
