@@ -83,17 +83,19 @@ grep -q '^pkgname=on-air$' packaging/aur/on-air/PKGBUILD || fail "pkgname"
 grep -q 'xdg-terminal-exec' packaging/aur/on-air/PKGBUILD || fail "PKGBUILD depends on xdg-terminal-exec"
 grep -q '^pkgbase = on-air$' packaging/aur/on-air/.SRCINFO || fail ".SRCINFO pkgbase"
 echo "ok $dir/install.sh packaging/aur/on-air"
-# install.sh must build this checkout, not the last release tag.
+# install.sh must build this checkout in place, not the last release tag.
 stage=$(mktemp -d)
 trap '[ -n "$stage" ] && rm -rf -- "$stage"' EXIT
 sh "$dir/install.sh" --prepare-only "$stage" >/dev/null || fail "install.sh --prepare-only failed"
 [ -f "$stage/PKGBUILD" ] || fail "install.sh staged no PKGBUILD"
-grep -q '^source=("on-air-${pkgver}.tar.gz")$' "$stage/PKGBUILD" || fail "staged PKGBUILD does not use the local tarball"
+grep -q '^source=()$' "$stage/PKGBUILD" || fail "staged PKGBUILD still downloads a source"
+grep -q '^export CARGO_TARGET_DIR=target/omarchy$' "$stage/PKGBUILD" || fail "staged PKGBUILD does not use target/omarchy"
+grep -q 'target/omarchy/release/on-air-core' "$stage/PKGBUILD" || fail "staged package() does not read target/omarchy"
+! grep -q 'CARGO_TARGET_DIR=target$' "$stage/PKGBUILD" || fail "staged build() still overrides CARGO_TARGET_DIR"
 bash -n "$stage/PKGBUILD" || fail "staged PKGBUILD syntax"
-archive=$(ls "$stage"/on-air-*.tar.gz)
-for f in apps/tui/Cargo.toml packaging/omarchy/on-air.desktop packaging/omarchy/on-air-core.service Cargo.lock; do
-  tar -tzf "$archive" | grep -q "^on-air-[^/]*/$f$" || fail "staged source lacks $f"
-done
+linked=$(ls -d "$stage"/src/on-air-*)
+[ -L "$linked" ] && [ "$(cd "$linked" && pwd -P)" = "$(pwd -P)" ] || fail "staged source is not a link to this checkout"
+sh "$dir/install.sh" --bogus >/dev/null 2>&1 && fail "install.sh accepted an unknown option"
 echo "ok $dir/install.sh builds the checkout"
 
 # Release recipes: one MIT license, one version, and the prebuilt package

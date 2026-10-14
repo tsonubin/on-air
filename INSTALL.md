@@ -42,7 +42,9 @@ packaging/omarchy/install.sh      # makepkg -si, enable the service, print the s
 on-air                            # the terminal UI; `on-air --help` for the subcommands
 ```
 
-It builds the checked-out commit; commit local changes first.
+It builds your working tree, uncommitted edits included. Rebuilds are
+incremental (only what changed recompiles, in `target/omarchy/`); pass
+`--clean` to rebuild everything.
 
 > **TODO:** the AUR packages (`yay -S on-air-bin`, `yay -S on-air`) are not
 > published yet. Until they are, use the script above.

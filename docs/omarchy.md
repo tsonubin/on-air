@@ -24,8 +24,10 @@ on-air status
 
 That builds the `on-air` package from your checkout, installs it with
 `makepkg -si`, enables the service, and prints the snippets below with the
-path each belongs in. It edits nothing under `~/.config`. Commit local
-changes first; uncommitted edits are not built.
+path each belongs in. It edits nothing under `~/.config`. It builds the
+working tree, uncommitted edits included, and keeps compiled output in
+`target/omarchy/`, so later runs only recompile what changed. Run
+`packaging/omarchy/install.sh --clean` to rebuild everything.
 
 > **TODO:** AUR packages (`yay -S on-air-bin` prebuilt, `yay -S on-air` from
 > source) are on hold and not published yet.
