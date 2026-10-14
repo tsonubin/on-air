@@ -148,7 +148,7 @@ fn header_line(model: &Model) -> Paragraph<'_> {
     }
     if !model.service_on() {
         spans.push(Span::styled(
-            " service off — press s ",
+            " monitor off — press m ",
             Style::new().fg(Color::Yellow).bold(),
         ));
     } else {
@@ -188,7 +188,7 @@ fn header_line(model: &Model) -> Paragraph<'_> {
         {
             spans.push(Span::styled(format!(" {address} "), Style::new().dim()));
         }
-        spans.push(Span::raw(" service on "));
+        spans.push(Span::raw(" monitor on "));
     }
     if let Some(autostart) = model.autostart {
         spans.push(Span::styled(
@@ -615,21 +615,21 @@ mod tests {
     }
 
     #[test]
-    fn the_header_shows_live_output_pin_and_service() {
+    fn the_header_shows_live_output_pin_and_monitor() {
         let t = text(&render(&model(), 100, 30));
         assert!(t.contains("● live"), "{t}");
         assert!(t.contains("Mock Sonos"), "{t}");
         assert!(t.contains("PIN 123456"), "{t}");
         assert!(t.contains("10.0.0.12"), "{t}");
-        assert!(t.contains("service on"), "{t}");
+        assert!(t.contains("monitor on"), "{t}");
     }
 
     #[test]
-    fn the_header_says_service_off() {
+    fn the_header_says_monitor_off() {
         let mut m = model();
         m.snapshot.status.as_mut().unwrap().service_enabled = false;
         let t = text(&render(&m, 100, 30));
-        assert!(t.contains("service off — press s"), "{t}");
+        assert!(t.contains("monitor off — press m"), "{t}");
     }
 
     #[test]

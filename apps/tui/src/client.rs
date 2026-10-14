@@ -247,7 +247,7 @@ impl Client {
                 done(update::LABEL_SETTINGS, self.open_bluetooth_settings().await)
             }
             Cmd::SetService(enabled) => done(
-                update::LABEL_SERVICE,
+                update::LABEL_MONITOR,
                 self.set_service(enabled).await.map(|_| ()),
             ),
             Cmd::QueryAutostart => vec![Msg::Autostart(crate::autostart::is_enabled().await)],

@@ -1,5 +1,5 @@
 //! The subcommands: `on-air bar` for the bar's command module, `on-air
-//! status` for humans and scripts, `on-air service` for menu rows. They
+//! status` for humans and scripts, `on-air monitor` for menu rows. They
 //! share the client with the TUI so there is no shell script to keep in
 //! step with the API.
 
@@ -34,7 +34,7 @@ pub fn bar_line(
     if !status.service_enabled {
         return BarLine {
             text: format!("{GLYPH_OFF} off"),
-            tooltip: "on-air service is off".to_string(),
+            tooltip: "on-air monitor is off".to_string(),
             class: "off",
         };
     }
@@ -103,7 +103,7 @@ pub async fn status(client: &Client, json: bool) -> Result<String, ClientError> 
     let mut lines = vec![
         format!("core: {} ({})", client.base(), status.version),
         format!(
-            "service: {}",
+            "monitor: {}",
             if status.service_enabled { "on" } else { "off" }
         ),
         format!(
@@ -169,7 +169,7 @@ pub async fn status(client: &Client, json: bool) -> Result<String, ClientError> 
 }
 
 /// `on | off | toggle`; prints the resulting state.
-pub async fn service(client: &Client, arg: &str) -> Result<String, ClientError> {
+pub async fn monitor(client: &Client, arg: &str) -> Result<String, ClientError> {
     let enabled = match arg {
         "on" => true,
         "off" => false,
@@ -183,7 +183,7 @@ pub async fn service(client: &Client, arg: &str) -> Result<String, ClientError> 
         }
     };
     let enabled = client.set_service(enabled).await?;
-    Ok(format!("service {}", if enabled { "on" } else { "off" }))
+    Ok(format!("monitor {}", if enabled { "on" } else { "off" }))
 }
 
 #[cfg(test)]
@@ -221,10 +221,11 @@ mod tests {
     }
 
     #[test]
-    fn a_paused_service_is_off() {
+    fn a_paused_monitor_is_off() {
         let line = bar_line(Some(&status(false)), None, None);
         assert_eq!(line.text, "󰝛 off");
         assert_eq!(line.class, "off");
+        assert_eq!(line.tooltip, "on-air monitor is off");
     }
 
     #[test]

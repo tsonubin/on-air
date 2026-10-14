@@ -69,7 +69,7 @@ async fn service_off_is_reported_and_blocks_audio() {
     );
     assert_eq!(
         error_copy::copy(&err),
-        "The audio service is paused. Turn it on to continue."
+        "The monitor is off. Turn it on with m or `on-air monitor on`."
     );
     assert!(c.set_service(true).await.unwrap());
 }
@@ -187,19 +187,19 @@ async fn run_cmd_round_trips_an_activation() {
 }
 
 #[tokio::test]
-async fn bar_and_service_subcommands_against_the_mock_core() {
+async fn bar_and_monitor_subcommands_against_the_mock_core() {
     let c = mock_core().await;
     let line: serde_json::Value = serde_json::from_str(&on_air_tui::cli::bar(&c).await).unwrap();
     assert_eq!(line["class"], "idle");
     assert_eq!(
-        on_air_tui::cli::service(&c, "toggle").await.unwrap(),
-        "service off"
+        on_air_tui::cli::monitor(&c, "toggle").await.unwrap(),
+        "monitor off"
     );
     let line: serde_json::Value = serde_json::from_str(&on_air_tui::cli::bar(&c).await).unwrap();
     assert_eq!(line["class"], "off");
     assert_eq!(
-        on_air_tui::cli::service(&c, "on").await.unwrap(),
-        "service on"
+        on_air_tui::cli::monitor(&c, "on").await.unwrap(),
+        "monitor on"
     );
     c.activate_output("sonos", "uuid:mock-sonos").await.unwrap();
     let line: serde_json::Value = serde_json::from_str(&on_air_tui::cli::bar(&c).await).unwrap();
@@ -212,8 +212,8 @@ async fn bar_and_service_subcommands_against_the_mock_core() {
     let status = on_air_tui::cli::status(&c, true).await.unwrap();
     assert!(status.contains("\"service_enabled\""), "{status}");
     let human = on_air_tui::cli::status(&c, false).await.unwrap();
-    assert!(human.contains("service: on"), "{human}");
-    assert!(on_air_tui::cli::service(&c, "maybe").await.is_err());
+    assert!(human.contains("monitor: on"), "{human}");
+    assert!(on_air_tui::cli::monitor(&c, "maybe").await.is_err());
 }
 
 #[tokio::test]

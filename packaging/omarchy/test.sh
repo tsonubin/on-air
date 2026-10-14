@@ -59,7 +59,8 @@ fi
 grep -q '"exec": *"on-air bar"' "$snippets/shell-bar.json" || fail "shell-bar exec"
 grep -q '"exec": *"on-air bar"' "$snippets/waybar.jsonc" || fail "waybar exec"
 grep -q 'omarchy-launch-or-focus-tui on-air' "$snippets/omarchy-menu.jsonc" || fail "menu open row"
-grep -q 'on-air service toggle' "$snippets/omarchy-menu.jsonc" || fail "menu service row"
+grep -q 'on-air monitor toggle' "$snippets/omarchy-menu.jsonc" || fail "menu monitor row"
+grep -q 'on-air service restart' "$snippets/omarchy-menu.jsonc" || fail "menu restart row"
 echo "ok $snippets/*.json*"
 
 if have luac; then

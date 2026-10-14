@@ -63,7 +63,7 @@ pub const LABEL_OUTPUT: &str = "Switching output";
 pub const LABEL_STOP: &str = "Stopping";
 pub const LABEL_PAIR: &str = "Pairing";
 pub const LABEL_CONNECT: &str = "Connecting";
-pub const LABEL_SERVICE: &str = "Changing service";
+pub const LABEL_MONITOR: &str = "Changing monitor";
 pub const LABEL_REFRESH: &str = "Refreshing";
 pub const LABEL_AUTOSTART: &str = "Changing autostart";
 pub const LABEL_SETTINGS: &str = "Opening Bluetooth settings";
@@ -138,7 +138,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
 }
 
 /// A refused sleep lock is worth its own line: the laptop may suspend
-/// mid-stream. Nothing to say while the service is off or the core is old.
+/// mid-stream. Nothing to say while the monitor is off or the core is old.
 fn sleep_notice(snapshot: &Snapshot) -> Option<String> {
     let status = snapshot.status.as_ref()?;
     (status.service_enabled && status.sleep_inhibited == Some(false))
@@ -311,10 +311,10 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             model.error = None;
             return vec![];
         }
-        Action::Service => {
+        Action::Monitor => {
             let enabled = !model.service_on();
             model.pending = Some(Pending {
-                label: LABEL_SERVICE.into(),
+                label: LABEL_MONITOR.into(),
             });
             return vec![Cmd::SetService(enabled)];
         }
@@ -380,7 +380,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::PrevTrack => cd_action(model, CdAction::Prev),
         Action::Bluetooth => pending(model, LABEL_SETTINGS, vec![Cmd::OpenBluetoothSettings]),
         Action::Refresh => pending(model, LABEL_REFRESH, vec![Cmd::Refresh]),
-        Action::Quit | Action::Help | Action::Back | Action::Service | Action::Autostart => {
+        Action::Quit | Action::Help | Action::Back | Action::Monitor | Action::Autostart => {
             unreachable!("handled above")
         }
     }
@@ -1041,9 +1041,9 @@ mod tests {
     }
 
     #[test]
-    fn s_toggles_the_service_and_locks_the_panes() {
+    fn m_toggles_the_monitor_and_locks_the_panes() {
         let mut m = model_with_mock_snapshot();
-        assert_eq!(update(&mut m, key('s')), vec![Cmd::SetService(false)]);
+        assert_eq!(update(&mut m, key('m')), vec![Cmd::SetService(false)]);
         update(
             &mut m,
             Msg::Ws(Incoming::Event(WsEvent::ServiceStateChanged {
@@ -1053,7 +1053,7 @@ mod tests {
         assert!(m.locked());
         assert_eq!(update(&mut m, key('j')), vec![]);
         assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
-        assert_eq!(update(&mut m, key('s')), vec![Cmd::SetService(true)]);
+        assert_eq!(update(&mut m, key('m')), vec![Cmd::SetService(true)]);
     }
 
     #[test]
@@ -1163,7 +1163,7 @@ mod tests {
         update(&mut m, Msg::Snapshot(Ok(Box::new(snap))));
         assert_eq!(
             m.notice, None,
-            "nothing to inhibit while the service is off"
+            "nothing to inhibit while the monitor is off"
         );
     }
 

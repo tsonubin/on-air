@@ -83,8 +83,8 @@ the rest inside it.
 ```jsonc
 "on-air": {"icon":"󰝚","label":"on-air"},
 "on-air.open": {"icon":"󰝚","label":"Open","action":"omarchy-launch-or-focus-tui on-air"},
-"on-air.service": {"icon":"󰐥","label":"Service on/off","action":"on-air service toggle"},
-"on-air.restart": {"icon":"󰜉","label":"Restart core","action":"systemctl --user restart on-air-core"},
+"on-air.monitor": {"icon":"󰐥","label":"Monitor on/off","action":"on-air monitor toggle"},
+"on-air.restart": {"icon":"󰜉","label":"Restart core","action":"on-air service restart"},
 ```
 
 ## Bar

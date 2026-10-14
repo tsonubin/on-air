@@ -22,7 +22,7 @@ pub enum Action {
     PlayPause,
     NextTrack,
     PrevTrack,
-    Service,
+    Monitor,
     Autostart,
     Bluetooth,
     Refresh,
@@ -85,9 +85,9 @@ pub const KEYS: &[Binding] = &[
         help: "CD next / previous track",
     },
     Binding {
-        keys: "s",
-        action: Action::Service,
-        help: "Service on / off",
+        keys: "m",
+        action: Action::Monitor,
+        help: "Monitor on / off",
     },
     Binding {
         keys: "a",
@@ -128,7 +128,7 @@ pub const HINTS: &[(&str, &str)] = &[
     ("Enter", "select"),
     ("h/l", "adjust"),
     ("+/-", "volume"),
-    ("s", "service"),
+    ("m", "monitor"),
     ("?", "help"),
     ("q", "quit"),
 ];
@@ -158,7 +158,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             ' ' => Action::PlayPause,
             '>' | '.' => Action::NextTrack,
             '<' | ',' => Action::PrevTrack,
-            's' => Action::Service,
+            'm' => Action::Monitor,
             'a' => Action::Autostart,
             'b' => Action::Bluetooth,
             'r' => Action::Refresh,
@@ -184,6 +184,11 @@ mod tests {
         assert_eq!(action_for(&press(KeyCode::BackTab)), Some(Action::PrevPane));
         assert_eq!(action_for(&press(KeyCode::Char('j'))), Some(Action::Down));
         assert_eq!(action_for(&press(KeyCode::Char('?'))), Some(Action::Help));
+        assert_eq!(
+            action_for(&press(KeyCode::Char('m'))),
+            Some(Action::Monitor)
+        );
+        assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
         assert_eq!(KEYS.len(), 16);
     }

@@ -12,6 +12,7 @@ pub mod error_copy;
 pub mod handoff;
 pub mod keys;
 pub mod model;
+pub mod service;
 pub mod theme;
 pub mod update;
 pub mod view;

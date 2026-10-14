@@ -42,8 +42,18 @@ shared-package, and TypeScript E2E sources. Rust is covered by `cargo fmt` and
 ## Service and sleep behavior
 
 On Linux the core is a `systemd --user` service; the terminal UI is a client
-of it and quitting the UI never stops streaming (`s` turns the service off,
-`a` toggles starting it at login). On macOS and Windows:
+of it and quitting the UI never stops streaming. Inside the TUI, `m` turns the
+monitor (audio capture and streaming) on or off and `a` toggles starting the
+service at login. From a shell:
+
+```bash
+on-air                                  # the terminal UI
+on-air monitor on|off|toggle            # audio on or off; the service keeps running
+on-air service start|stop|restart       # the on-air-core systemd user service
+on-air status                           # what is running and where
+```
+
+On macOS and Windows:
 
 Closing the desktop window hides it to the tray; it does not stop the service.
 The tray menu can open the mixer, turn the audio service on or off, or quit.

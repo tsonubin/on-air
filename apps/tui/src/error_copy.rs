@@ -14,7 +14,7 @@ pub const SLEEP_NOT_INHIBITED_COPY: &str =
 
 fn copy_by_code(code: &str) -> Option<&'static str> {
     Some(match code {
-        "service_paused" => "The audio service is paused. Turn it on to continue.",
+        "service_paused" => "The monitor is off. Turn it on with m or `on-air monitor on`.",
         "not_paired" => "This window is not paired with the audio service. Restart on-air.",
         "invalid_pin" => "That PIN did not match. Check the code on the speaker and try again.",
         "pin_lockout" => "Too many PIN attempts. Wait a minute, then try again.",

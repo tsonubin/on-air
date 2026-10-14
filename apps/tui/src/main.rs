@@ -1,11 +1,12 @@
-//! `on-air`: the terminal UI, plus `bar`, `status` and `service` subcommands
-//! for Omarchy's bar module and menu rows. All of it is a client of the
-//! `on-air-core` service; quitting never stops streaming.
+//! `on-air`: the terminal UI, plus `bar`, `status`, `monitor` and `service`
+//! subcommands for Omarchy's bar module and menu rows. All of it is a client
+//! of the `on-air-core` service; quitting never stops streaming.
 
 use crossterm::event::{Event, EventStream};
 use futures_util::StreamExt;
 use on_air_tui::client::{spawn_events, Client, DEFAULT_BASE};
 use on_air_tui::model::Model;
+use on_air_tui::service::{self, ServiceVerb};
 use on_air_tui::theme::Theme;
 use on_air_tui::update::{update, Cmd, Msg};
 use on_air_tui::view::view;
@@ -17,7 +18,8 @@ use tokio::sync::mpsc;
 const USAGE: &str = "usage: on-air [--base URL]                 the terminal UI
        on-air bar [--base URL]             one Waybar-style JSON line for a bar module
        on-air status [--json] [--base URL] the core's state, for humans or scripts
-       on-air service on|off|toggle        turn the LAN audio service on or off
+       on-air monitor on|off|toggle        turn LAN audio capture and streaming on or off
+       on-air service start|stop|restart   control the on-air-core systemd user service
        on-air --version | --help
 
 The base URL defaults to http://127.0.0.1:47990, the local on-air-core.";
@@ -27,14 +29,16 @@ pub enum Invocation {
     Tui { base: String },
     Bar { base: String },
     Status { base: String, json: bool },
-    Service { base: String, arg: String },
+    Monitor { base: String, arg: String },
+    Service { verb: ServiceVerb },
     Version,
     Help,
 }
 
-/// Hand-rolled: the surface is five forms and one flag.
+/// Hand-rolled: the surface is six forms and two flags.
 pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     let mut base = DEFAULT_BASE.to_string();
+    let mut base_given = false;
     let mut json = false;
     let mut positional: Vec<&str> = Vec::new();
     let mut iter = args.iter();
@@ -45,6 +49,7 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
                     .next()
                     .cloned()
                     .ok_or_else(|| format!("--base needs a URL\n{USAGE}"))?;
+                base_given = true;
             }
             "--json" => json = true,
             "--version" | "-V" => return Ok(Invocation::Version),
@@ -59,11 +64,22 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
         [] => Ok(Invocation::Tui { base }),
         ["bar"] => Ok(Invocation::Bar { base }),
         ["status"] => Ok(Invocation::Status { base, json }),
-        ["service", arg @ ("on" | "off" | "toggle")] => Ok(Invocation::Service {
+        ["monitor", arg @ ("on" | "off" | "toggle")] => Ok(Invocation::Monitor {
             base,
             arg: arg.to_string(),
         }),
-        ["service", ..] => Err(format!("service takes on, off or toggle\n{USAGE}")),
+        ["monitor", ..] => Err(format!("monitor takes on, off or toggle\n{USAGE}")),
+        ["service", arg @ ("on" | "off" | "toggle")] => Err(format!(
+            "`on-air service {arg}` is now `on-air monitor {arg}`\n{USAGE}"
+        )),
+        ["service", word] => match ServiceVerb::parse(word) {
+            Some(_) if base_given => Err(format!(
+                "--base does not apply to service: systemd manages the local core\n{USAGE}"
+            )),
+            Some(verb) => Ok(Invocation::Service { verb }),
+            None => Err(format!("service takes start, stop or restart\n{USAGE}")),
+        },
+        ["service", ..] => Err(format!("service takes start, stop or restart\n{USAGE}")),
         other => Err(format!("unknown command {}\n{USAGE}", other.join(" "))),
     }
 }
@@ -91,9 +107,10 @@ async fn main() {
         Invocation::Status { base, json } => cli::status(&Client::new(&base), json)
             .await
             .map_err(|error| error_copy::copy(&error)),
-        Invocation::Service { base, arg } => cli::service(&Client::new(&base), &arg)
+        Invocation::Monitor { base, arg } => cli::monitor(&Client::new(&base), &arg)
             .await
             .map_err(|error| error_copy::copy(&error)),
+        Invocation::Service { verb } => service::control(verb).await,
         Invocation::Tui { base } => {
             run_tui(Client::new(&base)).await;
             return;
@@ -241,12 +258,22 @@ mod tests {
             })
         );
         assert_eq!(
-            parse_args(&args(&["service", "toggle"])),
-            Ok(Invocation::Service {
+            parse_args(&args(&["monitor", "toggle"])),
+            Ok(Invocation::Monitor {
                 base: "http://127.0.0.1:47990".into(),
                 arg: "toggle".into()
             })
         );
+        for (word, verb) in [
+            ("start", ServiceVerb::Start),
+            ("stop", ServiceVerb::Stop),
+            ("restart", ServiceVerb::Restart),
+        ] {
+            assert_eq!(
+                parse_args(&args(&["service", word])),
+                Ok(Invocation::Service { verb })
+            );
+        }
         assert_eq!(parse_args(&args(&["--version"])), Ok(Invocation::Version));
         assert_eq!(parse_args(&args(&["--help"])), Ok(Invocation::Help));
     }
@@ -257,6 +284,28 @@ mod tests {
         assert!(err.contains("usage:"), "{err}");
         assert!(parse_args(&args(&["service", "maybe"])).is_err());
         assert!(parse_args(&args(&["service"])).is_err());
+        assert!(parse_args(&args(&["monitor", "maybe"])).is_err());
+        assert!(parse_args(&args(&["monitor"])).is_err());
+    }
+
+    #[test]
+    fn the_old_service_switch_points_at_monitor() {
+        for arg in ["on", "off", "toggle"] {
+            let err = parse_args(&args(&["service", arg])).unwrap_err();
+            assert!(err.contains(&format!("on-air monitor {arg}")), "{err}");
+        }
+    }
+
+    #[test]
+    fn service_verbs_reject_base() {
+        let err = parse_args(&args(&[
+            "service",
+            "restart",
+            "--base",
+            "http://10.0.0.2:47990",
+        ]))
+        .unwrap_err();
+        assert!(err.contains("--base"), "{err}");
         assert!(
             parse_args(&args(&["--base"])).is_err(),
             "--base needs a value"
