@@ -150,6 +150,11 @@ export interface ActiveOutputView extends ActiveOutput {
   state?: OutputPhase;
 }
 
+/** Phase of the active output; cores that predate the field only report live outputs. */
+export function outputPhase(active: Pick<ActiveOutputView, "state">): OutputPhase {
+  return active.state ?? "live";
+}
+
 /** `GET /api/outputs/active`. */
 export interface ActiveOutputResponse {
   active: ActiveOutputView | null;

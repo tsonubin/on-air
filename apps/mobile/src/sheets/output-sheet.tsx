@@ -1,6 +1,7 @@
 import { BottomSheet, Button, Column, Row, Spacer, Text } from "@expo/ui";
 import type { OutputInfo, OutputPhase } from "@on-air/api-types";
-import { outputPhase, useRemoteSession } from "@/remote-session";
+import { outputPhase } from "@on-air/api-types";
+import { useRemoteSession } from "@/remote-session";
 import { theme } from "@/theme";
 import { sheetProps } from "./sheet-props";
 

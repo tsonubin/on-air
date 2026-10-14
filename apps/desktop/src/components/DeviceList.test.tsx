@@ -63,7 +63,7 @@ describe("DeviceList", () => {
     expect(active).toHaveAttribute("aria-pressed", "true");
     expect(active).toBeDisabled();
     expect(screen.getByTestId("output-airplay-hp-1")).toHaveTextContent("Connecting…");
-    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Kitchen");
+    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Mock Sonos");
   });
 
   it("shows a starting output as connecting, not as live", () => {
@@ -84,7 +84,7 @@ describe("DeviceList", () => {
     expect(row).toHaveAttribute("aria-pressed", "false");
     expect(row).toHaveAttribute("aria-busy", "true");
     expect(row).toHaveTextContent("Connecting…");
-    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Kitchen (starting)");
+    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Mock Sonos (starting)");
   });
 
   it("shows a failed output as an error that can be chosen again", () => {
@@ -109,7 +109,7 @@ describe("DeviceList", () => {
     expect(row).toBeEnabled();
     row.click();
     expect(onChooseOutput).toHaveBeenCalledWith(sonos);
-    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Kitchen (failed)");
+    expect(screen.getByTestId("active-output")).toHaveTextContent("sonos: Mock Sonos (failed)");
   });
 
   it("treats an output without a state (older core) as live", () => {
@@ -125,6 +125,6 @@ describe("DeviceList", () => {
       "aria-pressed",
       "true",
     );
-    expect(screen.getByTestId("active-output")).toHaveTextContent(/^sonos: Kitchen$/);
+    expect(screen.getByTestId("active-output")).toHaveTextContent(/^sonos: Mock Sonos$/);
   });
 });

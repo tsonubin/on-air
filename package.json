@@ -15,6 +15,7 @@
     "test": "turbo run test",
     "test:mobile": "pnpm --filter @on-air/control-client test && pnpm --filter mobile test",
     "test:mobile:e2e": "pnpm --filter @on-air/e2e test:mobile",
+    "test:native": "pnpm --filter @on-air/e2e test:native",
     "test:desktop:e2e": "pnpm --filter @on-air/e2e test:desktop",
     "typecheck": "turbo run typecheck",
     "typecheck:web": "pnpm --filter @on-air/api-types typecheck && pnpm --filter @on-air/control-client typecheck && pnpm --filter desktop typecheck && pnpm --filter mobile typecheck && pnpm --filter @on-air/e2e typecheck"

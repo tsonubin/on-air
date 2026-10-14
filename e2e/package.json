@@ -8,7 +8,8 @@
     "test:desktop:api": "playwright test -c desktop/playwright.config.ts --project api",
     "test:desktop:ui": "playwright test -c desktop/playwright.config.ts --project ui",
     "test:mobile": "node --experimental-strip-types --test --test-concurrency=1 mobile/companion.e2e.ts mobile/expo-go-pairing.e2e.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test:native": "node --test mobile/native-project.test.mjs"
   },
   "devDependencies": {
     "@on-air/api-types": "workspace:*",

@@ -1,4 +1,5 @@
 import * as client from "@on-air/control-client";
+import { FakeSocket } from "@on-air/control-client/testing";
 import { act, renderHook } from "@testing-library/react-native";
 import {
   DEFAULT_STALL_MS,
@@ -7,7 +8,6 @@ import {
   PARTIAL_REFRESH_ERROR,
   useDesktopConnection,
 } from "@/hooks/useDesktopConnection";
-import { FakeWebSocket } from "./helpers/fake-websocket";
 
 jest.mock("@on-air/control-client", () => ({
   ...jest.requireActual("@on-air/control-client"),
@@ -101,7 +101,7 @@ function connect(overrides: Props = {}) {
     active: true,
     onUnauthorized,
     onNotice,
-    WebSocket: FakeWebSocket,
+    WebSocket: FakeSocket,
     pollMs: 1_000,
     coalesceMs: 100,
     stallMs: 0,
@@ -119,7 +119,7 @@ function connect(overrides: Props = {}) {
 beforeEach(() => {
   jest.useFakeTimers();
   jest.clearAllMocks();
-  FakeWebSocket.reset();
+  FakeSocket.reset();
   happyReads();
 });
 
@@ -130,8 +130,8 @@ afterEach(() => {
 test("connects with one immediate refresh and opens the event socket", async () => {
   const { result } = connect();
   expect(result.current.phase).toBe("connecting");
-  expect(FakeWebSocket.instances).toHaveLength(1);
-  expect(FakeWebSocket.last?.url).toContain("/api/ws?token=tok");
+  expect(FakeSocket.instances).toHaveLength(1);
+  expect(FakeSocket.last?.url).toContain("/api/ws?token=tok");
   await settle();
   expect(result.current.phase).toBe("connected");
   expect(result.current.wsState).toBe("connecting");
@@ -141,7 +141,7 @@ test("connects with one immediate refresh and opens the event socket", async () 
   expect(result.current.outputRates).toEqual([48000]);
   expect(result.current.error).toBeNull();
   for (const read of allReads) expect(read).toHaveBeenCalledTimes(1);
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   expect(result.current.wsState).toBe("open");
   await tick(500);
   for (const read of allReads) expect(read).toHaveBeenCalledTimes(1);
@@ -150,11 +150,11 @@ test("connects with one immediate refresh and opens the event socket", async () 
 test("applies socket payloads directly and refetches only the named slice", async () => {
   const { result } = connect();
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   const before = callCounts();
 
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "OutputStateChanged",
       transport: "sonos",
       device_name: "Mock Sonos",
@@ -168,7 +168,7 @@ test("applies socket payloads directly and refetches only the named slice", asyn
     state: "live",
   });
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "CdStateChanged",
       present: false,
       playing: false,
@@ -180,9 +180,9 @@ test("applies socket payloads directly and refetches only the named slice", asyn
   );
   expect(result.current.cd.track).toBe(3);
   act(() =>
-    FakeWebSocket.last?.emit({ type: "DeviceJoined", transport: "sonos", id: "x", name: "Y" }),
+    FakeSocket.last?.send({ type: "DeviceJoined", transport: "sonos", id: "x", name: "Y" }),
   );
-  act(() => FakeWebSocket.last?.emit({ type: "LevelMeter", rms: 0.1, peak: 0.2 }));
+  act(() => FakeSocket.last?.send({ type: "LevelMeter", rms: 0.1, peak: 0.2 }));
   expect(callCounts()).toEqual(before);
 
   await tick(150);
@@ -193,7 +193,7 @@ test("applies socket payloads directly and refetches only the named slice", asyn
   expect(reads.listInputs).toHaveBeenCalledTimes(before.listInputs);
 
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "OutputStateChanged",
       transport: "sonos",
       device_name: "Mock Sonos",
@@ -206,7 +206,7 @@ test("applies socket payloads directly and refetches only the named slice", asyn
 test("a disc change refetches the CD slice for its track list", async () => {
   const { result } = connect();
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   const before = callCounts();
   reads.getCd.mockResolvedValue({
     present: true,
@@ -221,7 +221,7 @@ test("a disc change refetches the CD slice for its track list", async () => {
     duration_ms: 1,
   });
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "CdStateChanged",
       present: true,
       playing: true,
@@ -241,7 +241,7 @@ test("a disc change refetches the CD slice for its track list", async () => {
 
   // A track change on the same disc touches neither.
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "CdStateChanged",
       present: true,
       playing: true,
@@ -258,13 +258,11 @@ test("a disc change refetches the CD slice for its track list", async () => {
 test("InputStateChanged updates the active input and refreshes the input slices", async () => {
   const { result, onNotice } = connect();
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   const before = callCounts();
   reads.listInputs.mockResolvedValue(["Mock Monitor", "Audio CD"]);
   reads.getActiveInput.mockResolvedValue({ name: "Audio CD", backend: "cpal-default" });
-  act(() =>
-    FakeWebSocket.last?.emit({ type: "InputStateChanged", name: "Audio CD", active: true }),
-  );
+  act(() => FakeSocket.last?.send({ type: "InputStateChanged", name: "Audio CD", active: true }));
   expect(result.current.activeInput).toBe("Audio CD");
   await tick(150);
   expect(reads.listInputs).toHaveBeenCalledTimes(before.listInputs + 1);
@@ -276,16 +274,14 @@ test("InputStateChanged updates the active input and refreshes the input slices"
 test("an input that stops with an error clears it and raises a notice", async () => {
   const { result, onNotice } = connect();
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   expect(result.current.activeInput).toBe("Mock Monitor");
   // A stop for another input leaves the current one alone.
-  act(() =>
-    FakeWebSocket.last?.emit({ type: "InputStateChanged", name: "Line In", active: false }),
-  );
+  act(() => FakeSocket.last?.send({ type: "InputStateChanged", name: "Line In", active: false }));
   expect(result.current.activeInput).toBe("Mock Monitor");
   reads.getActiveInput.mockResolvedValue({ name: null, backend: "cpal-default" });
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "InputStateChanged",
       name: "Mock Monitor",
       active: false,
@@ -299,14 +295,14 @@ test("an input that stops with an error clears it and raises a notice", async ()
 test("a refresh that started before an event does not overwrite what the event set", async () => {
   const { result } = connect();
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   let resolveActive!: (value: null) => void;
   reads.getActiveOutput.mockImplementationOnce(
     () => new Promise((resolve) => (resolveActive = resolve)),
   );
   act(() => result.current.scheduleRefresh("manual", ["activeOutput", "volume"]));
   act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "OutputStateChanged",
       transport: "sonos",
       device_name: "Mock Sonos",
@@ -324,14 +320,14 @@ test("Heartbeat frames are ignored but keep an idle socket alive", async () => {
   expect(DEFAULT_STALL_MS).toBe(30_000);
   const { result } = connect({ stallMs: DEFAULT_STALL_MS, pollMs: 600_000 });
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   const before = callCounts();
   const snapshot = result.current.inputs;
   for (let i = 0; i < 6; i += 1) {
     await tick(10_000);
-    act(() => FakeWebSocket.last?.emit({ type: "Heartbeat" }));
+    act(() => FakeSocket.last?.send({ type: "Heartbeat" }));
   }
-  expect(FakeWebSocket.instances).toHaveLength(1);
+  expect(FakeSocket.instances).toHaveLength(1);
   expect(result.current.wsState).toBe("open");
   expect(callCounts()).toEqual(before);
   expect(result.current.inputs).toBe(snapshot);
@@ -389,12 +385,12 @@ test("a paused service is a reachable desktop with no error", async () => {
 test("ServiceStateChanged toggles paused and resumes with a refresh", async () => {
   const { result } = connect();
   await settle();
-  act(() => FakeWebSocket.last?.open());
-  act(() => FakeWebSocket.last?.emit({ type: "ServiceStateChanged", enabled: false }));
+  act(() => FakeSocket.last?.open());
+  act(() => FakeSocket.last?.send({ type: "ServiceStateChanged", enabled: false }));
   expect(result.current.phase).toBe("paused");
   expect(result.current.status?.service_enabled).toBe(false);
   const before = callCounts();
-  act(() => FakeWebSocket.last?.emit({ type: "ServiceStateChanged", enabled: true }));
+  act(() => FakeSocket.last?.send({ type: "ServiceStateChanged", enabled: true }));
   expect(result.current.phase).toBe("connected");
   await tick(150);
   expect(reads.fetchStatus).toHaveBeenCalledTimes(before.fetchStatus + 1);
@@ -457,29 +453,29 @@ test("polls on the interval only while the app is active", async () => {
   await tick(100);
   expect(reads.fetchStatus).toHaveBeenCalledTimes(2);
   rerender({ ...initial, active: false });
-  expect(FakeWebSocket.last?.closed).toBe(true);
+  expect(FakeSocket.last?.closed).toBe(true);
   expect(result.current.wsState).toBe("closed");
   await tick(3_000);
   expect(reads.fetchStatus).toHaveBeenCalledTimes(2);
   rerender({ ...initial, active: true });
   await settle();
   expect(reads.fetchStatus).toHaveBeenCalledTimes(3);
-  expect(FakeWebSocket.instances).toHaveLength(2);
+  expect(FakeSocket.instances).toHaveLength(2);
   expect(result.current.phase).toBe("connected");
 });
 
 test("a socket loss schedules a refresh and a reopen after loss refreshes again", async () => {
   const { result } = connect({ pollMs: 600_000 });
   await settle();
-  act(() => FakeWebSocket.last?.open());
+  act(() => FakeSocket.last?.open());
   const before = callCounts();
-  act(() => FakeWebSocket.last?.dropFromServer());
+  act(() => FakeSocket.last?.dropFromServer());
   expect(result.current.wsState).toBe("reconnecting");
   await tick(150);
   expect(reads.fetchStatus).toHaveBeenCalledTimes(before.fetchStatus + 1);
   await tick(2_000);
-  expect(FakeWebSocket.instances.length).toBeGreaterThan(1);
-  act(() => FakeWebSocket.last?.open());
+  expect(FakeSocket.instances.length).toBeGreaterThan(1);
+  act(() => FakeSocket.last?.open());
   await tick(150);
   expect(reads.fetchStatus).toHaveBeenCalledTimes(before.fetchStatus + 2);
 });
@@ -496,14 +492,14 @@ test("results from a previous pairing are dropped after the token changes", asyn
   await settle();
   expect(onUnauthorized).not.toHaveBeenCalled();
   expect(result.current.phase).toBe("connected");
-  expect(FakeWebSocket.last?.url).toContain("token=tok2");
+  expect(FakeSocket.last?.url).toContain("token=tok2");
 });
 
 test("unmounting cancels the poll, the coalesced refresh and the socket", async () => {
   const { result, unmount } = connect();
   await settle();
   act(() => result.current.scheduleRefresh("poll"));
-  const socket = FakeWebSocket.last;
+  const socket = FakeSocket.last;
   unmount();
   expect(socket?.closed).toBe(true);
   const before = callCounts();
@@ -511,7 +507,7 @@ test("unmounting cancels the poll, the coalesced refresh and the socket", async 
   jest.advanceTimersByTime(60_000);
   expect(callCounts()).toEqual(before);
   expect(jest.getTimerCount()).toBe(0);
-  expect(FakeWebSocket.instances).toHaveLength(1);
+  expect(FakeSocket.instances).toHaveLength(1);
 });
 
 test("patch updates the snapshot locally", async () => {

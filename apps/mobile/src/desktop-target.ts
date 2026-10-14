@@ -33,8 +33,3 @@ export function targetBase(target: DesktopTarget): string {
 export function formatDesktopTarget(target: DesktopTarget): string {
   return target.port === DEFAULT_PORT ? target.host : `${target.host}:${target.port}`;
 }
-
-export function sameTarget(a: DesktopTarget | null, b: DesktopTarget | null): boolean {
-  if (!a || !b) return a === b;
-  return a.host === b.host && a.port === b.port;
-}

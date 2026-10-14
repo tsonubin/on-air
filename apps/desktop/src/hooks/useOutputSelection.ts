@@ -1,10 +1,4 @@
-import type {
-  ActiveOutputView,
-  AirPlayMode,
-  OutputInfo,
-  OutputPhase,
-  Transport,
-} from "@on-air/api-types";
+import type { AirPlayMode, OutputInfo, Transport } from "@on-air/api-types";
 import { useCallback, useRef, useState } from "react";
 import { type ClientLike, liveClient } from "../lib/client";
 import { invokeCommand } from "../lib/tauri";
@@ -43,11 +37,6 @@ export interface OutputSelectionHandle {
 
 export function outputKey(output: Pick<OutputInfo, "transport" | "id">): string {
   return `${output.transport}-${output.id}`;
-}
-
-/** Phase of the active output; cores that predate the field only report live outputs. */
-export function outputPhase(active: Pick<ActiveOutputView, "state">): OutputPhase {
-  return active.state ?? "live";
 }
 
 /** AirPlay via the macOS route picker cannot be driven from this window. */

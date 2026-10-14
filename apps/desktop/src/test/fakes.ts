@@ -5,87 +5,22 @@ import type {
   OutputInfo,
   SampleRateResponse,
   StatusResponse,
-  WsEvent,
 } from "@on-air/api-types";
-import type { EventHandlers, SubscribeOptions, WebSocketLike } from "@on-air/control-client";
+import type { EventHandlers, SubscribeOptions } from "@on-air/control-client";
 import { subscribeEvents } from "@on-air/control-client";
+import { FakeSocket, homepod, idleCd, sampleRate, sonos } from "@on-air/control-client/testing";
 import { vi } from "vitest";
 import type { ClientLike } from "../lib/client";
 
-/** Scriptable stand-in for a WHATWG WebSocket (same shape as the client's own tests). */
-export class FakeSocket implements WebSocketLike {
-  static instances: FakeSocket[] = [];
-  onopen: WebSocketLike["onopen"] = null;
-  onmessage: WebSocketLike["onmessage"] = null;
-  onclose: WebSocketLike["onclose"] = null;
-  onerror: WebSocketLike["onerror"] = null;
-  closed = false;
-  readonly url: string;
-
-  constructor(url: string) {
-    this.url = url;
-    FakeSocket.instances.push(this);
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  open(): void {
-    this.onopen?.({});
-  }
-  send(event: WsEvent): void {
-    this.onmessage?.({ data: JSON.stringify(event) });
-  }
-  dropFromServer(): void {
-    this.onclose?.({ code: 1006 });
-  }
-
-  static reset(): void {
-    FakeSocket.instances = [];
-  }
-  static latest(): FakeSocket {
-    const socket = FakeSocket.instances[FakeSocket.instances.length - 1];
-    if (!socket) throw new Error("no socket has been opened");
-    return socket;
-  }
-}
-
-export const sonos: OutputInfo = {
-  id: "uuid:mock-sonos",
-  name: "Kitchen",
-  transport: "sonos",
-  kind: "solo",
-  member_count: 1,
-  needs_pair: false,
-  paired: true,
-};
-
-export const homepod: OutputInfo = {
-  id: "hp-1",
-  name: "Bedroom",
-  transport: "airplay",
-  kind: "pair",
-  member_count: 2,
-  needs_pair: true,
-  paired: false,
-};
-
-export const idleCd: CdStatus = {
-  present: false,
-  playing: false,
-  track: 0,
-  track_count: 0,
-  position_ms: 0,
-  duration_ms: 0,
-  tracks: [],
-};
-
-export const sampleRate: SampleRateResponse = {
-  sample_rate_hz: 44100,
-  input: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
-  output: { sample_rate_hz: 48000, supported_hz: [44100, 48000, 96000], transport: "sonos" },
-};
+export {
+  deferred,
+  FakeSocket,
+  homepod,
+  idleCd,
+  sampleRate,
+  sonos,
+  tick,
+} from "@on-air/control-client/testing";
 
 /** Mutable backing store the fake client answers from. */
 export interface FakeCore {
@@ -171,18 +106,4 @@ export function fakeClient(core: FakeCore, socketOpts: SubscribeOptions = {}): F
       }),
     ),
   };
-}
-
-/** Lets pending promise chains settle. */
-export const tick = (ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-
-/** A promise the test resolves by hand, for in-flight requests. */
-export function deferred<T = void>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
 }

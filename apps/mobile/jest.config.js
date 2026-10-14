@@ -13,6 +13,7 @@ module.exports = {
     "^expo-router(/stack)?$": "<rootDir>/__mocks__/expo-router.js",
     "^@react-navigation/native$": "<rootDir>/__mocks__/navigation-theme.js",
     "^@on-air/control-client$": "<rootDir>/../../packages/control-client/src/index.ts",
+    "^@on-air/control-client/testing$": "<rootDir>/../../packages/control-client/src/testing.ts",
     "^@on-air/api-types$": "<rootDir>/../../packages/api-types/src/index.ts",
     "^react-native$": "<rootDir>/__mocks__/react-native.js",
     "^expo-network$": "<rootDir>/__mocks__/expo-network.js",

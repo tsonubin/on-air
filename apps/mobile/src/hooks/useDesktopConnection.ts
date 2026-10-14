@@ -26,7 +26,7 @@ import {
   type WebSocketConstructor,
 } from "@on-air/control-client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { friendlyError, isPaused, isUnauthorized } from "@/errors";
+import { friendlyError, isServicePaused, isUnauthorized } from "@/errors";
 
 /**
  * `idle`: no pairing. `connecting`: first refresh for this pairing is out.
@@ -289,7 +289,7 @@ export function judgeResults(results: SliceResults, requested: readonly Slice[])
   const status = fulfilled(results, "status");
   const paused =
     status?.service_enabled === false ||
-    requested.some((slice) => isPaused(rejection(results, slice)));
+    requested.some((slice) => isServicePaused(rejection(results, slice)));
   if (paused) return { kind: "settled", phase: "paused", error: null };
   const required = requested.filter((slice) => REQUIRED_SLICES.includes(slice));
   const considered = required.length > 0 ? required : requested;

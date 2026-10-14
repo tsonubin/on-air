@@ -1,8 +1,7 @@
 import type { ActiveOutputView, StatusResponse } from "@on-air/api-types";
-import { DEFAULT_PORT } from "@on-air/api-types";
+import { DEFAULT_PORT, outputPhase } from "@on-air/api-types";
 import type { ConnectionState } from "@on-air/control-client";
 import type { Connection } from "../hooks/useCoreSnapshot";
-import { outputPhase } from "../hooks/useOutputSelection";
 import { LedReadout } from "../ui/LedReadout";
 import { StatusPopover, type StatusPopoverProps } from "./StatusPopover";
 

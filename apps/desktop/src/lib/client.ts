@@ -1,9 +1,10 @@
 import {
   type ActiveInputResponse,
-  type ActiveOutput,
+  type ActiveOutputView,
   type AirPlayMode,
   API_BASE,
   type CdAction,
+  type CdControlRequest,
   type CdStatus,
   type EqGains,
   type OutputInfo,
@@ -28,7 +29,7 @@ export interface ClientLike {
   getActiveInput(): Promise<ActiveInputResponse>;
   activateInput(name: string): Promise<void>;
   listOutputs(): Promise<OutputInfo[]>;
-  getActiveOutput(): Promise<ActiveOutput | null>;
+  getActiveOutput(): Promise<ActiveOutputView | null>;
   activateOutput(transport: Transport, deviceId: string): Promise<void>;
   deactivateOutput(): Promise<void>;
   getVolume(): Promise<number>;
@@ -42,11 +43,11 @@ export interface ClientLike {
   pairBluetooth(id: string): Promise<void>;
   openBluetoothSettings(): Promise<void>;
   getCd(): Promise<CdStatus>;
-  controlCd(action: CdAction): Promise<CdStatus>;
+  controlCd(action: CdAction, extra?: Omit<CdControlRequest, "action">): Promise<CdStatus>;
   subscribeEvents(handlers: EventHandlers, opts?: SubscribeOptions): EventSubscription;
 }
 
-export function createClient(base: string = API_BASE): ClientLike {
+function createClient(base: string = API_BASE): ClientLike {
   return {
     fetchStatus: () => cc.fetchStatus(base),
     getPairingPin: () => cc.getPairingPin(base),
@@ -68,7 +69,7 @@ export function createClient(base: string = API_BASE): ClientLike {
     pairBluetooth: (id) => cc.pairBluetooth(base, id),
     openBluetoothSettings: () => cc.openBluetoothSettings(base),
     getCd: () => cc.getCd(base),
-    controlCd: (action) => cc.controlCd(base, action),
+    controlCd: (action, extra) => cc.controlCd(base, action, undefined, extra),
     subscribeEvents: (handlers, opts) => cc.subscribeEvents(base, undefined, handlers, opts),
   };
 }

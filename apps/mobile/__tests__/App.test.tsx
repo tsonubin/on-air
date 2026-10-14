@@ -1,11 +1,11 @@
 import type { CdStatus, OutputInfo } from "@on-air/api-types";
 import * as client from "@on-air/control-client";
+import { FakeSocket } from "@on-air/control-client/testing";
 import * as expoRouter from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { useWindowDimensions } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import RootLayout from "../app/_layout";
-import { FakeWebSocket } from "./helpers/fake-websocket";
 
 jest.mock("@on-air/control-client", () => ({
   ...jest.requireActual("@on-air/control-client"),
@@ -178,8 +178,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   routerMock.__reset();
   store.__reset();
-  FakeWebSocket.reset();
-  (globalThis as { WebSocket: unknown }).WebSocket = FakeWebSocket;
+  FakeSocket.reset();
+  (globalThis as { WebSocket: unknown }).WebSocket = FakeSocket;
   jest.mocked(useWindowDimensions).mockReturnValue({
     width: 390,
     height: 844,
@@ -222,7 +222,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(text()).toContain("Mock Monitor");
   expect(text()).toContain("Choose a speaker");
   expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
-  expect(FakeWebSocket.last?.url).toBe(`ws://192.168.5.14:47990/api/ws?token=${TOKEN}`);
+  expect(FakeSocket.last?.url).toBe(`ws://192.168.5.14:47990/api/ws?token=${TOKEN}`);
   expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
 
   // Choose a source.
@@ -247,9 +247,9 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   await press("output-sonos-uuid:mock-sonos");
   expect(api.activateOutput).toHaveBeenCalledWith(BASE, "sonos", "uuid:mock-sonos", TOKEN);
   expect(exists("output-sheet")).toBe(false);
-  ReactTestRenderer.act(() => FakeWebSocket.last?.open());
+  ReactTestRenderer.act(() => FakeSocket.last?.open());
   ReactTestRenderer.act(() =>
-    FakeWebSocket.last?.emit({
+    FakeSocket.last?.send({
       type: "OutputStateChanged",
       transport: "sonos",
       device_name: "Mock Sonos",
@@ -303,7 +303,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   await press("disconnect-menu-button");
   expect(text()).toContain("Pair your Mac");
   expect(store.deleteItemAsync).toHaveBeenCalledWith(PAIRING_KEY);
-  expect(FakeWebSocket.last?.closed).toBe(true);
+  expect(FakeSocket.last?.closed).toBe(true);
 });
 
 /** Numbers rendered in host Text nodes (the volume readout among them). */

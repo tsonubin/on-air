@@ -1,5 +1,4 @@
 import { BottomSheet, Button, Column, Picker, Row, Spacer, Text } from "@expo/ui";
-import { prettyInput } from "@/pretty-input";
 import { useRemoteSession } from "@/remote-session";
 import { theme } from "@/theme";
 import { sheetProps } from "./sheet-props";
@@ -30,8 +29,8 @@ export function SourceSheet({ onClose }: { onClose: () => void }) {
           testID="source-picker"
         >
           <Picker.Item label="Choose a source" value="" />
-          {inputs.map((name) => (
-            <Picker.Item key={name} label={prettyInput(name)} value={name} />
+          {inputs.map(({ name, label }) => (
+            <Picker.Item key={name} label={label} value={name} />
           ))}
         </Picker>
         {inputs.length === 0 && <Text>No capture devices are available.</Text>}

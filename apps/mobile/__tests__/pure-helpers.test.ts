@@ -1,9 +1,8 @@
 import { DEFAULT_PORT } from "@on-air/api-types";
-import { HttpError } from "@on-air/control-client";
+import { HttpError, inputLabels } from "@on-air/control-client";
 import { Platform } from "react-native";
 import { formatDesktopTarget, parseDesktopTarget, targetBase } from "@/desktop-target";
 import { friendlyError } from "@/errors";
-import { prettyInput, uniqueByLabel } from "@/pretty-input";
 import { digitsOnly, isForeground } from "@/remote-session";
 import { outputAction } from "@/sheets/output-sheet";
 import { sheetProps } from "@/sheets/sheet-props";
@@ -91,13 +90,17 @@ test("error copy follows the envelope code, then the status", () => {
   expect(friendlyError(new Error("boom"), "do it")).toBe(
     "Could not do it. Check that both devices are on the same Wi-Fi and try again.",
   );
+  expect(friendlyError(new TypeError("Network request failed"))).toMatch(
+    /Could not reach the desktop/,
+  );
+  expect(friendlyError(envelope(409, "stream_busy"))).toMatch(/already playing/);
 });
 
-test("inputs are labelled and de-duplicated by label", () => {
-  expect(prettyInput("alsa_output.pci.analog-stereo.monitor")).toBe("Analog monitor");
-  expect(uniqueByLabel(["a.monitor", "b.monitor", "PipeWire Sound Server"])).toEqual([
-    "a.monitor",
-    "PipeWire Sound Server",
+test("inputs are labelled and every distinct device stays selectable", () => {
+  expect(inputLabels(["a.monitor", "b.monitor", "PipeWire Sound Server"])).toEqual([
+    { name: "a.monitor", label: "System monitor" },
+    { name: "b.monitor", label: "System monitor (2)" },
+    { name: "PipeWire Sound Server", label: "PipeWire" },
   ]);
 });
 

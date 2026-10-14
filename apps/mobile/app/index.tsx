@@ -1,11 +1,12 @@
 import { FieldGroup, Host, Text } from "@expo/ui";
 import type { OutputInfo } from "@on-air/api-types";
+import { outputPhase } from "@on-air/api-types";
 import { router } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
 import { MixerHome } from "@/mixer-home";
 import { PairingHome } from "@/pairing-home";
-import { type DevicePairTarget, outputPhase, useRemoteSession } from "@/remote-session";
+import { type DevicePairTarget, useRemoteSession } from "@/remote-session";
 import { DevicePairSheet } from "@/sheets/device-pair-sheet";
 import { OutputSheet } from "@/sheets/output-sheet";
 import { SourceSheet } from "@/sheets/source-sheet";

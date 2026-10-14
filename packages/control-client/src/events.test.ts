@@ -7,56 +7,11 @@ import {
   DEFAULT_MAX_BACKOFF_MS,
   DEFAULT_MIN_BACKOFF_MS,
   subscribeEvents,
-  type WebSocketLike,
 } from "./events.ts";
-
-/** Scriptable stand-in for a WHATWG WebSocket. */
-class FakeSocket implements WebSocketLike {
-  static instances: FakeSocket[] = [];
-  static failConstructor = false;
-  onopen: WebSocketLike["onopen"] = null;
-  onmessage: WebSocketLike["onmessage"] = null;
-  onclose: WebSocketLike["onclose"] = null;
-  onerror: WebSocketLike["onerror"] = null;
-  closed = false;
-  pingListeners: Array<() => void> = [];
-  readonly url: string;
-
-  constructor(url: string) {
-    if (FakeSocket.failConstructor) throw new Error("boom");
-    this.url = url;
-    FakeSocket.instances.push(this);
-  }
-
-  close(): void {
-    this.closed = true;
-  }
-
-  on(_event: "ping", listener: () => void): void {
-    this.pingListeners.push(listener);
-  }
-
-  // Server-side script.
-  open(): void {
-    this.onopen?.({});
-  }
-  send(data: unknown): void {
-    this.onmessage?.({ data });
-  }
-  ping(): void {
-    for (const listener of this.pingListeners) listener();
-  }
-  dropFromServer(): void {
-    this.onclose?.({ code: 1006 });
-  }
-  fail(): void {
-    this.onerror?.({});
-  }
-}
+import { FakeSocket } from "./testing.ts";
 
 function reset() {
-  FakeSocket.instances = [];
-  FakeSocket.failConstructor = false;
+  FakeSocket.reset();
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

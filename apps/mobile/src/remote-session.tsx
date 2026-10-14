@@ -6,17 +6,20 @@ import type {
   DiscoveredHost,
   EqGains,
   OutputInfo,
-  OutputPhase,
 } from "@on-air/api-types";
+import { outputPhase } from "@on-air/api-types";
 import {
   activateInput,
   activateOutput,
   controlCd,
   fetchStatus,
   HttpError,
+  type InputLabel,
+  inputLabels,
   openBluetoothSettings,
   pairAirplay,
   pairBluetooth,
+  prettyInput,
   setEq,
   setSampleRate,
   setVolume,
@@ -31,7 +34,6 @@ import { useDesktopConnection } from "@/hooks/useDesktopConnection";
 import { useDiscovery } from "@/hooks/useDiscovery";
 import { useLatestWriteQueue } from "@/hooks/useLatestWriteQueue";
 import { usePairingStore } from "@/hooks/usePairingStore";
-import { prettyInput, uniqueByLabel } from "@/pretty-input";
 import { deriveUiState, describeUiState, type UiState, type UiView } from "@/ui-state";
 
 export const PIN_LENGTH = 6;
@@ -42,11 +44,6 @@ const BLUETOOTH_FOLLOW_UP_MS = 2_500;
 /** Keeps the digits of what was typed or pasted, up to `max`. */
 export function digitsOnly(value: string, max: number): string {
   return value.replace(/\D/g, "").slice(0, max);
-}
-
-/** Phase of the active output; desktops that predate the field only report live outputs. */
-export function outputPhase(active: Pick<ActiveOutputView, "state">): OutputPhase {
-  return active.state ?? "live";
 }
 
 /** iOS reports `inactive` during transitions and `unknown` before the first event. */
@@ -84,7 +81,7 @@ export type RemoteState = {
   pin: string;
   pairing: boolean;
   // Mixer
-  inputs: string[];
+  inputs: InputLabel[];
   activeInput: string;
   activeInputLabel: string;
   outputs: OutputInfo[];
@@ -476,7 +473,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     output: connection.activeOutput ? outputPhase(connection.activeOutput) : null,
   });
   const view = useMemo(() => describeUiState(uiState), [uiState]);
-  const inputs = useMemo(() => uniqueByLabel(connection.inputs), [connection.inputs]);
+  const inputs = useMemo(() => inputLabels(connection.inputs), [connection.inputs]);
   const error = actionError ?? (saved ? connection.error : null);
   const pairedHost = saved ? formatDesktopTarget(saved) : "";
 

@@ -70,14 +70,14 @@ describe("useCoreSnapshot", () => {
       socket.send({
         type: "OutputStateChanged",
         transport: "sonos",
-        device_name: "Kitchen",
+        device_name: "Mock Sonos",
         active: true,
       }),
     );
     expect(hook.result.current.snapshot.activeOutput).toEqual({
       transport: "sonos",
       device_id: "uuid:mock-sonos",
-      device_name: "Kitchen",
+      device_name: "Mock Sonos",
       state: "live",
     });
 
@@ -85,7 +85,7 @@ describe("useCoreSnapshot", () => {
       socket.send({
         type: "OutputStateChanged",
         transport: "sonos",
-        device_name: "Kitchen",
+        device_name: "Mock Sonos",
         active: false,
       }),
     );
@@ -189,7 +189,7 @@ describe("useCoreSnapshot", () => {
       socket.send({
         type: "OutputStateChanged",
         transport: "sonos",
-        device_name: "Kitchen",
+        device_name: "Mock Sonos",
         active: true,
       }),
     );
@@ -199,7 +199,7 @@ describe("useCoreSnapshot", () => {
       staleOutputs.resolve([sonos, homepod]);
       await poll;
     });
-    expect(hook.result.current.snapshot.activeOutput?.device_name).toBe("Kitchen");
+    expect(hook.result.current.snapshot.activeOutput?.device_name).toBe("Mock Sonos");
     expect(hook.result.current.snapshot.outputs?.map((o) => o.id)).toEqual(["uuid:mock-sonos"]);
   });
 

@@ -1,8 +1,9 @@
 import type { ActiveOutputView, AirPlayMode, OutputInfo } from "@on-air/api-types";
+import { outputPhase } from "@on-air/api-types";
+import { inputLabels } from "@on-air/control-client";
 import { useMemo } from "react";
-import { isPickerOnly, outputKey, outputPhase } from "../hooks/useOutputSelection";
+import { isPickerOnly, outputKey } from "../hooks/useOutputSelection";
 import { Button } from "../ui/Button";
-import { inputLabels } from "../ui/inputLabels";
 
 const LIST_CLASS =
   "m-0 flex min-h-0 flex-1 list-none flex-col gap-1.5 overflow-x-hidden overflow-y-auto overscroll-contain p-0 pr-0.5";
