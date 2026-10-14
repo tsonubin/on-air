@@ -282,37 +282,49 @@ fn sleep_notice(snapshot: &Snapshot) -> Option<String> {
 }
 
 fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cmd> {
+    let chain_step = match label {
+        LABEL_PAIR => Some(ActivationStep::Pairing),
+        LABEL_CONNECT => Some(ActivationStep::Connecting),
+        LABEL_OUTPUT => Some(ActivationStep::Activating),
+        _ => None,
+    };
+    if let Some(step) = chain_step {
+        // A reply for a chain that was cancelled or has moved on: the core
+        // may have changed something, so reload, but drive nothing.
+        if model.activation.as_ref().map(|a| a.step) != Some(step) {
+            if model.pending.as_ref().is_some_and(|p| p.label == label) {
+                model.pending = None;
+            }
+            return vec![Cmd::Refresh];
+        }
+    }
     model.pending = None;
     match result {
         Ok(()) => {
             model.error = None;
-            if label == LABEL_PAIR {
-                let paired = match std::mem::replace(&mut model.modal, Modal::None) {
-                    Modal::Pin { target, .. } => Some(match target {
-                        PairTarget::Airplay { device_id, name } => ("airplay", device_id, name),
-                        PairTarget::Bluetooth { id, name } => ("bluetooth", id, name),
-                    }),
-                    _ => current_device(model),
-                };
-                let Some(device) = paired else {
-                    model.activation = None;
+            if chain_step.is_some() {
+                let Some(device) = current_device(model) else {
                     return vec![Cmd::Refresh];
                 };
-                // Bluetooth must connect before the core can route to it.
-                if device.0 == "bluetooth" {
-                    let cmd = Cmd::ConnectBluetooth(device.1.clone());
-                    return advance(model, device, ActivationStep::Connecting, cmd);
+                match label {
+                    LABEL_PAIR => {
+                        // The modal belongs to this chain: only its Enter pairs.
+                        if matches!(model.modal, Modal::Pin { .. }) {
+                            model.modal = Modal::None;
+                        }
+                        // Bluetooth must connect before the core can route to it.
+                        if device.0 == "bluetooth" {
+                            let cmd = Cmd::ConnectBluetooth(device.1.clone());
+                            return advance(model, device, ActivationStep::Connecting, cmd);
+                        }
+                        return activate_step(model, device);
+                    }
+                    LABEL_CONNECT => return activate_step(model, device),
+                    _ => {
+                        model.activation = None;
+                        model.failed_output = None;
+                    }
                 }
-                return activate_step(model, device);
-            }
-            if label == LABEL_CONNECT {
-                if let Some(device) = current_device(model) {
-                    return activate_step(model, device);
-                }
-            }
-            if label == LABEL_OUTPUT {
-                model.activation = None;
-                model.failed_output = None;
             }
             if label == LABEL_SETTINGS {
                 vec![]
@@ -321,14 +333,16 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
             }
         }
         Err(copy) => {
-            if let Modal::Pin { error, input, .. } = &mut model.modal {
-                // The modal stays open for another try.
-                *error = Some(copy);
-                input.clear();
-                model.activation = None;
-                return vec![];
+            if label == LABEL_PAIR {
+                if let Modal::Pin { error, input, .. } = &mut model.modal {
+                    // The modal stays open for another try.
+                    *error = Some(copy);
+                    input.clear();
+                    model.activation = None;
+                    return vec![];
+                }
             }
-            if matches!(label, LABEL_PAIR | LABEL_CONNECT | LABEL_OUTPUT) {
+            if chain_step.is_some() {
                 if let Some(a) = model.activation.take() {
                     model.failed_output = Some((a.transport, a.id));
                 }
@@ -1457,6 +1471,12 @@ mod tests {
         m.pending = Some(Pending {
             label: "Pairing".into(),
         });
+        m.activation = Some(Activation {
+            transport: "airplay".into(),
+            id: "ap-new".into(),
+            name: "HomePod".into(),
+            step: ActivationStep::Pairing,
+        });
         let copy = "That PIN did not match. Check the code on the speaker and try again.";
         assert_eq!(
             update(
@@ -2386,13 +2406,13 @@ mod tests {
     fn done_clears_pending_and_errors_show_once() {
         let mut m = model_with_mock_snapshot();
         m.pending = Some(Pending {
-            label: "Switching output".into(),
+            label: "Switching source".into(),
         });
         assert_eq!(
             update(
                 &mut m,
                 Msg::Done {
-                    label: "Switching output".into(),
+                    label: "Switching source".into(),
                     result: Ok(())
                 }
             ),
@@ -2403,11 +2423,11 @@ mod tests {
         update(
             &mut m,
             Msg::Done {
-                label: "Switching output".into(),
-                result: Err("The speaker did not answer.".into()),
+                label: "Switching source".into(),
+                result: Err("That source is gone.".into()),
             },
         );
-        assert_eq!(m.error.as_deref(), Some("The speaker did not answer."));
+        assert_eq!(m.error.as_deref(), Some("That source is gone."));
         update(&mut m, code(KeyCode::Esc));
         assert!(m.error.is_none());
     }
@@ -2904,6 +2924,78 @@ mod tests {
         assert_eq!(
             update(&mut m, code(KeyCode::Enter)),
             vec![Cmd::PairBluetooth("bt-unpaired".into())]
+        );
+    }
+
+    fn airplay_pin_modal(m: &mut Model, input: &str) {
+        m.modal = Modal::Pin {
+            target: PairTarget::Airplay {
+                device_id: "ap-new".into(),
+                name: "HomePod".into(),
+            },
+            input: input.into(),
+            error: None,
+        };
+    }
+
+    #[test]
+    fn a_refresh_error_does_not_land_in_the_pin_modal() {
+        let mut m = model_with_mock_snapshot();
+        airplay_pin_modal(&mut m, "12");
+        assert_eq!(
+            update(&mut m, done(LABEL_REFRESH, Err("partial".into()))),
+            vec![]
+        );
+        assert_eq!(m.error.as_deref(), Some("partial"));
+        assert!(
+            matches!(&m.modal, Modal::Pin { input, error: None, .. } if input == "12"),
+            "{:?}",
+            m.modal
+        );
+    }
+
+    #[test]
+    fn a_pairing_reply_after_esc_activates_nothing() {
+        let mut m = on_dest("bt-unpaired");
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, code(KeyCode::Esc));
+        assert_eq!(update(&mut m, done(LABEL_PAIR, Ok(()))), vec![Cmd::Refresh]);
+        assert_eq!(m.activation, None);
+        assert_eq!(m.pending, None);
+    }
+
+    #[test]
+    fn a_stale_pairing_reply_leaves_another_devices_modal_alone() {
+        let mut m = on_dest("bt-unpaired");
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, code(KeyCode::Esc));
+        airplay_pin_modal(&mut m, "12");
+        assert_eq!(update(&mut m, done(LABEL_PAIR, Ok(()))), vec![Cmd::Refresh]);
+        assert!(matches!(&m.modal, Modal::Pin { input, .. } if input == "12"));
+        assert_eq!(m.activation, None);
+        assert_eq!(
+            update(&mut m, done(LABEL_PAIR, Err("late".into()))),
+            vec![Cmd::Refresh]
+        );
+        assert!(matches!(&m.modal, Modal::Pin { error: None, .. }));
+    }
+
+    #[test]
+    fn a_reply_for_another_step_does_not_advance_the_chain() {
+        let mut m = on_dest("uuid:mock-sonos");
+        update(&mut m, code(KeyCode::Enter));
+        assert_eq!(step(&m), Some(ActivationStep::Activating));
+        assert_eq!(
+            update(&mut m, done(LABEL_CONNECT, Ok(()))),
+            vec![Cmd::Refresh]
+        );
+        assert_eq!(step(&m), Some(ActivationStep::Activating));
+        assert_eq!(
+            m.pending.as_ref().map(|p| p.label.as_str()),
+            Some(LABEL_OUTPUT),
+            "only a matching label clears the pending one"
         );
     }
 }
