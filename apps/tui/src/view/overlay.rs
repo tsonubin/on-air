@@ -2,6 +2,7 @@
 
 use super::layout::centered;
 use crate::keys::KEYS;
+use crate::model::Model;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -103,6 +104,66 @@ pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) {
             Line::from(Span::styled("y eject   n cancel", Style::new().dim())),
         ])
         .block(Block::bordered().title(" Eject ")),
+        rect,
+    );
+}
+
+/// The core's port, as the LAN addresses are listed with it.
+const PORT: u16 = 47990;
+
+pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) {
+    let status = model.snapshot.status.as_ref();
+    let yes_no = |value: Option<bool>| match value {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "unknown",
+    };
+    let on_off = |value: Option<bool>| match value {
+        Some(true) => "on",
+        Some(false) => "off",
+        None => "unknown",
+    };
+    let mut lines = vec![
+        Line::from(format!(
+            "Version: {}   Port: {PORT}",
+            status.map_or("unknown", |s| s.version.as_str())
+        )),
+        Line::from("Addresses:"),
+    ];
+    match status.and_then(|s| s.lan_addresses.as_ref()) {
+        Some(addresses) if !addresses.is_empty() => lines.extend(
+            addresses
+                .iter()
+                .map(|address| Line::from(format!("  {address}:{PORT}"))),
+        ),
+        _ => lines.push(Line::from("  none found")),
+    }
+    lines.extend([
+        Line::from(format!(
+            "AirPlay: {}",
+            model.snapshot.airplay_mode.as_deref().unwrap_or("unknown")
+        )),
+        Line::from(if model.service_on() {
+            "monitor on"
+        } else {
+            "monitor off"
+        }),
+        Line::from(format!(
+            "sleep inhibited: {}",
+            yes_no(status.and_then(|s| s.sleep_inhibited))
+        )),
+        Line::from(format!("login start: {}", on_off(model.autostart))),
+        Line::from(format!("Core: {}", model.base)),
+        Line::from(Span::styled(" Esc or i closes ", Style::new().dim())),
+    ]);
+    let rect = centered(
+        area,
+        area.width.min(60),
+        (lines.len() as u16 + 2).min(area.height),
+    );
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines).block(Block::bordered().title(" Status ")),
         rect,
     );
 }

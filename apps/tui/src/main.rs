@@ -139,6 +139,7 @@ async fn run_tui(client: Client) {
     let mut theme = Theme::load(&home());
     let mut model = Model::new();
     model.accent = theme.accent;
+    model.base = client.base().to_string();
     if let Ok(size) = terminal.size() {
         model.size = (size.width, size.height);
     }

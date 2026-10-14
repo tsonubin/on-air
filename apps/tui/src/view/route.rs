@@ -1,7 +1,7 @@
 //! The Source and Destination panes.
 
 use super::hit::{HitMap, Target};
-use super::layout::{locked_style, pane_block, row_rect, selection_style, truncate};
+use super::layout::{centered, locked_style, pane_block, row_rect, selection_style, truncate};
 use crate::labels::input_labels;
 use crate::model::{DestEntry, DestRow, DestState, Model, Pane};
 use ratatui::layout::Rect;
@@ -144,4 +144,19 @@ pub(super) fn dest_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &mut
             }
         }
     }
+}
+
+/// Replaces both route panes while the monitor is off.
+pub(super) fn monitor_off_panel(frame: &mut Frame, area: Rect) {
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from(Span::styled("Monitor is off.", Style::new().bold())),
+            Line::from(
+                "Capture and streaming are stopped. Discovery and the phone remote stay online.",
+            ),
+            Line::from("Press m to turn it on."),
+        ])
+        .centered(),
+        centered(area, area.width, 3),
+    );
 }

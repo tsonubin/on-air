@@ -20,12 +20,12 @@ use crate::model::{Modal, Model};
 use cd::cd_strip;
 use header::{hint_line, render_header};
 use mixer::mixer_pane;
-use overlay::{eject_overlay, help_overlay, pin_overlay, track_overlay};
+use overlay::{eject_overlay, help_overlay, pin_overlay, status_overlay, track_overlay};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
-use route::{dest_pane, source_pane};
+use route::{dest_pane, monitor_off_panel, source_pane};
 
 /// Below this the screen only asks for a larger window.
 pub const MIN_SIZE: (u16, u16) = (40, 10);
@@ -74,8 +74,12 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
         );
     }
 
-    source_pane(model, frame, areas.source, &mut hits);
-    dest_pane(model, frame, areas.dest, &mut hits);
+    if model.locked() {
+        monitor_off_panel(frame, areas.source.union(areas.dest));
+    } else {
+        source_pane(model, frame, areas.source, &mut hits);
+        dest_pane(model, frame, areas.dest, &mut hits);
+    }
     mixer_pane(model, frame, areas.mixer, &mut hits);
 
     frame.render_widget(hint_line(), areas.hints);
@@ -92,6 +96,7 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
             track_overlay(frame, area, input, error.as_deref());
         }
         Modal::ConfirmEject => eject_overlay(frame, area),
+        Modal::Status => status_overlay(model, frame, area),
     }
     hits
 }
@@ -714,6 +719,66 @@ mod tests {
         for binding in KEYS {
             assert!(t.contains(binding.help), "{} missing:\n{t}", binding.help);
         }
+    }
+
+    #[test]
+    fn status_overlay_lists_everything() {
+        let mut m = model();
+        m.base = "http://127.0.0.1:47990".into();
+        m.autostart = Some(true);
+        m.snapshot.status.as_mut().unwrap().lan_addresses =
+            Some(vec!["10.0.0.12".into(), "192.168.1.5".into()]);
+        m.modal = Modal::Status;
+        let t = text(&render(&m, 100, 30));
+        for needle in [
+            "0.1.0",
+            "47990",
+            "10.0.0.12:47990",
+            "192.168.1.5:47990",
+            "owntone",
+            "monitor on",
+            "sleep inhibited: yes",
+            "login start: on",
+            "http://127.0.0.1:47990",
+        ] {
+            assert!(t.contains(needle), "{needle} missing:\n{t}");
+        }
+    }
+
+    #[test]
+    fn monitor_off_panel_replaces_route() {
+        let mut m = model();
+        m.snapshot.status.as_mut().unwrap().service_enabled = false;
+        let (buffer, hits) = render_hits(&m, 100, 30);
+        let t = text(&buffer);
+        for line in [
+            "Monitor is off.",
+            "Capture and streaming are stopped. Discovery and the phone remote stay online.",
+            "Press m to turn it on.",
+        ] {
+            assert!(t.contains(line), "{line} missing:\n{t}");
+        }
+        assert!(!t.contains("Source"), "{t}");
+        assert!(!t.contains("Destination"), "{t}");
+        assert!(!t.contains("Mock Sonos "), "{t}");
+        for y in 0..30 {
+            for x in 0..100 {
+                assert!(!matches!(
+                    hits.hit(x, y),
+                    Some((Target::SourceRow(_) | Target::DestRow(_), _))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn core_down_dims_but_keeps_rows() {
+        let mut m = model();
+        m.core_down = true;
+        let b = render(&m, 100, 30);
+        assert!(text(&b).contains("Living Room AirPlay"));
+        let (x, y) = cell_of(&b, "Living Room AirPlay");
+        assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     }
 
     #[test]

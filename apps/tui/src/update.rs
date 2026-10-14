@@ -108,9 +108,36 @@ pub fn seek_target(position_ms: u64, duration_ms: u64, delta_ms: i64) -> u64 {
     position_ms.saturating_add_signed(delta_ms).min(duration_ms)
 }
 
+/// Whether a command talks to `on-air-core`. Quitting and the host-side
+/// autostart and settings commands work without it.
+pub fn needs_core(cmd: &Cmd) -> bool {
+    !matches!(
+        cmd,
+        Cmd::Quit | Cmd::QueryAutostart | Cmd::SetAutostart(_) | Cmd::OpenBluetoothSettings
+    )
+}
+
+pub const CORE_DOWN_COPY: &str = "on-air-core is not reachable";
+
+/// Runs a user input; while the core is down, an input that would send a core
+/// command is undone and says so instead.
+fn gated(model: &mut Model, input: impl FnOnce(&mut Model) -> Vec<Cmd>) -> Vec<Cmd> {
+    if !model.core_down {
+        return input(model);
+    }
+    let before = model.clone();
+    let cmds = input(model);
+    if cmds.iter().any(needs_core) {
+        *model = before;
+        model.notice = Some(CORE_DOWN_COPY.into());
+        return vec![];
+    }
+    cmds
+}
+
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
-        Msg::Key(key) => on_key(model, key),
+        Msg::Key(key) => gated(model, |model| on_key(model, key)),
         Msg::Resize(w, h) => {
             model.size = (w, h);
             vec![]
@@ -131,6 +158,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Ws(Incoming::Event(event)) => on_event(model, event),
         Msg::Snapshot(Ok(snapshot)) => {
             model.snapshot = *snapshot;
+            model.core_down = false;
             close_cd_modals_without_disc(model);
             model.notice = sleep_notice(&model.snapshot);
             if matches!(
@@ -143,6 +171,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             vec![]
         }
         Msg::Snapshot(Err(copy)) => {
+            model.core_down = true;
             model.error = Some(copy);
             if matches!(
                 model.pending,
@@ -530,6 +559,12 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                 _ => vec![],
             };
         }
+        Modal::Status => {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('i')) {
+                model.modal = Modal::None;
+            }
+            return vec![];
+        }
         Modal::None => {}
     }
     let Some(action) = action_for(&key) else {
@@ -546,6 +581,10 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         }
         Action::Back => {
             model.error = None;
+            return vec![];
+        }
+        Action::Status => {
+            model.modal = Modal::Status;
             return vec![];
         }
         Action::Monitor => {
@@ -636,7 +675,12 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::PrevTrack => cd_action(model, CdAction::Prev),
         Action::Bluetooth => pending(model, LABEL_SETTINGS, vec![Cmd::OpenBluetoothSettings]),
         Action::Refresh => pending(model, LABEL_REFRESH, vec![Cmd::Refresh]),
-        Action::Quit | Action::Help | Action::Back | Action::Monitor | Action::Autostart => {
+        Action::Quit
+        | Action::Help
+        | Action::Back
+        | Action::Status
+        | Action::Monitor
+        | Action::Autostart => {
             unreachable!("handled above")
         }
     }
@@ -1841,6 +1885,44 @@ mod tests {
         assert_eq!(update(&mut m, key('j')), vec![]);
         assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
         assert_eq!(update(&mut m, key('m')), vec![Cmd::SetService(true)]);
+    }
+
+    #[test]
+    fn i_toggles_status_even_when_locked() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.status.as_mut().unwrap().service_enabled = false;
+        assert!(m.locked());
+        assert_eq!(update(&mut m, key('i')), vec![]);
+        assert_eq!(m.modal, Modal::Status);
+        assert_eq!(update(&mut m, key('x')), vec![]);
+        assert_eq!(m.modal, Modal::Status);
+        update(&mut m, key('i'));
+        assert_eq!(m.modal, Modal::None);
+        update(&mut m, key('i'));
+        update(&mut m, code(KeyCode::Esc));
+        assert_eq!(m.modal, Modal::None);
+    }
+
+    #[test]
+    fn core_down_blocks_core_commands() {
+        let mut m = model_with_mock_snapshot();
+        update(&mut m, Msg::Snapshot(Err("down".into())));
+        assert!(m.core_down);
+        m.pane = Pane::Sources;
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert_eq!(m.notice.as_deref(), Some("on-air-core is not reachable"));
+        assert_eq!(m.pending, None);
+        m.autostart = Some(false);
+        assert_eq!(update(&mut m, key('a')), vec![Cmd::SetAutostart(true)]);
+    }
+
+    #[test]
+    fn snapshot_ok_clears_core_down() {
+        let mut m = model_with_mock_snapshot();
+        update(&mut m, Msg::Snapshot(Err("down".into())));
+        let snapshot = m.snapshot.clone();
+        update(&mut m, Msg::Snapshot(Ok(Box::new(snapshot))));
+        assert!(!m.core_down);
     }
 
     #[test]

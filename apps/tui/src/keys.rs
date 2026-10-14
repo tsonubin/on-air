@@ -30,6 +30,7 @@ pub enum Action {
     Eject,
     Monitor,
     Autostart,
+    Status,
     Bluetooth,
     Refresh,
     Help,
@@ -121,6 +122,11 @@ pub const KEYS: &[Binding] = &[
         help: "Start the service at login on / off",
     },
     Binding {
+        keys: "i",
+        action: Action::Status,
+        help: "Status: version, addresses, monitor, login start",
+    },
+    Binding {
         keys: "b",
         action: Action::Bluetooth,
         help: "Open Bluetooth settings",
@@ -193,6 +199,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             'e' => Action::Eject,
             'm' => Action::Monitor,
             'a' => Action::Autostart,
+            'i' => Action::Status,
             'b' => Action::Bluetooth,
             'r' => Action::Refresh,
             '?' => Action::Help,
@@ -223,7 +230,7 @@ mod tests {
         );
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 20);
+        assert_eq!(KEYS.len(), 21);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),

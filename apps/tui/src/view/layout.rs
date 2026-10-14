@@ -102,7 +102,7 @@ pub(super) fn selection_style(model: &Model) -> Style {
 }
 
 pub(super) fn locked_style(model: &Model, style: Style) -> Style {
-    if model.locked() {
+    if model.locked() || model.core_down {
         style.add_modifier(Modifier::DIM)
     } else {
         style

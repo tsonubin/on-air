@@ -92,6 +92,8 @@ pub enum Modal {
         error: Option<String>,
     },
     ConfirmEject,
+    /// The `i` info overlay.
+    Status,
 }
 
 /// One action in flight, shown in the header until its `Done` arrives.
@@ -227,6 +229,10 @@ pub struct Model {
     pub notice: Option<String>,
     /// `None` until the host answers, or where autostart is not ours.
     pub autostart: Option<bool>,
+    /// The last snapshot failed: the panes keep their rows but are dimmed.
+    pub core_down: bool,
+    /// The core's base URL, shown in the status overlay.
+    pub base: String,
     pub accent: Color,
     pub size: (u16, u16),
     pub quit: bool,
@@ -257,6 +263,8 @@ impl Model {
             error: None,
             notice: None,
             autostart: None,
+            core_down: false,
+            base: String::new(),
             accent: Color::Cyan,
             size: (0, 0),
             quit: false,
