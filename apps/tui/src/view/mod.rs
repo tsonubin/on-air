@@ -532,6 +532,21 @@ mod tests {
     }
 
     #[test]
+    fn the_focused_band_label_fits_the_whole_range() {
+        let mut m = model();
+        m.pane = Pane::Mixer;
+        m.mixer_row = crate::model::MixerRow::Eq(4);
+        for (gain, label) in [(12.0, "+12.0 dB"), (-12.0, "-12.0 dB"), (-10.5, "-10.5 dB")] {
+            m.snapshot.eq[4] = gain;
+            let t = text(&render(&m, 100, 30));
+            assert!(t.contains(label), "{label} missing:\n{t}");
+        }
+        m.mixer_row = crate::model::MixerRow::Eq(0);
+        m.snapshot.eq[0] = -12.0;
+        assert!(text(&render(&m, 100, 30)).contains("-12.0 dB"));
+    }
+
+    #[test]
     fn the_focused_band_alone_shows_its_db() {
         let mut m = model();
         m.pane = Pane::Mixer;

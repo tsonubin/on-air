@@ -3,8 +3,9 @@
 
 use super::hit::{HitMap, Target};
 use super::layout::{locked_style, pane_block, row_rect, selection_style};
+use crate::model::METER_FLOOR_DB;
 use crate::model::{Meter, MixerRow, Model, Pane};
-use crate::update::{EQ_RANGE_DB, METER_FLOOR_DB};
+use crate::update::EQ_RANGE_DB;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -21,6 +22,8 @@ const FADER_HEIGHT: u16 = 3;
 const VALUE_ROW: u16 = FADER_ROW + FADER_HEIGHT;
 const VOLUME_WIDTH: u16 = 5;
 const BAND_WIDTH: u16 = 5;
+/// Wide enough for "-12.0 dB", centred on the fader.
+const DB_LABEL_WIDTH: u16 = BAND_WIDTH + 4;
 const RATE_WIDTH: u16 = 14;
 const METER_MAX_WIDTH: u16 = 24;
 const METER_MIN_WIDTH: u16 = 4;
@@ -261,9 +264,9 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
             put(
                 frame,
                 inner,
-                x.saturating_sub(1).max(inner.x),
+                x.saturating_sub(2).max(inner.x),
                 VALUE_ROW,
-                BAND_WIDTH + 2,
+                DB_LABEL_WIDTH,
                 Line::styled(format!("{gain:+.1} dB"), fader_style(row)).centered(),
             );
         }

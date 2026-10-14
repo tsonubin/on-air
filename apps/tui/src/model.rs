@@ -154,6 +154,9 @@ pub const TRANSPORTS: [(&str, &str); 3] = [
     ("bluetooth", "Bluetooth"),
 ];
 
+/// The bottom of the meter scale, in dBFS.
+pub const METER_FLOOR_DB: f32 = -60.0;
+
 /// The level meter: RMS and held peak in dBFS, and the frame counters that
 /// drive the peak fall and the timeout.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -169,8 +172,8 @@ pub struct Meter {
 impl Default for Meter {
     fn default() -> Self {
         Meter {
-            rms_db: crate::update::METER_FLOOR_DB,
-            peak_db: crate::update::METER_FLOOR_DB,
+            rms_db: METER_FLOOR_DB,
+            peak_db: METER_FLOOR_DB,
             hold: 0,
             quiet: 0,
         }

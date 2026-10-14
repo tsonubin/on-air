@@ -7,6 +7,7 @@ use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
 use crate::model::{
     DestRow, DestState, Meter, MixerRow, Modal, Model, PairTarget, Pane, Pending, Snapshot,
+    METER_FLOOR_DB,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Color;
@@ -63,7 +64,6 @@ pub const VOLUME_STEP: u8 = 5;
 pub const EQ_STEP_DB: f32 = 1.0;
 pub const EQ_RANGE_DB: (f32, f32) = (-12.0, 12.0);
 
-pub const METER_FLOOR_DB: f32 = -60.0;
 pub const PEAK_HOLD_FRAMES: u8 = 10;
 pub const PEAK_FALL_DB: f32 = 1.5;
 pub const METER_TIMEOUT_FRAMES: u8 = 20;
