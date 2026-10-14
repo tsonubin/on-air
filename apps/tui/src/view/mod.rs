@@ -92,7 +92,14 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
             target,
             input,
             error,
-        } => Some(pin_overlay(frame, area, target, input, error.as_deref())),
+        } => Some(pin_overlay(
+            frame,
+            area,
+            target,
+            input,
+            error.as_deref(),
+            model.activation.is_some(),
+        )),
         Modal::TrackPrompt { input, error } => {
             Some(track_overlay(frame, area, input, error.as_deref()))
         }
@@ -863,5 +870,34 @@ mod tests {
                 assert_eq!(b[(x, y)].bg, Color::Reset, "cell ({x}, {y})");
             }
         }
+    }
+
+    #[test]
+    fn the_pin_modal_says_pairing_while_it_runs() {
+        let mut m = model();
+        m.modal = Modal::Pin {
+            target: PairTarget::Bluetooth {
+                id: "bt-unpaired".into(),
+                name: "New Bluetooth Speaker".into(),
+            },
+            input: String::new(),
+            error: None,
+        };
+        assert!(!text(&render(&m, 100, 30)).contains("Pairing…"));
+        m.activation = Some(Activation {
+            transport: "bluetooth".into(),
+            id: "bt-unpaired".into(),
+            name: "New Bluetooth Speaker".into(),
+            step: ActivationStep::Pairing,
+        });
+        let b = render(&m, 100, 30);
+        let (_, y) = cell_of(&b, "Press Enter to pair");
+        assert!(
+            rows(&b)[y as usize + 1..y as usize + 4]
+                .iter()
+                .any(|row| row.contains("Pairing…")),
+            "{}",
+            text(&b)
+        );
     }
 }

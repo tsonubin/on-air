@@ -56,6 +56,7 @@ pub(super) fn pin_overlay(
     target: &crate::model::PairTarget,
     input: &str,
     error: Option<&str>,
+    pairing: bool,
 ) -> Rect {
     let width = area.width.min(60);
     let rect = centered(area, width, 7);
@@ -78,6 +79,12 @@ pub(super) fn pin_overlay(
         lines.push(Line::from(Span::styled(
             error.to_string(),
             Style::new().fg(Color::Red),
+        )));
+    }
+    if pairing {
+        lines.push(Line::from(Span::styled(
+            "Pairing…",
+            Style::new().fg(Color::Yellow),
         )));
     }
     frame.render_widget(

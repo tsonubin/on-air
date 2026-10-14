@@ -322,9 +322,10 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
         }
         Err(copy) => {
             if let Modal::Pin { error, input, .. } = &mut model.modal {
-                // The activation stays until the modal is closed.
+                // The modal stays open for another try.
                 *error = Some(copy);
                 input.clear();
+                model.activation = None;
                 return vec![];
             }
             if matches!(label, LABEL_PAIR | LABEL_CONNECT | LABEL_OUTPUT) {
@@ -577,6 +578,8 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                     input.push(c);
                     vec![]
                 }
+                // One pairing at a time; the modal says "Pairing…" meanwhile.
+                KeyCode::Enter if model.activation.is_some() => vec![],
                 KeyCode::Enter => {
                     let needs_pin = matches!(target, PairTarget::Airplay { .. });
                     if needs_pin && input.is_empty() {
@@ -2872,5 +2875,35 @@ mod tests {
         assert_eq!(m.snapshot.volume, 50);
         assert_eq!(update(&mut m, click(Target::StatusTag)), vec![]);
         assert_eq!(m.modal, Modal::Status);
+    }
+
+    #[test]
+    fn enter_in_the_pin_modal_while_pairing_sends_nothing() {
+        let mut m = on_dest("bt-unpaired");
+        update(&mut m, code(KeyCode::Enter));
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::PairBluetooth("bt-unpaired".into())]
+        );
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert_eq!(step(&m), Some(ActivationStep::Pairing));
+        assert_eq!(
+            update(&mut m, done(LABEL_PAIR, Ok(()))),
+            vec![Cmd::ConnectBluetooth("bt-unpaired".into())]
+        );
+        assert_eq!(step(&m), Some(ActivationStep::Connecting));
+    }
+
+    #[test]
+    fn enter_after_a_failed_pairing_tries_again() {
+        let mut m = on_dest("bt-unpaired");
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, code(KeyCode::Enter));
+        update(&mut m, done(LABEL_PAIR, Err("no luck".into())));
+        assert!(matches!(m.modal, Modal::Pin { .. }));
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            vec![Cmd::PairBluetooth("bt-unpaired".into())]
+        );
     }
 }
