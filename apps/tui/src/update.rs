@@ -54,7 +54,11 @@ pub enum Cmd {
         input_hz: Option<u32>,
         output_hz: Option<u32>,
     },
-    ControlCd(CdAction),
+    ControlCd {
+        action: CdAction,
+        position_ms: Option<u64>,
+        track: Option<u8>,
+    },
     PairAirplay {
         device_id: String,
         pin: String,
@@ -96,6 +100,13 @@ pub const LABEL_REFRESH: &str = "Refreshing";
 pub const LABEL_AUTOSTART: &str = "Changing autostart";
 pub const LABEL_SETTINGS: &str = "Opening Bluetooth settings";
 pub const LABEL_CD: &str = "Disc";
+/// How far `[` and `]` move the playhead.
+pub const CD_SEEK_MS: i64 = 10_000;
+
+/// Where a seek of `delta_ms` from `position_ms` lands, kept inside the track.
+pub fn seek_target(position_ms: u64, duration_ms: u64, delta_ms: i64) -> u64 {
+    position_ms.saturating_add_signed(delta_ms).min(duration_ms)
+}
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
@@ -120,6 +131,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Ws(Incoming::Event(event)) => on_event(model, event),
         Msg::Snapshot(Ok(snapshot)) => {
             model.snapshot = *snapshot;
+            close_cd_modals_without_disc(model);
             model.notice = sleep_notice(&model.snapshot);
             if matches!(
                 model.pending,
@@ -356,6 +368,7 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
                 duration_ms,
                 tracks,
             });
+            close_cd_modals_without_disc(model);
             vec![]
         }
         WsEvent::InputStateChanged {
@@ -468,6 +481,55 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                 _ => vec![],
             };
         }
+        Modal::TrackPrompt { input, error } => {
+            return match key.code {
+                KeyCode::Esc => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() && input.len() < 3 => {
+                    input.push(c);
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Enter => {
+                    let Ok(track) = input.parse::<u8>() else {
+                        return vec![];
+                    };
+                    let count = model.snapshot.cd.as_ref().map_or(0, |cd| cd.track_count);
+                    if track == 0 || track > count {
+                        *error = Some(format!("Track {track} is not on this disc"));
+                        return vec![];
+                    }
+                    model.modal = Modal::None;
+                    let cmd = Cmd::ControlCd {
+                        action: CdAction::Goto,
+                        position_ms: None,
+                        track: Some(track),
+                    };
+                    pending(model, LABEL_CD, vec![cmd])
+                }
+                _ => vec![],
+            };
+        }
+        Modal::ConfirmEject => {
+            return match key.code {
+                KeyCode::Char('y') => {
+                    model.modal = Modal::None;
+                    cd_action(model, CdAction::Eject)
+                }
+                KeyCode::Char('n') | KeyCode::Esc => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                _ => vec![],
+            };
+        }
         Modal::None => {}
     }
     let Some(action) = action_for(&key) else {
@@ -542,17 +604,34 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                 vec![]
             }
         }
-        Action::PlayPause => match &model.snapshot.cd {
-            Some(cd) if cd.present => {
-                let action = if cd.playing {
+        Action::PlayPause => {
+            let playing = model.snapshot.cd.as_ref().is_some_and(|cd| cd.playing);
+            cd_action(
+                model,
+                if playing {
                     CdAction::Pause
                 } else {
                     CdAction::Play
+                },
+            )
+        }
+        Action::SeekBack => cd_seek(model, -CD_SEEK_MS),
+        Action::SeekForward => cd_seek(model, CD_SEEK_MS),
+        Action::GotoTrack => {
+            if has_disc(model) {
+                model.modal = Modal::TrackPrompt {
+                    input: String::new(),
+                    error: None,
                 };
-                pending(model, LABEL_CD, vec![Cmd::ControlCd(action)])
             }
-            _ => vec![],
-        },
+            vec![]
+        }
+        Action::Eject => {
+            if has_disc(model) {
+                model.modal = Modal::ConfirmEject;
+            }
+            vec![]
+        }
         Action::NextTrack => cd_action(model, CdAction::Next),
         Action::PrevTrack => cd_action(model, CdAction::Prev),
         Action::Bluetooth => pending(model, LABEL_SETTINGS, vec![Cmd::OpenBluetoothSettings]),
@@ -570,10 +649,38 @@ fn pending(model: &mut Model, label: &str, cmds: Vec<Cmd>) -> Vec<Cmd> {
     cmds
 }
 
+fn has_disc(model: &Model) -> bool {
+    model.snapshot.cd.as_ref().is_some_and(|cd| cd.present)
+}
+
 fn cd_action(model: &mut Model, action: CdAction) -> Vec<Cmd> {
-    match &model.snapshot.cd {
-        Some(cd) if cd.present => pending(model, LABEL_CD, vec![Cmd::ControlCd(action)]),
-        _ => vec![],
+    if !has_disc(model) {
+        return vec![];
+    }
+    let cmd = Cmd::ControlCd {
+        action,
+        position_ms: None,
+        track: None,
+    };
+    pending(model, LABEL_CD, vec![cmd])
+}
+
+fn cd_seek(model: &mut Model, delta_ms: i64) -> Vec<Cmd> {
+    let Some(cd) = model.snapshot.cd.as_ref().filter(|cd| cd.present) else {
+        return vec![];
+    };
+    let cmd = Cmd::ControlCd {
+        action: CdAction::Seek,
+        position_ms: Some(seek_target(cd.position_ms, cd.duration_ms, delta_ms)),
+        track: None,
+    };
+    pending(model, LABEL_CD, vec![cmd])
+}
+
+/// A prompt about a disc means nothing once the disc is gone.
+fn close_cd_modals_without_disc(model: &mut Model) {
+    if !has_disc(model) && matches!(model.modal, Modal::TrackPrompt { .. } | Modal::ConfirmEject) {
+        model.modal = Modal::None;
     }
 }
 
@@ -1556,29 +1663,168 @@ mod tests {
         m.snapshot.cd = Some(disc(false));
         assert_eq!(
             update(&mut m, key(' ')),
-            vec![Cmd::ControlCd(CdAction::Play)]
+            vec![Cmd::ControlCd {
+                action: CdAction::Play,
+                position_ms: None,
+                track: None
+            }]
         );
         m.snapshot.cd = Some(disc(true));
         assert_eq!(
             update(&mut m, key(' ')),
-            vec![Cmd::ControlCd(CdAction::Pause)]
+            vec![Cmd::ControlCd {
+                action: CdAction::Pause,
+                position_ms: None,
+                track: None
+            }]
         );
         assert_eq!(
             update(&mut m, key('>')),
-            vec![Cmd::ControlCd(CdAction::Next)]
+            vec![Cmd::ControlCd {
+                action: CdAction::Next,
+                position_ms: None,
+                track: None
+            }]
         );
         assert_eq!(
             update(&mut m, key('<')),
-            vec![Cmd::ControlCd(CdAction::Prev)]
+            vec![Cmd::ControlCd {
+                action: CdAction::Prev,
+                position_ms: None,
+                track: None
+            }]
         );
         assert_eq!(
             update(&mut m, key('.')),
-            vec![Cmd::ControlCd(CdAction::Next)]
+            vec![Cmd::ControlCd {
+                action: CdAction::Next,
+                position_ms: None,
+                track: None
+            }]
         );
         assert_eq!(
             update(&mut m, key(',')),
-            vec![Cmd::ControlCd(CdAction::Prev)]
+            vec![Cmd::ControlCd {
+                action: CdAction::Prev,
+                position_ms: None,
+                track: None
+            }]
         );
+    }
+
+    fn control(action: CdAction, position_ms: Option<u64>, track: Option<u8>) -> Vec<Cmd> {
+        vec![Cmd::ControlCd {
+            action,
+            position_ms,
+            track,
+        }]
+    }
+
+    fn cd_event(present: bool) -> Msg {
+        Msg::Ws(Incoming::Event(WsEvent::CdStateChanged {
+            present,
+            playing: false,
+            track: 1,
+            track_count: 12,
+            title: None,
+            album: None,
+            position_ms: 0,
+            duration_ms: 0,
+        }))
+    }
+
+    #[test]
+    fn seek_keys_clamp() {
+        let mut m = model_with_mock_snapshot();
+        let mut cd = disc(true);
+        cd.duration_ms = 300_000;
+        cd.position_ms = 5_000;
+        m.snapshot.cd = Some(cd.clone());
+        assert_eq!(
+            update(&mut m, key('[')),
+            control(CdAction::Seek, Some(0), None)
+        );
+        cd.position_ms = 295_000;
+        m.snapshot.cd = Some(cd);
+        assert_eq!(
+            update(&mut m, key(']')),
+            control(CdAction::Seek, Some(300_000), None)
+        );
+        assert_eq!(seek_target(100_000, 300_000, 10_000), 110_000);
+        assert_eq!(seek_target(100_000, 300_000, -10_000), 90_000);
+    }
+
+    #[test]
+    fn goto_prompt() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.cd = Some(disc(true));
+        assert_eq!(update(&mut m, key('g')), vec![]);
+        assert!(matches!(m.modal, Modal::TrackPrompt { .. }));
+        update(&mut m, key('x'));
+        assert!(matches!(&m.modal, Modal::TrackPrompt { input, .. } if input.is_empty()));
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert!(
+            matches!(m.modal, Modal::TrackPrompt { .. }),
+            "empty Enter does nothing"
+        );
+        update(&mut m, key('1'));
+        update(&mut m, key('2'));
+        assert_eq!(
+            update(&mut m, code(KeyCode::Enter)),
+            control(CdAction::Goto, None, Some(12))
+        );
+        assert_eq!(m.modal, Modal::None);
+
+        update(&mut m, key('g'));
+        update(&mut m, key('1'));
+        update(&mut m, key('3'));
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert!(matches!(
+            &m.modal,
+            Modal::TrackPrompt { error: Some(e), .. } if e == "Track 13 is not on this disc"
+        ));
+        update(&mut m, code(KeyCode::Esc));
+        assert_eq!(m.modal, Modal::None);
+    }
+
+    #[test]
+    fn eject_confirms() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.cd = Some(disc(true));
+        assert_eq!(update(&mut m, key('e')), vec![]);
+        assert_eq!(m.modal, Modal::ConfirmEject);
+        assert_eq!(
+            update(&mut m, key('y')),
+            control(CdAction::Eject, None, None)
+        );
+        assert_eq!(m.modal, Modal::None);
+        update(&mut m, key('e'));
+        assert_eq!(update(&mut m, key('n')), vec![]);
+        assert_eq!(m.modal, Modal::None);
+        update(&mut m, key('e'));
+        assert_eq!(update(&mut m, code(KeyCode::Esc)), vec![]);
+        assert_eq!(m.modal, Modal::None);
+    }
+
+    #[test]
+    fn cd_keys_need_a_disc() {
+        let mut m = model_with_mock_snapshot();
+        for c in ['[', ']', 'g', 'e'] {
+            assert_eq!(update(&mut m, key(c)), vec![]);
+            assert_eq!(m.modal, Modal::None);
+        }
+    }
+
+    #[test]
+    fn prompt_closes_when_the_disc_goes() {
+        for open in ['g', 'e'] {
+            let mut m = model_with_mock_snapshot();
+            m.snapshot.cd = Some(disc(true));
+            update(&mut m, key(open));
+            assert_ne!(m.modal, Modal::None);
+            assert_eq!(update(&mut m, cd_event(false)), vec![]);
+            assert_eq!(m.modal, Modal::None);
+        }
     }
 
     #[test]

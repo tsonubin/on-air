@@ -4,7 +4,7 @@
 //! serde structs they copy.
 
 use on_air_core::state::CoreState;
-use on_air_tui::api::WsEvent;
+use on_air_tui::api::{CdAction, WsEvent};
 use on_air_tui::client::{Client, ClientError, Connection, Incoming};
 use on_air_tui::error_copy;
 use on_air_tui::update::{Cmd, Msg};
@@ -303,4 +303,34 @@ async fn bluetooth_pair_connect_activate() {
     let active = c.active_output().await.unwrap().unwrap();
     assert_eq!(active.output.transport, "bluetooth");
     assert_eq!(active.output.device_id, "bt-unpaired");
+}
+
+#[tokio::test]
+async fn cd_seek_goto_eject() {
+    let c = mock_core().await;
+    let response = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .unwrap()
+        .post(format!("{}/api/mock/cd", c.base()))
+        .json(&serde_json::json!({
+            "present": true,
+            "album": "Test",
+            "tracks": [
+                { "title": "One", "duration_ms": 180_000 },
+                { "title": "Two", "duration_ms": 200_000 },
+            ],
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(response.status().is_success());
+    assert!(c.cd().await.unwrap().present);
+    c.control_cd(CdAction::Seek, Some(1000), None)
+        .await
+        .unwrap();
+    c.control_cd(CdAction::Goto, None, Some(2)).await.unwrap();
+    assert_eq!(c.cd().await.unwrap().track, 2);
+    c.control_cd(CdAction::Eject, None, None).await.unwrap();
+    assert!(!c.cd().await.unwrap().present);
 }

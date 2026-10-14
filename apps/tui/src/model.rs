@@ -86,6 +86,12 @@ pub enum Modal {
         input: String,
         error: Option<String>,
     },
+    /// Digits of the CD track to go to.
+    TrackPrompt {
+        input: String,
+        error: Option<String>,
+    },
+    ConfirmEject,
 }
 
 /// One action in flight, shown in the header until its `Done` arrives.

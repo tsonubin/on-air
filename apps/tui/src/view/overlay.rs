@@ -1,4 +1,4 @@
-//! The help and pairing overlays.
+//! The help, pairing and CD overlays.
 
 use super::layout::centered;
 use crate::keys::KEYS;
@@ -66,6 +66,43 @@ pub(super) fn pin_overlay(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .block(Block::bordered().title(format!(" Pair {} ", target.name()))),
+        rect,
+    );
+}
+
+pub(super) fn track_overlay(frame: &mut Frame, area: Rect, input: &str, error: Option<&str>) {
+    let rect = centered(area, area.width.min(44), 6);
+    frame.render_widget(Clear, rect);
+    let mut lines = vec![
+        Line::from("Type a track number, then press Enter."),
+        Line::from(Span::styled(
+            format!("Track: {input}▏"),
+            Style::new().bold(),
+        )),
+    ];
+    if let Some(error) = error {
+        lines.push(Line::from(Span::styled(
+            error.to_string(),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title(" Go to track ")),
+        rect,
+    );
+}
+
+pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) {
+    let rect = centered(area, area.width.min(36), 5);
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(vec![
+            Line::from("Eject the disc?"),
+            Line::from(Span::styled("y eject   n cancel", Style::new().dim())),
+        ])
+        .block(Block::bordered().title(" Eject ")),
         rect,
     );
 }

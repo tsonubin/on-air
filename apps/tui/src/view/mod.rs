@@ -17,10 +17,10 @@ pub use hit::{CdButton, HitMap, Target};
 pub use layout::truncate;
 
 use crate::model::{Modal, Model};
-use cd::cd_line;
+use cd::cd_strip;
 use header::{hint_line, render_header};
 use mixer::mixer_pane;
-use overlay::{help_overlay, pin_overlay};
+use overlay::{eject_overlay, help_overlay, pin_overlay, track_overlay};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
@@ -50,7 +50,7 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
 
     render_header(model, frame, areas.header, &mut hits);
     if areas.cd.height == 1 {
-        frame.render_widget(cd_line(model), areas.cd);
+        cd_strip(model, frame, areas.cd, &mut hits);
     }
     if let Some(copy) = &model.error {
         frame.render_widget(
@@ -88,6 +88,10 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
             input,
             error,
         } => pin_overlay(frame, area, target, input, error.as_deref()),
+        Modal::TrackPrompt { input, error } => {
+            track_overlay(frame, area, input, error.as_deref());
+        }
+        Modal::ConfirmEject => eject_overlay(frame, area),
     }
     hits
 }
@@ -102,6 +106,7 @@ mod tests {
     use crate::client::Connection;
     use crate::keys::KEYS;
     use crate::model::{Activation, ActivationStep, Modal, Model, PairTarget, Pane, Snapshot};
+    use crate::view::hit::CdButton;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::style::Color;
@@ -577,26 +582,71 @@ mod tests {
         assert!(t.contains("> EQ 1k") && t.contains("+2.0 dB"), "{t}");
     }
 
-    #[test]
-    fn the_cd_row_appears_only_with_a_disc() {
-        let t = text(&render(&model(), 100, 30));
-        assert!(!t.contains("Audio CD"), "{t}");
-        let mut m = model();
-        m.snapshot.cd = Some(CdStatus {
+    fn playing_disc() -> CdStatus {
+        CdStatus {
             present: true,
             playing: true,
             track: 3,
             track_count: 12,
-            title: Some("Track title".into()),
-            album: None,
+            title: Some("Title".into()),
+            album: Some("Album".into()),
             position_ms: 134_000,
-            duration_ms: 270_000,
+            duration_ms: 562_000,
             tracks: vec![],
-        });
+        }
+    }
+
+    #[test]
+    fn cd_strip_with_disc() {
+        let mut m = model();
+        m.snapshot.cd = Some(playing_disc());
+        let (b, hits) = render_hits(&m, 100, 30);
+        let t = text(&b);
+        for needle in ["03/12", "Album", "Title", "02:14 / 09:22", "⏏"] {
+            assert!(t.contains(needle), "{needle} missing:\n{t}");
+        }
+        let seen: Vec<Target> = (0..30)
+            .flat_map(|y| (0..100).map(move |x| (x, y)))
+            .filter_map(|(x, y)| hits.hit(x, y).map(|(t, _)| t))
+            .collect();
+        for target in [
+            Target::CdButton(CdButton::Prev),
+            Target::CdButton(CdButton::PlayPause),
+            Target::CdButton(CdButton::Next),
+            Target::CdButton(CdButton::Eject),
+            Target::CdProgress,
+        ] {
+            assert!(seen.contains(&target), "{target:?} missing");
+        }
+    }
+
+    #[test]
+    fn cd_strip_hidden_without_disc() {
+        let t = text(&render(&model(), 100, 30));
+        assert!(!t.contains("⏏") && !t.contains("00/00"), "{t}");
+        let mut m = model();
+        let mut cd = playing_disc();
+        cd.present = false;
+        m.snapshot.cd = Some(cd);
         let t = text(&render(&m, 100, 30));
-        assert!(t.contains("Audio CD"), "{t}");
-        assert!(t.contains("03/12"), "{t}");
-        assert!(t.contains("02:14/04:30"), "{t}");
+        assert!(!t.contains("⏏"), "{t}");
+    }
+
+    #[test]
+    fn cd_overlays_render() {
+        let mut m = model();
+        m.snapshot.cd = Some(playing_disc());
+        m.modal = Modal::ConfirmEject;
+        assert!(text(&render(&m, 100, 30)).contains("Eject the disc?"));
+        m.modal = Modal::TrackPrompt {
+            input: "4".into(),
+            error: Some("Track 13 is not on this disc".into()),
+        };
+        let t = text(&render(&m, 100, 30));
+        assert!(
+            t.contains("Go to track") && t.contains("not on this disc"),
+            "{t}"
+        );
     }
 
     #[test]

@@ -246,7 +246,14 @@ impl Client {
                     .await
                     .map_err(|error| error_copy::copy(&error)),
             )],
-            Cmd::ControlCd(action) => done(update::LABEL_CD, self.control_cd(action).await),
+            Cmd::ControlCd {
+                action,
+                position_ms,
+                track,
+            } => done(
+                update::LABEL_CD,
+                self.control_cd(action, position_ms, track).await,
+            ),
             Cmd::PairAirplay { device_id, pin } => done(
                 update::LABEL_PAIR,
                 self.pair_airplay(&device_id, &pin).await,
@@ -589,15 +596,22 @@ impl Client {
         self.get("/api/cd").await
     }
 
-    pub async fn control_cd(&self, action: CdAction) -> Result<(), ClientError> {
-        self.send_json::<CdStatus>(
-            Method::POST,
-            "/api/cd/control",
-            json!({ "action": action }),
-            READ_TIMEOUT,
-        )
-        .await
-        .map(|_| ())
+    pub async fn control_cd(
+        &self,
+        action: CdAction,
+        position_ms: Option<u64>,
+        track: Option<u8>,
+    ) -> Result<(), ClientError> {
+        let mut body = json!({ "action": action });
+        if let Some(position_ms) = position_ms {
+            body["position_ms"] = position_ms.into();
+        }
+        if let Some(track) = track {
+            body["track"] = track.into();
+        }
+        self.send_json::<CdStatus>(Method::POST, "/api/cd/control", body, READ_TIMEOUT)
+            .await
+            .map(|_| ())
     }
 
     pub async fn set_service(&self, enabled: bool) -> Result<bool, ClientError> {
