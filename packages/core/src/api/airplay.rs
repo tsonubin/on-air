@@ -5,23 +5,13 @@ use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct AirPlayModeResponse {
-    pub mode: &'static str,
-}
+pub use on_air_api::{AirPlayModeResponse, AirPlayPairRequest};
 
 pub async fn mode(Paired: Paired) -> Json<AirPlayModeResponse> {
     Json(AirPlayModeResponse {
-        mode: airplay::platform_mode(),
+        mode: airplay::platform_mode().into(),
     })
-}
-
-#[derive(Deserialize)]
-pub struct AirPlayPairRequest {
-    pub device_id: String,
-    pub pin: String,
 }
 
 /// OwnTone/AirPlay2 PIN handshake. Mock mode accepts any PIN for a known device.

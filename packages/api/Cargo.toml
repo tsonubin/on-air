@@ -1,0 +1,13 @@
+[package]
+name = "on-air-api"
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/tsonubin/on-air"
+description = "on-air control-plane wire types: the JSON the core serves and its clients read"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

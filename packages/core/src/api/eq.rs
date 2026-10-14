@@ -5,22 +5,13 @@ use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct EqResponse {
-    pub gains_db: [f32; 5],
-}
+pub use on_air_api::{EqResponse, SetEqRequest};
 
 pub async fn get_eq(Paired: Paired, State(state): State<CoreState>) -> Json<EqResponse> {
     Json(EqResponse {
         gains_db: *state.eq_gains_db.lock(),
     })
-}
-
-#[derive(Deserialize)]
-pub struct SetEqRequest {
-    pub gains_db: [f32; 5],
 }
 
 pub async fn set_eq(

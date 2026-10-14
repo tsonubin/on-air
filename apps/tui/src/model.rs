@@ -420,7 +420,7 @@ impl Model {
             Some(Some(OutputPhase::Starting)) => return DestState::Connecting,
             Some(Some(OutputPhase::Live) | None) => return DestState::Live,
             // A retry of a failed output shows its own step below.
-            Some(Some(OutputPhase::Failed)) | None => {}
+            Some(Some(OutputPhase::Failed | OutputPhase::Idle)) | None => {}
         }
         if let Some(activation) = &self.activation {
             if is_this(&activation.transport, &activation.id) {

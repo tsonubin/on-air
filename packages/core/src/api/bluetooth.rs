@@ -4,20 +4,8 @@ use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct BluetoothDeviceInfo {
-    pub id: String,
-    pub name: String,
-    pub paired: bool,
-    pub connected: bool,
-}
-
-#[derive(Serialize)]
-pub struct BluetoothListResponse {
-    pub devices: Vec<BluetoothDeviceInfo>,
-}
+pub use on_air_api::{BluetoothDeviceInfo, BluetoothIdRequest, BluetoothListResponse};
 
 pub async fn list_devices(
     Paired: Paired,
@@ -37,11 +25,6 @@ pub async fn list_devices(
             })
             .collect(),
     }))
-}
-
-#[derive(Deserialize)]
-pub struct BluetoothIdRequest {
-    pub id: String,
 }
 
 pub async fn pair_device(

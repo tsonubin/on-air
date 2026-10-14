@@ -4,14 +4,10 @@ use crate::pairing::persist_tokens;
 use crate::state::CoreState;
 use axum::extract::{ConnectInfo, State};
 use axum::Json;
-use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 
-#[derive(Serialize)]
-pub struct PinResponse {
-    pub pin: String,
-}
+pub use on_air_api::{PinResponse, VerifyRequest, VerifyResponse};
 
 pub async fn get_pin(
     LocalClient: LocalClient,
@@ -20,16 +16,6 @@ pub async fn get_pin(
     Json(PinResponse {
         pin: state.pairing.lock().pin().to_string(),
     })
-}
-
-#[derive(Deserialize)]
-pub struct VerifyRequest {
-    pub pin: String,
-}
-
-#[derive(Serialize)]
-pub struct VerifyResponse {
-    pub token: String,
 }
 
 /// PIN → bearer token. The PIN check and the commit each take the `pairing`

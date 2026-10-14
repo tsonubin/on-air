@@ -2,60 +2,10 @@
 //! them; `api::ws` only forwards them, so nothing below the API layer needs
 //! to import `crate::api`.
 
-use serde::Serialize;
 use std::collections::HashSet;
 use tokio::sync::broadcast;
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
-pub enum WsEvent {
-    OutputStateChanged {
-        transport: String,
-        device_name: String,
-        active: bool,
-    },
-    /// The live input changed. `active: false` with an `error` means the
-    /// capture or processing thread died and the input session cleared
-    /// itself.
-    InputStateChanged {
-        name: Option<String>,
-        active: bool,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<String>,
-    },
-    LevelMeter {
-        rms: f32,
-        peak: f32,
-    },
-    DeviceJoined {
-        transport: String,
-        id: String,
-        name: String,
-    },
-    DeviceLeft {
-        transport: String,
-        id: String,
-    },
-    ServiceStateChanged {
-        enabled: bool,
-    },
-    CdStateChanged {
-        present: bool,
-        playing: bool,
-        track: u8,
-        track_count: u8,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        title: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        album: Option<String>,
-        position_ms: u64,
-        duration_ms: u64,
-    },
-    /// Keep-alive text frame every [`HEARTBEAT_INTERVAL`](crate::api::ws::HEARTBEAT_INTERVAL)
-    /// per socket; never broadcast. Clients ignore it beyond resetting their
-    /// stall timer.
-    Heartbeat,
-}
+pub use on_air_api::WsEvent;
 
 /// `DeviceJoined`/`DeviceLeft` for whatever changed between two catalogs of
 /// `(id, name)` pairs.

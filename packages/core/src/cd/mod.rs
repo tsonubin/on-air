@@ -11,7 +11,7 @@ use tokio::sync::broadcast;
 pub mod autoplay;
 mod sys;
 
-pub const AUDIO_CD_INPUT: &str = "Audio CD";
+pub use on_air_api::{CdStatus, CdTrackInfo, AUDIO_CD_INPUT};
 pub const CD_SAMPLE_RATE_HZ: u32 = 44_100;
 pub const SECTORS_PER_SECOND: u32 = 75;
 pub const BYTES_PER_SECTOR: usize = 2352;
@@ -136,45 +136,6 @@ impl CdMedium for GeneratedCd {
         }
         let n = count.min(last.saturating_sub(lba));
         Ok(vec![0u8; n as usize * BYTES_PER_SECTOR])
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct CdTrackInfo {
-    pub number: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    pub duration_ms: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct CdStatus {
-    pub present: bool,
-    pub playing: bool,
-    pub track: u8,
-    pub track_count: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub album: Option<String>,
-    pub position_ms: u64,
-    pub duration_ms: u64,
-    pub tracks: Vec<CdTrackInfo>,
-}
-
-impl CdStatus {
-    pub fn empty() -> Self {
-        CdStatus {
-            present: false,
-            playing: false,
-            track: 0,
-            track_count: 0,
-            title: None,
-            album: None,
-            position_ms: 0,
-            duration_ms: 0,
-            tracks: Vec::new(),
-        }
     }
 }
 

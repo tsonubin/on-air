@@ -14,35 +14,11 @@
 use crate::events::WsEvent;
 use crate::sender::{AudioSender, OutputFormat, SenderError};
 use parking_lot::Mutex as SyncMutex;
-use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch, Mutex, MutexGuard};
 
-/// Which speaker the exclusive output belongs to. Persisted in the saved
-/// settings, so its serialized shape is part of the settings file format.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ActiveOutput {
-    pub transport: String,
-    pub device_id: String,
-    pub device_name: String,
-}
-
-/// Lifecycle of the exclusive output as clients see it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputPhase {
-    #[default]
-    Idle,
-    /// `start()` is in flight. The identity and stream nonce are already
-    /// visible because Sonos pulls the radio URI during Play.
-    Starting,
-    Live,
-    /// Start (or a rollback) failed and the sender's cleanup also failed.
-    /// The sender is retained so a later stop can retry; nothing else may
-    /// start until it does.
-    Failed,
-}
+pub use on_air_api::{ActiveOutput, OutputPhase};
 
 /// Point-in-time view of the output session, consistent across fields.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

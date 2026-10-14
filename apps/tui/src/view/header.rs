@@ -36,7 +36,7 @@ fn left_spans(model: &Model) -> Vec<Span<'static>> {
                 ));
                 spans.push(Span::raw(format!("{} ", active.output.device_name)));
             }
-            Some(OutputPhase::Live) | None => {
+            Some(OutputPhase::Live | OutputPhase::Idle) | None => {
                 spans.push(Span::styled(
                     " ● ON AIR ",
                     Style::new().fg(Color::Green).bold(),

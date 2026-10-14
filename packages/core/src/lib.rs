@@ -1,7 +1,6 @@
 use axum::http::{header, HeaderValue, Method};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
@@ -24,29 +23,18 @@ pub mod state;
 
 use state::CoreState;
 
-// Keep in sync with DEFAULT_PORT in packages/api-types/src/index.ts
-pub const DEFAULT_PORT: u16 = 47990;
+/// The wire types this core serves (and the TUI reads).
+pub use on_air_api::{StatusResponse, DEFAULT_PORT};
 
-#[derive(Serialize, PartialEq, Debug)]
-pub struct StatusResponse {
-    pub status: &'static str,
-    pub version: &'static str,
-    pub service_enabled: bool,
-    /// Whether a platform sleep inhibitor is held right now. False while the
-    /// service is off, on platforms without one, and when the OS refused it.
-    pub sleep_inhibited: bool,
-    /// Non-loopback IPv4 addresses of this host, so the desktop can show the
-    /// address a phone must type. Empty when unknown.
-    pub lan_addresses: Vec<String>,
-}
-
+/// `sleep_inhibited` is false while the service is off, on platforms
+/// without an inhibitor, and when the OS refused it.
 pub fn status_for(state: &CoreState) -> StatusResponse {
     StatusResponse {
-        status: "ok",
-        version: env!("CARGO_PKG_VERSION"),
+        status: "ok".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
         service_enabled: state.service_enabled.load(Ordering::Acquire),
-        sleep_inhibited: state.sleep_inhibited(),
-        lan_addresses: net::lan_addresses(),
+        sleep_inhibited: Some(state.sleep_inhibited()),
+        lan_addresses: Some(net::lan_addresses()),
     }
 }
 

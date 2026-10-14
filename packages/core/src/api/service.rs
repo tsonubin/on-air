@@ -10,17 +10,8 @@ use crate::api::error::JsonBody;
 use crate::state::CoreState;
 use axum::extract::State;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
-pub struct SetServiceRequest {
-    pub enabled: bool,
-}
-
-#[derive(Serialize)]
-pub struct ServiceResponse {
-    pub enabled: bool,
-}
+pub use on_air_api::{ServiceResponse, SetServiceRequest};
 
 pub async fn set_service(
     Authorized: Authorized,

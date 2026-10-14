@@ -6,36 +6,14 @@ use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
-pub struct SampleRateSide {
-    pub sample_rate_hz: u32,
-    pub supported_hz: Vec<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transport: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct SampleRateResponse {
-    /// Pipeline / input rate. Kept for older clients.
-    pub sample_rate_hz: u32,
-    pub input: SampleRateSide,
-    pub output: SampleRateSide,
-}
+pub use on_air_api::{SampleRateResponse, SampleRateSide, SetSampleRateRequest};
 
 pub async fn get_sample_rate(
     Paired: Paired,
     State(state): State<CoreState>,
 ) -> Json<SampleRateResponse> {
     Json(current_sample_rates(&state))
-}
-
-#[derive(Deserialize)]
-pub struct SetSampleRateRequest {
-    pub sample_rate_hz: Option<u32>,
-    pub input_hz: Option<u32>,
-    pub output_hz: Option<u32>,
 }
 
 pub async fn set_sample_rate(

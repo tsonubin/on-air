@@ -3126,6 +3126,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "on-air-api"
+version = "0.2.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "on-air-core"
 version = "0.2.0"
 dependencies = [
@@ -3142,6 +3150,7 @@ dependencies = [
  "mdns-sd",
  "objc2-core-audio",
  "objc2-core-audio-types",
+ "on-air-api",
  "parking_lot",
  "reqwest 0.12.28",
  "ringbuf",
@@ -3182,6 +3191,7 @@ version = "0.2.0"
 dependencies = [
  "crossterm",
  "futures-util",
+ "on-air-api",
  "on-air-core",
  "ratatui",
  "reqwest 0.12.28",

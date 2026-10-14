@@ -29,16 +29,7 @@ pub enum ActivateError {
     Sender(#[from] SenderError),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct OutputInfo {
-    pub id: String,
-    pub name: String,
-    pub transport: &'static str,
-    pub kind: &'static str,
-    pub member_count: u8,
-    pub needs_pair: bool,
-    pub paired: bool,
-}
+pub use on_air_api::OutputInfo;
 
 pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     let mut outputs = Vec::new();
@@ -46,8 +37,8 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
         outputs.push(OutputInfo {
             id: d.usn,
             name: d.friendly_name,
-            transport: "sonos",
-            kind: if d.member_count >= 2 { "pair" } else { "solo" },
+            transport: "sonos".into(),
+            kind: (if d.member_count >= 2 { "pair" } else { "solo" }).into(),
             member_count: d.member_count.max(1),
             needs_pair: false,
             paired: true,
@@ -57,8 +48,8 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
         outputs.push(OutputInfo {
             id: d.id.clone(),
             name: d.name.clone(),
-            transport: "airplay",
-            kind: d.kind,
+            transport: "airplay".into(),
+            kind: d.kind.into(),
             member_count: d.member_count.max(1),
             needs_pair: d.needs_pair,
             paired: d.paired,
@@ -69,8 +60,8 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
         outputs.push(OutputInfo {
             id: d.id,
             name: d.name,
-            transport: "bluetooth",
-            kind: "solo",
+            transport: "bluetooth".into(),
+            kind: "solo".into(),
             member_count: 1,
             needs_pair: !d.paired,
             paired: d.paired,

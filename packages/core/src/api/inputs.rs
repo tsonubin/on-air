@@ -6,14 +6,10 @@ use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 
 pub use crate::pipeline::{InputError, LOOPBACK_INPUT};
 
-#[derive(Serialize)]
-pub struct InputsResponse {
-    pub inputs: Vec<String>,
-}
+pub use on_air_api::{ActivateInputRequest, ActiveInputResponse, InputsResponse};
 
 fn with_cd_input(state: &CoreState, mut inputs: Vec<String>) -> Vec<String> {
     if state.cd.status().present && !inputs.iter().any(|name| name == AUDIO_CD_INPUT) {
@@ -45,25 +41,14 @@ pub async fn list_inputs(
     }))
 }
 
-#[derive(Serialize)]
-pub struct ActiveInputResponse {
-    pub name: Option<String>,
-    pub backend: &'static str,
-}
-
 pub async fn get_active_input(
     Paired: Paired,
     State(state): State<CoreState>,
 ) -> Json<ActiveInputResponse> {
     Json(ActiveInputResponse {
         name: state.input().active_name(),
-        backend: capture::loopback_backend(),
+        backend: capture::loopback_backend().into(),
     })
-}
-
-#[derive(Deserialize)]
-pub struct ActivateInputRequest {
-    pub name: String,
 }
 
 pub async fn activate_input(

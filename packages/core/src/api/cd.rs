@@ -12,24 +12,7 @@ pub async fn get_cd(Paired: Paired, State(state): State<CoreState>) -> Json<CdSt
     Json(state.cd.status())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CdAction {
-    Play,
-    Pause,
-    Next,
-    Prev,
-    Seek,
-    Goto,
-    Eject,
-}
-
-#[derive(Deserialize)]
-pub struct CdControlRequest {
-    pub action: CdAction,
-    pub position_ms: Option<u64>,
-    pub track: Option<u8>,
-}
+pub use on_air_api::{CdAction, CdControlRequest};
 
 pub async fn control_cd(
     Paired: Paired,

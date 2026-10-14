@@ -9,19 +9,13 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Request};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde::Serialize;
+pub use on_air_api::ApiErrorBody;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
-}
-
-#[derive(Serialize)]
-struct Envelope<'a> {
-    error: &'a str,
-    code: &'a str,
 }
 
 impl ApiError {
@@ -129,9 +123,9 @@ impl std::error::Error for ApiError {}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = axum::Json(Envelope {
-            error: &self.message,
-            code: self.code,
+        let body = axum::Json(ApiErrorBody {
+            error: self.message,
+            code: self.code.to_string(),
         });
         (self.status, body).into_response()
     }
