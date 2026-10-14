@@ -13,9 +13,9 @@ use on_air_tui::view::{view, HitMap};
 use on_air_tui::{cli, error_copy};
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 mod input;
-use tokio::sync::mpsc;
 
 const USAGE: &str = "usage: on-air [--base URL]                 the terminal UI
        on-air bar [--base URL]             one Waybar-style JSON line for a bar module
@@ -130,13 +130,15 @@ async fn main() {
 /// The event loop. Every message goes through `update`; every command it
 /// returns runs on its own task and feeds its replies back on the channel.
 async fn run_tui(client: Client) {
-    // A panic must not leave the terminal in raw mode on the alternate screen.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        restore();
-        default_hook(info);
-    }));
     let mut terminal = ratatui::init();
+    // A panic must not leave the terminal capturing the mouse, in raw mode or
+    // on the alternate screen. This hook wraps the one `ratatui::init`
+    // installs, so capture is off before ratatui restores the rest.
+    let ratatui_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+        ratatui_hook(info);
+    }));
     let mouse = crossterm::execute!(std::io::stdout(), EnableMouseCapture).is_ok();
 
     let mut theme = Theme::load(&home());
@@ -188,6 +190,7 @@ async fn run_tui(client: Client) {
     }
 
     let mut hits = HitMap::default();
+    let mut drag = input::DragState::default();
     let mut draw = |model: &Model, hits: &mut HitMap| {
         terminal.draw(|frame| *hits = view(model, frame)).is_ok()
     };
@@ -197,10 +200,20 @@ async fn run_tui(client: Client) {
         let msg = tokio::select! {
             event = keys.next() => match event {
                 Some(Ok(Event::Key(key))) => Msg::Key(key),
-                Some(Ok(Event::Mouse(event))) => match input::mouse_msg(&hits, event) {
-                    Some(msg) => msg,
-                    None => continue,
-                },
+                Some(Ok(Event::Mouse(event))) => {
+                    // Rows are indices into what is on screen: catch the
+                    // screen up with the model before resolving the click.
+                    if dirty {
+                        dirty = false;
+                        if !draw(&model, &mut hits) {
+                            break;
+                        }
+                    }
+                    match drag.mouse_msg(&hits, event) {
+                        Some(msg) => msg,
+                        None => continue,
+                    }
+                }
                 Some(Ok(Event::Resize(w, h))) => Msg::Resize(w, h),
                 Some(Ok(_)) => continue,
                 Some(Err(_)) | None => break,

@@ -807,6 +807,9 @@ fn on_mouse(
     };
     match target {
         Target::SourceRow(index) | Target::DestRow(index) => {
+            if kind == MouseKind::Drag {
+                return vec![];
+            }
             model.pane = if matches!(target, Target::SourceRow(_)) {
                 Pane::Sources
             } else {
@@ -814,9 +817,6 @@ fn on_mouse(
             };
             if wheel != 0 {
                 move_selection(model, wheel);
-                return vec![];
-            }
-            if !click {
                 return vec![];
             }
             if model.pane == Pane::Sources {
@@ -2678,6 +2678,21 @@ mod tests {
         );
         assert_eq!(m.pane, Pane::Outputs);
         assert!(m.output_index > before, "{} > {before}", m.output_index);
+    }
+
+    #[test]
+    fn drag_over_a_list_row_does_nothing() {
+        let mut m = model_with_mock_snapshot();
+        m.pane = Pane::Mixer;
+        let msg = mouse(
+            Target::SourceRow(0),
+            Rect::new(0, 0, 10, 1),
+            0,
+            0,
+            MouseKind::Drag,
+        );
+        assert_eq!(update(&mut m, msg), vec![]);
+        assert_eq!(m.pane, Pane::Mixer, "focus stays put");
     }
 
     #[test]
