@@ -246,7 +246,7 @@ async fn search_once_discovers_a_fake_responder() {
     assert_eq!(devices.len(), 1);
     assert_eq!(devices[0].usn, "uuid:fake-sonos-1");
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let name = fetch_friendly_name(&client, &devices[0].location).await;
     assert_eq!(name.as_deref(), Some("Living Room"));
 }

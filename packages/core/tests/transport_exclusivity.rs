@@ -79,7 +79,7 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
     state
         .activate_sender(Box::new(SonosSender::new(
             sonos,
-            reqwest::Client::new(),
+            reqwest::Client::builder().no_proxy().build().unwrap(),
             "http://127.0.0.1:47990/stream/audio.wav".into(),
         )))
         .await

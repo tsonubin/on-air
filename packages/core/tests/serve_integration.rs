@@ -74,7 +74,7 @@ async fn a_shutdown_signal_stops_audio_and_releases_the_inhibitor() {
         })
         .await
     });
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let response = client
         .post(format!("http://{addr}/api/outputs/active"))
         .json(&serde_json::json!({"transport": "sonos", "device_id": "uuid:mock-sonos"}))

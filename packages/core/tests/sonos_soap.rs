@@ -39,7 +39,7 @@ async fn start_fake_upnp_server() -> (std::net::SocketAddr, Captured) {
 #[tokio::test]
 async fn set_av_transport_uri_sends_expected_action_and_body() {
     let (addr, captured) = start_fake_upnp_server().await;
-    let client = SonosControlClient::new(reqwest::Client::new());
+    let client = SonosControlClient::new(reqwest::Client::builder().no_proxy().build().unwrap());
     let control_url = format!("http://{addr}/Control");
 
     client
@@ -60,7 +60,7 @@ async fn set_av_transport_uri_sends_expected_action_and_body() {
 #[tokio::test]
 async fn play_and_stop_send_expected_actions() {
     let (addr, captured) = start_fake_upnp_server().await;
-    let client = SonosControlClient::new(reqwest::Client::new());
+    let client = SonosControlClient::new(reqwest::Client::builder().no_proxy().build().unwrap());
     let control_url = format!("http://{addr}/Control");
 
     client.play(&control_url).await.unwrap();
@@ -75,7 +75,7 @@ async fn play_and_stop_send_expected_actions() {
 #[tokio::test]
 async fn set_volume_sends_desired_volume() {
     let (addr, captured) = start_fake_upnp_server().await;
-    let client = SonosControlClient::new(reqwest::Client::new());
+    let client = SonosControlClient::new(reqwest::Client::builder().no_proxy().build().unwrap());
     let rendering_url = format!("http://{addr}/Control");
 
     client.set_volume(&rendering_url, 42).await.unwrap();
@@ -98,7 +98,7 @@ async fn non_success_status_is_an_error() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    let client = SonosControlClient::new(reqwest::Client::new());
+    let client = SonosControlClient::new(reqwest::Client::builder().no_proxy().build().unwrap());
     let result = client.play(&format!("http://{addr}/Control")).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("500"));

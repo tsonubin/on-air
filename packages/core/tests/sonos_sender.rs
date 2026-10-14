@@ -57,7 +57,7 @@ async fn start_calls_set_uri_then_play_stop_calls_stop_set_volume_calls_set_volu
 
     let mut sender = SonosSender::new(
         device,
-        reqwest::Client::new(),
+        reqwest::Client::builder().no_proxy().build().unwrap(),
         "http://192.168.1.10:47990/stream/audio.wav".to_string(),
     );
 
