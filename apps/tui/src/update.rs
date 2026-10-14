@@ -213,7 +213,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::Ws(Incoming::Event(event)) => on_event(model, event),
         Msg::Snapshot(Ok(snapshot)) => {
-            model.snapshot = *snapshot;
+            let previous = std::mem::replace(&mut model.snapshot, *snapshot);
+            keep_in_flight(model, previous);
             model.placeholders.clear();
             model.since_refresh = 0;
             model.core_down = false;
@@ -272,6 +273,35 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         Msg::Accent(color) => {
             model.accent = color;
             vec![]
+        }
+    }
+}
+
+/// A snapshot read while a mixer write is in flight holds the old value:
+/// keep the optimistic one until the write lands.
+fn keep_in_flight(model: &mut Model, previous: Snapshot) {
+    let in_flight = |control: MixerControl| {
+        matches!(model.writes[control as usize], WriteSlot::InFlight { .. })
+    };
+    let (volume, eq, input, output) = (
+        in_flight(MixerControl::Volume),
+        in_flight(MixerControl::Eq),
+        in_flight(MixerControl::InputRate),
+        in_flight(MixerControl::OutputRate),
+    );
+    let snapshot = &mut model.snapshot;
+    if volume {
+        snapshot.volume = previous.volume;
+    }
+    if eq {
+        snapshot.eq = previous.eq;
+    }
+    if let (Some(rates), Some(old)) = (&mut snapshot.rates, previous.rates) {
+        if input {
+            rates.input.sample_rate_hz = old.input.sample_rate_hz;
+        }
+        if output {
+            rates.output.sample_rate_hz = old.output.sample_rate_hz;
         }
     }
 }
@@ -413,19 +443,16 @@ fn write(model: &mut Model, control: MixerControl, cmd: Cmd) -> Vec<Cmd> {
 fn on_written(model: &mut Model, control: MixerControl, result: Result<(), String>) -> Vec<Cmd> {
     let slot = std::mem::replace(&mut model.writes[control as usize], WriteSlot::Idle);
     match result {
-        Ok(()) => {
-            model.error = None;
-            match slot {
-                WriteSlot::InFlight { queued: Some(cmd) } => {
-                    model.writes[control as usize] = WriteSlot::InFlight { queued: None };
-                    vec![cmd]
-                }
-                _ if matches!(control, MixerControl::InputRate | MixerControl::OutputRate) => {
-                    vec![Cmd::LoadRates]
-                }
-                _ => vec![],
+        Ok(()) => match slot {
+            WriteSlot::InFlight { queued: Some(cmd) } => {
+                model.writes[control as usize] = WriteSlot::InFlight { queued: None };
+                vec![cmd]
             }
-        }
+            _ if matches!(control, MixerControl::InputRate | MixerControl::OutputRate) => {
+                vec![Cmd::LoadRates]
+            }
+            _ => vec![],
+        },
         // The queued value is dropped: reload the core's real values over
         // the optimistic ones instead of sending on top of a failure.
         Err(copy) => {
@@ -644,14 +671,17 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                     vec![]
                 }
                 KeyCode::Enter => {
-                    let Ok(track) = input.parse::<u8>() else {
+                    let Ok(number) = input.parse::<u16>() else {
                         return vec![];
                     };
                     let count = model.snapshot.cd.as_ref().map_or(0, |cd| cd.track_count);
-                    if track == 0 || track > count {
-                        *error = Some(format!("Track {track} is not on this disc"));
-                        return vec![];
-                    }
+                    let track = match u8::try_from(number) {
+                        Ok(track) if track != 0 && track <= count => track,
+                        _ => {
+                            *error = Some(format!("Track {number} is not on this disc"));
+                            return vec![];
+                        }
+                    };
                     model.modal = Modal::None;
                     let cmd = Cmd::ControlCd {
                         action: CdAction::Goto,
@@ -677,8 +707,13 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             };
         }
         Modal::Status => {
-            if matches!(key.code, KeyCode::Esc | KeyCode::Char('i')) {
-                model.modal = Modal::None;
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('i') => model.modal = Modal::None,
+                KeyCode::Char('q') => {
+                    model.quit = true;
+                    return vec![Cmd::Quit];
+                }
+                _ => {}
             }
             return vec![];
         }
@@ -698,6 +733,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         }
         Action::Back => {
             model.error = None;
+            model.notice = None;
             return vec![];
         }
         Action::Status => {
@@ -1092,7 +1128,8 @@ fn select(model: &mut Model) -> Vec<Cmd> {
             None => vec![],
         },
         Pane::Outputs => {
-            let Some(entry) = model.selected_dest() else {
+            // A placeholder waits for the next snapshot to list it.
+            let Some(entry) = model.selected_dest().filter(|e| !e.placeholder) else {
                 return vec![];
             };
             if let Some(a) = &model.activation {
@@ -3130,5 +3167,98 @@ mod tests {
             }),
         );
         assert!(id(&m).is_some(), "falls back to a device row");
+    }
+
+    #[test]
+    fn esc_also_dismisses_the_notice() {
+        let mut m = model_with_mock_snapshot();
+        m.notice = Some(CORE_DOWN_COPY.into());
+        m.error = Some("boom".into());
+        update(&mut m, code(KeyCode::Esc));
+        assert_eq!((m.notice.as_deref(), m.error.as_deref()), (None, None));
+    }
+
+    #[test]
+    fn q_quits_from_the_status_overlay() {
+        let mut m = model_with_mock_snapshot();
+        update(&mut m, key('i'));
+        assert_eq!(m.modal, Modal::Status);
+        assert_eq!(update(&mut m, key('q')), vec![Cmd::Quit]);
+        assert!(m.quit);
+    }
+
+    #[test]
+    fn a_three_digit_track_past_255_is_not_on_the_disc() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.cd = Some(disc(true));
+        update(&mut m, key('g'));
+        for c in "300".chars() {
+            update(&mut m, key(c));
+        }
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert!(
+            matches!(
+                &m.modal,
+                Modal::TrackPrompt { error: Some(e), .. } if e == "Track 300 is not on this disc"
+            ),
+            "{:?}",
+            m.modal
+        );
+    }
+
+    #[test]
+    fn a_mixer_write_leaves_other_errors_alone() {
+        let mut m = model_with_mock_snapshot();
+        m.error = Some("The speaker did not answer.".into());
+        update(&mut m, key('+'));
+        update(&mut m, written(MixerControl::Volume, Ok(())));
+        assert_eq!(m.error.as_deref(), Some("The speaker did not answer."));
+    }
+
+    #[test]
+    fn a_snapshot_keeps_values_still_being_written() {
+        let mut m = model_with_mock_snapshot();
+        let stale = m.snapshot.clone();
+        m.pane = Pane::Mixer;
+        update(&mut m, key('+'));
+        m.mixer_row = MixerRow::Eq(0);
+        update(&mut m, key('l'));
+        m.mixer_row = MixerRow::InputRate;
+        update(&mut m, key('l'));
+        m.mixer_row = MixerRow::OutputRate;
+        update(&mut m, key('l'));
+        let optimistic = m.snapshot.clone();
+        update(&mut m, Msg::Snapshot(Ok(Box::new(stale.clone()))));
+        assert_eq!(m.snapshot.volume, optimistic.volume);
+        assert_eq!(m.snapshot.eq, optimistic.eq);
+        assert_eq!(m.snapshot.rates, optimistic.rates);
+
+        settle(&mut m);
+        update(&mut m, Msg::Snapshot(Ok(Box::new(stale.clone()))));
+        assert_eq!(m.snapshot, stale, "settled controls take the core's values");
+    }
+
+    #[test]
+    fn a_placeholder_row_cannot_be_activated() {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.bluetooth = Some(vec![]);
+        update(
+            &mut m,
+            ev(WsEvent::DeviceJoined {
+                transport: "sonos".into(),
+                id: "uuid:new".into(),
+                name: "New".into(),
+            }),
+        );
+        let index = m
+            .dest_rows()
+            .iter()
+            .position(|row| matches!(row, DestRow::Entry(e) if e.placeholder))
+            .unwrap();
+        assert_eq!(update(&mut m, click(Target::DestRow(index))), vec![]);
+        assert_eq!(m.output_index, index);
+        assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
+        assert_eq!(m.activation, None);
+        assert_eq!(m.modal, Modal::None);
     }
 }

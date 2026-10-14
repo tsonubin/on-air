@@ -42,7 +42,7 @@ is transport, `?` is help and `q` quits.
 | `b` | Open Bluetooth settings |
 | `r` | Refresh devices and snapshot |
 | `?` | Help overlay |
-| `Esc` | Close the overlay or modal, dismiss the error banner |
+| `Esc` | Close the overlay or modal, dismiss the error banner or notice line |
 | `q`, `Ctrl-C` | Quit; the service keeps running |
 
 ## Layout of `src/`

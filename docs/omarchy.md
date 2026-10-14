@@ -177,7 +177,7 @@ Run `on-air` in a terminal. Quitting never stops the service.
 | `b` | Open Bluetooth settings |
 | `r` | Refresh devices |
 | `?` | This help |
-| `Esc` | Close, dismiss the error |
+| `Esc` | Close, dismiss the error or notice |
 | `q / Ctrl-C` | Quit; the service keeps running |
 
 ### Mouse
@@ -189,7 +189,7 @@ works and the help overlay says "mouse off".
 | Where | Action |
 |---|---|
 | Source or output row | Left click: focus the pane, move the cursor and select (same as `Enter`). Wheel: move the cursor |
-| Volume or EQ fader | Left click or drag: set the value at that cell (the top is the maximum). Wheel: fine step. In the compact mixer a click only focuses the fader; a drag stays on the fader where the button went down |
+| Volume or EQ fader | Left click: focus the fader; click it again, or drag, to set the value at that cell (the top is the maximum). A drag stays on the fader where the button went down. Wheel: fine step. In the compact mixer a click only focuses the fader and a drag does nothing there |
 | Rate row | Left click: next rate. Wheel: next or previous |
 | CD buttons | Left click: previous, play / pause, next, eject (eject still asks first) |
 | CD progress bar | Left click: seek to that position |
@@ -199,16 +199,17 @@ works and the help overlay says "mouse off".
 
 ### Status
 
-`i` opens the status overlay: version, addresses, monitor state and
-whether the service starts at login. Click the `PIN` or address tag in the
-header for the same view.
+`i` opens the status overlay: version, the core's port, addresses (each
+with the port), monitor state and whether the service starts at login.
+Click the `PIN` or address tag in the header for the same view. `Esc` or
+`i` closes it; `q` quits.
 
 ### Monitor off
 
 With the monitor off the header shows `monitor off — press m`. Capture and
 streaming are stopped, so the mixer, sources, outputs and CD controls are
 locked until you press `m` (or click the tag) to turn it back on. `i`, `?`,
-`a`, `Esc` and `q` still work.
+`a`, `Esc`, `q` and `Ctrl-C` still work.
 
 ## Bluetooth
 

@@ -144,7 +144,7 @@ pub const KEYS: &[Binding] = &[
     Binding {
         keys: "Esc",
         action: Action::Back,
-        help: "Close, dismiss the error",
+        help: "Close, dismiss the error or notice",
     },
     Binding {
         keys: "q / Ctrl-C",

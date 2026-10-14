@@ -376,7 +376,6 @@ impl Model {
             .find(|d| d.id == id)
     }
 
-    /// The state of one device; the first rule that matches wins.
     /// Devices announced by the core before the next snapshot lists them.
     fn push_placeholders(&self, transport: &'static str, rows: &mut Vec<DestRow>) {
         let listed = |id: &str| {
@@ -402,6 +401,7 @@ impl Model {
         }
     }
 
+    /// The state of one device; the first rule that matches wins.
     fn dest_state(
         &self,
         transport: &str,
@@ -410,14 +410,17 @@ impl Model {
         device: Option<&BluetoothDeviceInfo>,
     ) -> DestState {
         let is_this = |t: &str, i: &str| t == transport && i == id;
-        if let Some(active) = &self.snapshot.active_output {
-            if is_this(&active.output.transport, &active.output.device_id) {
-                return match active.state {
-                    Some(OutputPhase::Failed) => DestState::Failed,
-                    Some(OutputPhase::Starting) => DestState::Connecting,
-                    Some(OutputPhase::Live) | None => DestState::Live,
-                };
-            }
+        let phase = self
+            .snapshot
+            .active_output
+            .as_ref()
+            .filter(|active| is_this(&active.output.transport, &active.output.device_id))
+            .map(|active| active.state);
+        match phase {
+            Some(Some(OutputPhase::Starting)) => return DestState::Connecting,
+            Some(Some(OutputPhase::Live) | None) => return DestState::Live,
+            // A retry of a failed output shows its own step below.
+            Some(Some(OutputPhase::Failed)) | None => {}
         }
         if let Some(activation) = &self.activation {
             if is_this(&activation.transport, &activation.id) {
@@ -428,6 +431,9 @@ impl Model {
                     }
                 };
             }
+        }
+        if phase == Some(Some(OutputPhase::Failed)) {
+            return DestState::Failed;
         }
         if let Some((t, i)) = &self.failed_output {
             if is_this(t, i) {
@@ -524,16 +530,22 @@ mod tests {
         let mut m = Model::new();
         m.snapshot.outputs = vec![output("s1", "sonos")];
         for (phase, want) in [
-            (Some(OutputPhase::Failed), DestState::Failed),
             (Some(OutputPhase::Starting), DestState::Connecting),
             (Some(OutputPhase::Live), DestState::Live),
         ] {
             m.snapshot.active_output = Some(active("sonos", "s1", phase));
-            // The active output beats an activation and a failure.
+            // A starting or live output beats an activation and a failure.
             m.activation = activation(ActivationStep::Pairing);
             m.failed_output = Some(("sonos".into(), "s1".into()));
             assert_eq!(state_of(&m, "sonos", "s1"), want);
         }
+        // A retry of a failed output shows its own step, then the failure.
+        m.snapshot.active_output = Some(active("sonos", "s1", Some(OutputPhase::Failed)));
+        m.activation = activation(ActivationStep::Connecting);
+        assert_eq!(state_of(&m, "sonos", "s1"), DestState::Connecting);
+        m.activation = None;
+        assert_eq!(state_of(&m, "sonos", "s1"), DestState::Failed);
+        m.activation = activation(ActivationStep::Pairing);
         m.snapshot.active_output = None;
         assert_eq!(state_of(&m, "sonos", "s1"), DestState::Pairing);
         m.activation = activation(ActivationStep::Connecting);
