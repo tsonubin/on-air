@@ -507,6 +507,7 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
                     .any(|p| p.0 == transport && p.1 == id)
             {
                 model.placeholders.push((transport, id, name));
+                clamp_selection(model);
             }
             schedule_refresh(model)
         }
@@ -843,6 +844,7 @@ fn on_mouse(
                 model.source_index = index;
             } else if matches!(model.dest_rows().get(index), Some(DestRow::Entry(_))) {
                 model.output_index = index;
+                remember_dest(model);
             } else {
                 return vec![];
             }
@@ -1018,6 +1020,7 @@ fn move_selection(model: &mut Model, delta: i32) {
             }
             if matches!(rows[index], DestRow::Entry(_)) {
                 model.output_index = index;
+                remember_dest(model);
             }
         }
         Pane::Mixer => {
@@ -1040,11 +1043,31 @@ fn step(index: usize, delta: i32, len: usize) -> usize {
     (index as i32 + delta).clamp(0, max) as usize
 }
 
+/// Remember the device under the Destination cursor, so the cursor can
+/// follow it when rows above it come and go.
+fn remember_dest(model: &mut Model) {
+    model.selected_dest_key = model
+        .selected_dest()
+        .map(|entry| (entry.transport.to_string(), entry.id));
+}
+
+/// Keep the cursors on real rows after the lists change; the Destination
+/// cursor stays on its device while that device is listed.
 fn clamp_selection(model: &mut Model) {
     let sources = input_labels(&model.snapshot.inputs).len();
     model.source_index = model.source_index.min(sources.saturating_sub(1));
     let rows = model.dest_rows();
-    if rows.is_empty() {
+    let kept = model
+        .selected_dest_key
+        .as_ref()
+        .and_then(|(transport, id)| {
+            rows.iter().position(
+                |row| matches!(row, DestRow::Entry(e) if e.transport == transport && e.id == *id),
+            )
+        });
+    if let Some(index) = kept {
+        model.output_index = index;
+    } else if rows.is_empty() {
         model.output_index = 0;
     } else {
         model.output_index = model.output_index.min(rows.len() - 1);
@@ -1053,6 +1076,9 @@ fn clamp_selection(model: &mut Model) {
                 model.output_index = first;
             }
         }
+    }
+    if kept.is_none() {
+        remember_dest(model);
     }
 }
 
@@ -3064,5 +3090,45 @@ mod tests {
         );
         assert_eq!(m.mixer_row, MixerRow::Eq(1));
         assert_eq!(m.snapshot.eq, [0.0; 5]);
+    }
+
+    #[test]
+    fn the_destination_cursor_follows_its_device() {
+        let mut m = on_dest("ap-living");
+        let id = |m: &Model| m.selected_dest().map(|e| e.id);
+        update(
+            &mut m,
+            ev(WsEvent::DeviceJoined {
+                transport: "sonos".into(),
+                id: "uuid:new".into(),
+                name: "New".into(),
+            }),
+        );
+        assert_eq!(id(&m).as_deref(), Some("ap-living"));
+
+        let mut snapshot = m.snapshot.clone();
+        snapshot
+            .outputs
+            .insert(0, output("uuid:other", "Other", "sonos", false, true));
+        update(&mut m, Msg::Snapshot(Ok(Box::new(snapshot))));
+        assert_eq!(id(&m).as_deref(), Some("ap-living"));
+
+        update(
+            &mut m,
+            ev(WsEvent::DeviceLeft {
+                transport: "sonos".into(),
+                id: "uuid:other".into(),
+            }),
+        );
+        assert_eq!(id(&m).as_deref(), Some("ap-living"));
+
+        update(
+            &mut m,
+            ev(WsEvent::DeviceLeft {
+                transport: "airplay".into(),
+                id: "ap-living".into(),
+            }),
+        );
+        assert!(id(&m).is_some(), "falls back to a device row");
     }
 }

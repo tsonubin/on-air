@@ -214,6 +214,9 @@ pub struct Model {
     pub source_index: usize,
     /// Index into `dest_rows()`; never a header once there is a device.
     pub output_index: usize,
+    /// The (transport, id) under the Destination cursor; `output_index`
+    /// follows it when rows come and go.
+    pub selected_dest_key: Option<(String, String)>,
     pub mixer_row: MixerRow,
     /// Indexed by `MixerControl as usize`.
     pub writes: [WriteSlot; 4],
@@ -258,6 +261,7 @@ impl Model {
             pane: Pane::Sources,
             source_index: 0,
             output_index: 1,
+            selected_dest_key: None,
             mixer_row: MixerRow::Volume,
             writes: [const { WriteSlot::Idle }; 4],
             meter: Meter::default(),
