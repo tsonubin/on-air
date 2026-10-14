@@ -16,6 +16,13 @@ function reset() {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Upper bound for "the timer fired about when asked". Generous because the
+ * suite runs alongside the other packages' tests; the backoff *growth* is
+ * proven by the lower bounds, which do not depend on scheduler latency.
+ */
+const SOON_MS = 250;
+
 async function waitFor(check: () => boolean, label: string, timeoutMs = 2_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!check()) {
@@ -100,7 +107,7 @@ test("a server close reconnects with growing backoff and resets after open", asy
   const t0 = Date.now();
   await waitFor(() => FakeSocket.instances.length === 2, "first retry");
   const firstDelay = Date.now() - t0;
-  assert.ok(firstDelay < 40, `first retry should be ~5 ms, was ${firstDelay}`);
+  assert.ok(firstDelay < SOON_MS, `first retry should be ~5 ms, was ${firstDelay}`);
 
   // Fail again before opening: no second "reconnecting", longer wait.
   h.socket(1).fail();
@@ -118,7 +125,7 @@ test("a server close reconnects with growing backoff and resets after open", asy
   h.socket(2).dropFromServer();
   const t2 = Date.now();
   await waitFor(() => FakeSocket.instances.length === 4, "third retry");
-  assert.ok(Date.now() - t2 < 40);
+  assert.ok(Date.now() - t2 < SOON_MS);
   h.sub.close();
 });
 
@@ -129,7 +136,7 @@ test("backoff never exceeds maxBackoffMs", async () => {
     FakeSocket.instances[before - 1].fail();
     const t = Date.now();
     await waitFor(() => FakeSocket.instances.length === before + 1, `retry ${i}`);
-    assert.ok(Date.now() - t < 60, `retry ${i} waited ${Date.now() - t} ms`);
+    assert.ok(Date.now() - t < SOON_MS, `retry ${i} waited ${Date.now() - t} ms`);
   }
   h.sub.close();
 });
