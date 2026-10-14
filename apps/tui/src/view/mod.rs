@@ -900,4 +900,15 @@ mod tests {
             text(&b)
         );
     }
+
+    #[test]
+    fn core_down_says_unreachable_after_the_first_load() {
+        let mut m = model();
+        m.connection = Connection::Reconnecting;
+        m.core_down = true;
+        assert!(m.snapshot.status.is_some());
+        let header = rows(&render(&m, 100, 30))[0].clone();
+        assert!(header.contains("✗ core unreachable"), "{header}");
+        assert!(!header.contains("reconnecting"), "{header}");
+    }
 }

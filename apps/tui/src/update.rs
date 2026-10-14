@@ -201,8 +201,11 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             vec![]
         }
         Msg::Ws(Incoming::Connection(connection)) => {
+            let was_open = model.connection == Connection::Open;
             model.connection = connection;
-            if connection == Connection::Open {
+            // On a drop, one probe tells a restart from a dead core: its
+            // failure marks the core down.
+            if connection == Connection::Open || was_open {
                 vec![Cmd::Refresh]
             } else {
                 vec![]
@@ -2997,5 +3000,33 @@ mod tests {
             Some(LABEL_OUTPUT),
             "only a matching label clears the pending one"
         );
+    }
+
+    #[test]
+    fn losing_the_socket_probes_the_core_once() {
+        let mut m = model_with_mock_snapshot();
+        m.connection = Connection::Open;
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::Ws(Incoming::Connection(Connection::Reconnecting))
+            ),
+            vec![Cmd::Refresh]
+        );
+        assert_eq!(
+            update(
+                &mut m,
+                Msg::Ws(Incoming::Connection(Connection::Reconnecting))
+            ),
+            vec![],
+            "only the drop from Open probes"
+        );
+        m.connection = Connection::Open;
+        assert_eq!(
+            update(&mut m, Msg::Ws(Incoming::Connection(Connection::Closed))),
+            vec![Cmd::Refresh]
+        );
+        update(&mut m, Msg::Snapshot(Err("Core unreachable".into())));
+        assert!(m.core_down);
     }
 }

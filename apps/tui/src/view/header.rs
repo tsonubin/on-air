@@ -51,6 +51,12 @@ fn left_spans(model: &Model) -> Vec<Span<'static>> {
         None => spans.push(Span::styled(" ○ idle ", Style::new().dim())),
     }
     match model.connection {
+        _ if model.core_down => {
+            spans.push(Span::styled(
+                " ✗ core unreachable ",
+                Style::new().fg(Color::Red),
+            ));
+        }
         Connection::Closed | Connection::Reconnecting if model.snapshot.status.is_none() => {
             spans.push(Span::styled(
                 " ✗ core unreachable ",
