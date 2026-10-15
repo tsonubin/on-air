@@ -201,7 +201,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     },
     (error, _value, committed) => {
       if (committed === undefined) {
-        scheduleRefresh("control", ["eq"]);
+        scheduleRefresh("control", ["gains"]);
       } else {
         gainsRef.current = committed;
         patch({ gains: committed });

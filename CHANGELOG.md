@@ -16,6 +16,13 @@ Notable changes to on-air. The format follows
   device whose label matches the first.
 - New `on-air-api` crate (`packages/api`) holds the Rust wire types; the
   terminal UI no longer mirrors them by hand.
+- The desktop and phone apps share one snapshot engine in
+  `packages/control-client`: slice readers, result merging with a staleness
+  guard, the refresh verdict, the WebSocket event reducer, the coalescing
+  refresh scheduler and the latest-write queue. Both now treat events the
+  same way: a `DeviceJoined` shows the speaker at once, an input switch
+  re-reads the sample rate, and an output stop for another transport is
+  ignored.
 - Packaging: one GUI desktop entry, one post-install hook, the systemd
   user unit shipped by the Debian and RPM core packages too; the
   unpublished `on-air-desktop` and `on-air-core` AUR recipes and the

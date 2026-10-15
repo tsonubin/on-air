@@ -1,38 +1,32 @@
-import type {
-  ActiveOutputView,
-  AirPlayMode,
-  CdStatus,
-  EqGains,
-  OutputInfo,
-  SampleRateResponse,
-  StatusResponse,
-  WsEvent,
-} from "@on-air/api-types";
-import type { ConnectionState, SubscribeOptions } from "@on-air/control-client";
+import type { ActiveOutputView, CdStatus, WsEvent } from "@on-air/api-types";
+import {
+  ALL_SLICES,
+  CONFIG_SLICES,
+  type ConnectionState,
+  type CoreSnapshot,
+  createRefreshQueue,
+  createStaleGuard,
+  DEVICE_SLICES,
+  EMPTY_SNAPSHOT,
+  judgeResults,
+  mergeResults,
+  type RefreshQueue,
+  readSlices,
+  reduceEvent,
+  type Slice,
+  type SliceReaders,
+  type SubscribeOptions,
+} from "@on-air/control-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ClientLike, liveClient } from "../lib/client";
-import { errorCopy, INPUT_STOPPED_COPY, isServicePaused } from "../lib/errorCopy";
+import { errorCopy, INPUT_STOPPED_COPY } from "../lib/errorCopy";
 
-/** Everything the UI reads from the core. Each field is `null` until its first fetch lands. */
-export interface CoreSnapshot {
-  status: StatusResponse | null;
-  inputs: string[] | null;
-  activeInput: string | null;
-  outputs: OutputInfo[] | null;
-  /** `state` is absent on older cores; treat that as live. */
-  activeOutput: ActiveOutputView | null;
-  volume: number | null;
-  gains: EqGains | null;
-  sampleRate: SampleRateResponse | null;
-  pin: string | null;
-  airplayMode: AirPlayMode | null;
-  cd: CdStatus | null;
-}
+export type { CoreSnapshot } from "@on-air/control-client";
 
 /** Health of the HTTP side, derived from `/api/status` and fetch failures only. */
 export type Connection = "connecting" | "ok" | "unreachable" | "paused";
 
-/** Which group of endpoints a refresh covers. */
+/** Which group of endpoints a refresh covers. Status is always included. */
 export type RefreshKind = "devices" | "config" | "all";
 
 /** A failed user action. Only the next action or an explicit dismiss clears it. */
@@ -45,7 +39,7 @@ export interface UseCoreSnapshotOptions {
   client?: ClientLike;
   /** Full poll interval. */
   pollMs?: number;
-  /** Window in which repeated refresh requests are coalesced. */
+  /** Window in which event-triggered refreshes are coalesced. */
   debounceMs?: number;
   /** Forwarded to `subscribeEvents`; tests inject a fake socket here. */
   subscribeOptions?: SubscribeOptions;
@@ -59,7 +53,7 @@ export interface CoreSnapshotHandle {
   actionError: ActionError | null;
   reportError(err: unknown): void;
   clearError(): void;
-  /** Debounced: runs at once, then at most once more after the window closes. */
+  /** Runs now (after any in-flight refresh) and resolves when done. */
   refresh(kind?: RefreshKind): Promise<void>;
   /** Apply the result of a user action without waiting for a poll. */
   patch: {
@@ -74,43 +68,27 @@ export const DEFAULT_DEBOUNCE_MS = 300;
 /** The core sends a Heartbeat text frame every 10 s; three missed ones mean a dead socket. */
 export const EVENT_STALL_MS = 30_000;
 
-const EMPTY: CoreSnapshot = {
-  status: null,
-  inputs: null,
-  activeInput: null,
-  outputs: null,
-  activeOutput: null,
-  volume: null,
-  gains: null,
-  sampleRate: null,
-  pin: null,
-  airplayMode: null,
-  cd: null,
+// The pairing PIN is a loopback-only read, so only this window asks for it.
+const KIND_SLICES: Record<RefreshKind, readonly Slice[]> = {
+  all: [...ALL_SLICES, "pin"],
+  devices: ["status", ...DEVICE_SLICES],
+  config: ["status", ...CONFIG_SLICES, "pin"],
 };
 
-const MISS = Symbol("miss");
-type Settled<T> = T | typeof MISS;
-
-type Field = keyof CoreSnapshot;
-
-/**
- * Fields a `DeviceJoined` event does not carry. A debounced devices refresh
- * follows every join to replace these guesses with the catalog entry.
- */
-function provisionalOutput(ev: Extract<WsEvent, { type: "DeviceJoined" }>): OutputInfo {
+function readersFor(client: ClientLike): SliceReaders {
   return {
-    id: ev.id,
-    name: ev.name,
-    transport: ev.transport,
-    kind: "solo",
-    member_count: 1,
-    needs_pair: ev.transport === "airplay",
-    paired: ev.transport !== "airplay",
+    status: () => client.fetchStatus(),
+    inputs: () => client.listInputs(),
+    activeInput: () => client.getActiveInput(),
+    outputs: () => client.listOutputs(),
+    activeOutput: () => client.getActiveOutput(),
+    volume: () => client.getVolume(),
+    gains: () => client.getEq(),
+    sampleRate: () => client.getSampleRate(),
+    pin: () => client.getPairingPin(),
+    airplayMode: () => client.getAirplayMode(),
+    cd: () => client.getCd(),
   };
-}
-
-function mergeKinds(a: RefreshKind, b: RefreshKind): RefreshKind {
-  return a === b ? a : "all";
 }
 
 export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnapshotHandle {
@@ -121,163 +99,53 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
     subscribeOptions,
   } = options;
 
-  const [snapshot, setSnapshot] = useState<CoreSnapshot>(EMPTY);
+  const [snapshot, setSnapshot] = useState<CoreSnapshot>(EMPTY_SNAPSHOT);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [liveUpdates, setLiveUpdates] = useState<ConnectionState>("connecting");
   const [actionError, setActionError] = useState<ActionError | null>(null);
-
-  // Mirrors of state the fetchers need without re-creating callbacks.
-  const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
-  const connectionRef = useRef(connection);
-  connectionRef.current = connection;
   const clientRef = useRef(client);
   clientRef.current = client;
 
-  const patchSnapshot = useCallback((partial: Partial<CoreSnapshot>) => {
-    setSnapshot((prev) => ({ ...prev, ...partial }));
+  // The ref is the source of truth so events and merges compose in order
+  // even when several land before React renders; state mirrors it.
+  const snapshotRef = useRef(snapshot);
+  const update = useCallback((f: (prev: CoreSnapshot) => CoreSnapshot) => {
+    const next = f(snapshotRef.current);
+    if (next === snapshotRef.current) return;
+    snapshotRef.current = next;
+    setSnapshot(next);
   }, []);
+  const guard = useRef(createStaleGuard<Slice>()).current;
 
-  // Every event or local patch bumps `generation` and stamps the fields it
-  // set. A fetch drops any field stamped after it started, so a poll that
-  // left before an event cannot land after it and restore stale state.
-  const generation = useRef(0);
-  const touchedAt = useRef<Partial<Record<Field, number>>>({});
-  const touch = useCallback((...fields: Field[]) => {
-    generation.current += 1;
-    for (const field of fields) touchedAt.current[field] = generation.current;
-  }, []);
-
-  // ---------------------------------------------------------------------
-  // Fetching
-  // ---------------------------------------------------------------------
-
-  /** One fetch group; failures are swallowed per endpoint and reported via `connection`. */
-  const fetchNow = useCallback(
-    async (kind: RefreshKind): Promise<void> => {
-      const api = clientRef.current;
-      const startedAt = generation.current;
-      const stale = (field: Field) => (touchedAt.current[field] ?? 0) > startedAt;
-      let pausedByCode = false;
-      const settle = async <T>(p: Promise<T>): Promise<Settled<T>> => {
-        try {
-          return await p;
-        } catch (err) {
-          if (isServicePaused(err)) pausedByCode = true;
-          return MISS;
-        }
-      };
-
-      let status: Settled<StatusResponse>;
-      try {
-        status = await api.fetchStatus();
-      } catch {
+  const run = useCallback(
+    async (slices: Slice[]) => {
+      const since = guard.now();
+      const results = await readSlices(readersFor(clientRef.current), slices);
+      const stale = (slice: Slice) => guard.isStale(slice, since);
+      update((prev) => mergeResults(prev, results, stale));
+      // A ServiceStateChanged landed meanwhile; it set the connection itself.
+      if (slices.includes("status") && stale("status")) return;
+      const outcome = judgeResults(results, slices);
+      if (outcome.kind === "inconclusive") return;
+      if (outcome.kind === "unauthorized" || outcome.phase === "reconnecting") {
         setConnection("unreachable");
-        return;
+      } else {
+        setConnection(outcome.phase === "paused" ? "paused" : "ok");
       }
-      // A ServiceStateChanged landed meanwhile; it set the connection itself
-      // and, when enabling, scheduled its own refresh.
-      if (stale("status")) return;
-      patchSnapshot({ status });
-      const paused = status.service_enabled === false;
-      if (paused) {
-        // `Paired` answers 503 to everything else while paused; do not spam it.
-        setConnection("paused");
-        return;
-      }
-
-      const wantDevices = kind !== "config";
-      const wantConfig = kind !== "devices";
-      const skip = Promise.resolve(MISS);
-      const [inputs, activeInput, outputs, activeOutput, cd, volume, gains, sampleRate, pin, mode] =
-        await Promise.all([
-          wantDevices ? settle(api.listInputs()) : skip,
-          wantDevices ? settle(api.getActiveInput()) : skip,
-          wantDevices ? settle(api.listOutputs()) : skip,
-          wantDevices ? settle(api.getActiveOutput()) : skip,
-          wantDevices ? settle(api.getCd()) : skip,
-          wantConfig ? settle(api.getVolume()) : skip,
-          wantConfig ? settle(api.getEq()) : skip,
-          wantConfig ? settle(api.getSampleRate()) : skip,
-          wantConfig ? settle(api.getPairingPin()) : skip,
-          wantConfig ? settle(api.getAirplayMode()) : skip,
-        ]);
-
-      const next: Partial<CoreSnapshot> = {};
-      if (inputs !== MISS) next.inputs = inputs;
-      if (activeInput !== MISS) next.activeInput = activeInput.name;
-      if (outputs !== MISS) next.outputs = outputs;
-      if (activeOutput !== MISS) next.activeOutput = activeOutput;
-      if (cd !== MISS) next.cd = cd;
-      if (volume !== MISS) next.volume = volume;
-      if (gains !== MISS) next.gains = gains;
-      if (sampleRate !== MISS) next.sampleRate = sampleRate;
-      if (pin !== MISS) next.pin = pin;
-      if (mode !== MISS) next.airplayMode = mode;
-      for (const field of Object.keys(next) as Field[]) {
-        if (stale(field)) delete next[field];
-      }
-      patchSnapshot(next);
-      setConnection(pausedByCode ? "paused" : "ok");
     },
-    [patchSnapshot],
+    [guard, update],
   );
-
-  // Debounce (leading edge plus one trailing run) on top of in-flight
-  // serialisation, so a burst of socket events costs at most two rounds.
-  const inFlight = useRef<Promise<void> | null>(null);
-  const windowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const trailing = useRef<{ kind: RefreshKind; promise: Promise<void>; run: () => void } | null>(
-    null,
-  );
-
-  const runSerialised = useCallback(
-    (kind: RefreshKind): Promise<void> => {
-      const previous = inFlight.current ?? Promise.resolve();
-      const run = previous.then(() => fetchNow(kind));
-      inFlight.current = run;
-      void run.finally(() => {
-        if (inFlight.current === run) inFlight.current = null;
-      });
-      return run;
-    },
-    [fetchNow],
-  );
+  const runRef = useRef(run);
+  runRef.current = run;
+  const queue = useRef<RefreshQueue<Slice> | null>(null);
+  if (queue.current === null) {
+    queue.current = createRefreshQueue<Slice>((slices) => runRef.current(slices), debounceMs);
+  }
 
   const refresh = useCallback(
-    (kind: RefreshKind = "all"): Promise<void> => {
-      if (windowTimer.current === null) {
-        windowTimer.current = setTimeout(() => {
-          windowTimer.current = null;
-          const queued = trailing.current;
-          trailing.current = null;
-          queued?.run();
-        }, debounceMs);
-        return runSerialised(kind);
-      }
-      if (trailing.current) {
-        trailing.current.kind = mergeKinds(trailing.current.kind, kind);
-        return trailing.current.promise;
-      }
-      let resolve!: () => void;
-      let reject!: (err: unknown) => void;
-      const promise = new Promise<void>((res, rej) => {
-        resolve = res;
-        reject = rej;
-      });
-      const entry = {
-        kind,
-        promise,
-        run: () => {
-          runSerialised(entry.kind).then(resolve, reject);
-        },
-      };
-      trailing.current = entry;
-      return promise;
-    },
-    [debounceMs, runSerialised],
+    (kind: RefreshKind = "all"): Promise<void> => queue.current!.refreshNow(KIND_SLICES[kind]),
+    [],
   );
-
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
@@ -294,107 +162,22 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
       clearInterval(id);
       document.removeEventListener("visibilitychange", refreshIfVisible);
       window.removeEventListener("focus", refreshIfVisible);
-      if (windowTimer.current !== null) clearTimeout(windowTimer.current);
-      windowTimer.current = null;
-      trailing.current = null;
+      queue.current?.clear();
     };
   }, [pollMs]);
 
-  // ---------------------------------------------------------------------
-  // Live events
-  // ---------------------------------------------------------------------
-
   const applyEvent = useCallback(
     (ev: WsEvent) => {
-      switch (ev.type) {
-        case "Heartbeat":
-        case "LevelMeter":
-          return;
-        case "CdStateChanged": {
-          const { type: _type, ...fields } = ev;
-          const wasPresent = snapshotRef.current.cd?.present ?? false;
-          touch("cd");
-          setSnapshot((prev) => ({
-            ...prev,
-            cd: { ...(prev.cd ?? { tracks: [] }), ...fields },
-          }));
-          // A disc arriving or leaving adds or removes the "Audio CD" input,
-          // and autoplay may switch to it.
-          if (ev.present !== wasPresent) void refreshRef.current("devices").catch(() => undefined);
-          return;
-        }
-        case "InputStateChanged":
-          touch("activeInput");
-          setSnapshot((prev) => {
-            if (ev.active) return { ...prev, activeInput: ev.name };
-            return ev.name === null || prev.activeInput === ev.name
-              ? { ...prev, activeInput: null }
-              : prev;
-          });
-          if (ev.error) setActionError({ message: INPUT_STOPPED_COPY, at: Date.now() });
-          void refreshRef.current("devices").catch(() => undefined);
-          return;
-        case "ServiceStateChanged":
-          touch("status");
-          setSnapshot((prev) =>
-            prev.status
-              ? { ...prev, status: { ...prev.status, service_enabled: ev.enabled } }
-              : prev,
-          );
-          if (ev.enabled) {
-            setConnection("ok");
-            void refreshRef.current("all").catch(() => undefined);
-          } else {
-            setConnection("paused");
-          }
-          return;
-        case "OutputStateChanged":
-          touch("activeOutput");
-          setSnapshot((prev) => {
-            if (!ev.active) {
-              return prev.activeOutput?.transport === ev.transport
-                ? { ...prev, activeOutput: null }
-                : prev;
-            }
-            // The event names the device but does not carry its id; the
-            // catalog usually has it, otherwise a devices refresh fills it.
-            const match = prev.outputs?.find(
-              (o) => o.transport === ev.transport && o.name === ev.device_name,
-            );
-            if (!match) void refreshRef.current("devices").catch(() => undefined);
-            return {
-              ...prev,
-              activeOutput: {
-                transport: ev.transport,
-                device_name: ev.device_name,
-                device_id: match?.id ?? "",
-                // The core only announces an active output once it is live.
-                state: "live",
-              },
-            };
-          });
-          return;
-        case "DeviceJoined":
-          touch("outputs");
-          setSnapshot((prev) => {
-            const outputs = prev.outputs ?? [];
-            if (outputs.some((o) => o.transport === ev.transport && o.id === ev.id)) return prev;
-            return { ...prev, outputs: [...outputs, provisionalOutput(ev)] };
-          });
-          void refreshRef.current("devices").catch(() => undefined);
-          return;
-        case "DeviceLeft":
-          touch("outputs");
-          setSnapshot((prev) => ({
-            ...prev,
-            outputs:
-              prev.outputs?.filter((o) => !(o.transport === ev.transport && o.id === ev.id)) ??
-              null,
-          }));
-          return;
+      const reduced = reduceEvent(snapshotRef.current, ev);
+      guard.touch(...reduced.touched);
+      update(() => reduced.next);
+      if (reduced.inputStopped) setActionError({ message: INPUT_STOPPED_COPY, at: Date.now() });
+      if (reduced.serviceEnabled !== undefined) {
+        setConnection(reduced.serviceEnabled ? "ok" : "paused");
       }
+      if (reduced.refresh.length > 0) queue.current?.schedule(reduced.refresh);
     },
-    [touch],
+    [guard, update],
   );
 
   // Re-subscribe when the HTTP side recovers: a socket left half-open by a
@@ -431,10 +214,6 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
     return () => subscription.close();
   }, [applyEvent, subscribeOptions, socketGeneration]);
 
-  // ---------------------------------------------------------------------
-  // Action errors and patches
-  // ---------------------------------------------------------------------
-
   const reportError = useCallback((err: unknown) => {
     setActionError({ message: errorCopy(err), at: Date.now() });
   }, []);
@@ -443,19 +222,19 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
   const patch = useMemo(
     () => ({
       cd: (next: CdStatus) => {
-        touch("cd");
-        patchSnapshot({ cd: next });
+        guard.touch("cd");
+        update((prev) => ({ ...prev, cd: next }));
       },
       activeOutput: (next: ActiveOutputView | null) => {
-        touch("activeOutput");
-        patchSnapshot({ activeOutput: next });
+        guard.touch("activeOutput");
+        update((prev) => ({ ...prev, activeOutput: next }));
       },
       activeInput: (next: string | null) => {
-        touch("activeInput");
-        patchSnapshot({ activeInput: next });
+        guard.touch("activeInput");
+        update((prev) => ({ ...prev, activeInput: next }));
       },
     }),
-    [patchSnapshot, touch],
+    [guard, update],
   );
 
   return {

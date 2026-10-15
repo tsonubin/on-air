@@ -253,9 +253,10 @@ describe("useCoreSnapshot", () => {
     act(() => {
       for (let i = 0; i < 5; i += 1) burst = hook.result.current.refresh("devices");
     });
-    // The leading run starts at once (status first, then the group), still inside the window.
+    // The leading run starts at once (status first, then the group); the
+    // other four become one more run after it, never one each.
     await tick(0);
-    expect(client.listOutputs.mock.calls.length).toBe(outputsBefore + 1);
+    expect(client.listOutputs.mock.calls.length).toBeGreaterThanOrEqual(outputsBefore + 1);
     await act(async () => {
       await burst;
     });

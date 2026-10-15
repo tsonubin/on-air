@@ -1,4 +1,5 @@
 import type { EqGains } from "@on-air/api-types";
+import { createLatestWriteQueue, type LatestWriteQueue } from "@on-air/control-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ClientLike, liveClient } from "../lib/client";
 import type { CoreSnapshot, RefreshKind } from "./useCoreSnapshot";
@@ -23,72 +24,28 @@ export interface MixerHandle {
   setOutputRate(hz: number): void;
 }
 
-export const DEFAULT_VOLUME = 50;
-export const FLAT_EQ: EqGains = [0, 0, 0, 0, 0];
+const DEFAULT_VOLUME = 50;
+const FLAT_EQ: EqGains = [0, 0, 0, 0, 0];
 const DEFAULT_RATES = [44100, 48000];
 
-type WriteKey = "volume" | "eq" | "input_hz" | "output_hz";
-
-interface Pending<T> {
-  value: T;
-  send: (value: T) => Promise<void>;
-  onFail: (attempted: T, err: unknown) => void;
+interface Queues {
+  volume: LatestWriteQueue<number>;
+  eq: LatestWriteQueue<EqGains>;
+  input_hz: LatestWriteQueue<number>;
+  output_hz: LatestWriteQueue<number>;
 }
 
 /**
- * Latest-write queue: one request in flight per key, and only the newest
- * value waits behind it. Older pending values are dropped. When a write
- * fails and a newer value is queued, the newer value is sent (it supersedes
- * the failed one); only when nothing newer is pending does `onFail` run, so
- * the UI can roll back to the last committed value.
+ * One latest-write queue per control. Each queue sends through the current
+ * client and reports a final failure (nothing newer queued) with the last
+ * value the core accepted, so the control can roll back to it.
  */
-function useLatestWrite() {
-  const inFlight = useRef(new Set<WriteKey>());
-  const pending = useRef(new Map<WriteKey, Pending<unknown>>());
-
-  const start = useCallback(<T>(key: WriteKey, job: Pending<T>) => {
-    inFlight.current.add(key);
-    job.send(job.value).then(
-      () => {
-        inFlight.current.delete(key);
-        const next = pending.current.get(key) as Pending<T> | undefined;
-        pending.current.delete(key);
-        if (next) start(key, next);
-      },
-      (err: unknown) => {
-        inFlight.current.delete(key);
-        const next = pending.current.get(key) as Pending<T> | undefined;
-        pending.current.delete(key);
-        if (next) start(key, next);
-        else job.onFail(job.value, err);
-      },
-    );
-  }, []);
-
-  const write = useCallback(
-    <T>(key: WriteKey, job: Pending<T>) => {
-      if (inFlight.current.has(key)) {
-        pending.current.set(key, job as Pending<unknown>);
-        return;
-      }
-      start(key, job);
-    },
-    [start],
-  );
-
-  const writing = useCallback((key: WriteKey) => inFlight.current.has(key), []);
-
-  return { write, writing };
-}
-
 export function useMixer({
   snapshot,
   client = liveClient,
   reportError,
   refresh,
 }: UseMixerOptions): MixerHandle {
-  const { write, writing } = useLatestWrite();
-
   const [volume, setVolumeState] = useState(snapshot.volume ?? DEFAULT_VOLUME);
   const [gains, setGainsState] = useState<EqGains>(snapshot.gains ?? FLAT_EQ);
   const [inputHz, setInputHzState] = useState(
@@ -98,107 +55,135 @@ export function useMixer({
     snapshot.sampleRate?.output?.sample_rate_hz ?? snapshot.sampleRate?.sample_rate_hz ?? 44100,
   );
 
-  // Last value the core confirmed, per key; rollbacks restore from here.
-  const committedVolume = useRef(volume);
-  const committedGains = useRef<EqGains>(gains);
-  const committedInputHz = useRef(inputHz);
-  const committedOutputHz = useRef(outputHz);
-  // Latest local gains, so two quick fader moves compose instead of clobbering.
+  // Latest local values, so two quick moves compose instead of clobbering,
+  // and the value on screen before an edit is known without a render.
+  const latestVolume = useRef(volume);
   const latestGains = useRef<EqGains>(gains);
+  const latestInputHz = useRef(inputHz);
+  const latestOutputHz = useRef(outputHz);
+  const deps = useRef({ client, reportError, refresh });
+  deps.current = { client, reportError, refresh };
 
-  // Poll results are accepted for a key only while nothing is being written to it.
+  const queues = useRef<Queues | null>(null);
+  if (queues.current === null) {
+    queues.current = {
+      volume: createLatestWriteQueue<number>(
+        (v) => deps.current.client.setVolume(v),
+        (err, _value, committed) => {
+          // Nothing newer is queued, so the UI shows the failed value: restore.
+          if (committed !== undefined) {
+            latestVolume.current = committed;
+            setVolumeState(committed);
+          }
+          deps.current.reportError(err);
+        },
+      ),
+      eq: createLatestWriteQueue<EqGains>(
+        (g) => deps.current.client.setEq(g),
+        (err, _value, committed) => {
+          // Nothing newer is queued: every band goes back to what the core holds.
+          if (committed !== undefined) {
+            latestGains.current = committed;
+            setGainsState(committed);
+          }
+          deps.current.reportError(err);
+        },
+      ),
+      input_hz: createLatestWriteQueue<number>(
+        async (hz) => {
+          await deps.current.client.setSampleRate({ input_hz: hz });
+          // Changing one side can change the other's supported list.
+          await deps.current.refresh("config").catch(() => undefined);
+        },
+        (err, _value, committed) => {
+          if (committed !== undefined) {
+            latestInputHz.current = committed;
+            setInputHzState(committed);
+          }
+          deps.current.reportError(err);
+        },
+      ),
+      output_hz: createLatestWriteQueue<number>(
+        async (hz) => {
+          await deps.current.client.setSampleRate({ output_hz: hz });
+          await deps.current.refresh("config").catch(() => undefined);
+        },
+        (err, _value, committed) => {
+          if (committed !== undefined) {
+            latestOutputHz.current = committed;
+            setOutputHzState(committed);
+          }
+          deps.current.reportError(err);
+        },
+      ),
+    };
+  }
+  const q = queues.current;
+
+  // Poll results are accepted for a control only while nothing is being written to it.
   const polledVolume = snapshot.volume;
   useEffect(() => {
-    if (polledVolume === null || writing("volume")) return;
-    committedVolume.current = polledVolume;
+    if (polledVolume === null || q.volume.sending()) return;
+    latestVolume.current = polledVolume;
     setVolumeState(polledVolume);
-  }, [polledVolume, writing]);
+  }, [polledVolume, q]);
 
   const polledGains = snapshot.gains;
   useEffect(() => {
-    if (polledGains === null || writing("eq")) return;
-    committedGains.current = polledGains;
+    if (polledGains === null || q.eq.sending()) return;
     latestGains.current = polledGains;
     setGainsState(polledGains);
-  }, [polledGains, writing]);
+  }, [polledGains, q]);
 
   const rate = snapshot.sampleRate;
   const polledInputHz = rate ? rate.input.sample_rate_hz : null;
   const polledOutputHz = rate ? rate.output.sample_rate_hz : null;
   useEffect(() => {
-    if (polledInputHz === null || writing("input_hz")) return;
-    committedInputHz.current = polledInputHz;
+    if (polledInputHz === null || q.input_hz.sending()) return;
+    latestInputHz.current = polledInputHz;
     setInputHzState(polledInputHz);
-  }, [polledInputHz, writing]);
+  }, [polledInputHz, q]);
   useEffect(() => {
-    if (polledOutputHz === null || writing("output_hz")) return;
-    committedOutputHz.current = polledOutputHz;
+    if (polledOutputHz === null || q.output_hz.sending()) return;
+    latestOutputHz.current = polledOutputHz;
     setOutputHzState(polledOutputHz);
-  }, [polledOutputHz, writing]);
+  }, [polledOutputHz, q]);
 
+  // `shown` is what the screen had before the edit: the rollback target
+  // until the core accepts a write in this burst.
   const setVolume = useCallback(
     (value: number) => {
+      const shown = latestVolume.current;
+      latestVolume.current = value;
       setVolumeState(value);
-      write<number>("volume", {
-        value,
-        send: async (v) => {
-          await client.setVolume(v);
-          committedVolume.current = v;
-        },
-        onFail: (_attempted, err) => {
-          // Nothing newer is queued, so the UI shows the failed value: restore.
-          setVolumeState(committedVolume.current);
-          reportError(err);
-        },
-      });
+      q.volume.push(value, shown);
     },
-    [client, reportError, write],
+    [q],
   );
 
   const setGain = useCallback(
     (band: number, value: number) => {
-      const next = [...latestGains.current] as EqGains;
+      const shown = latestGains.current;
+      const next = [...shown] as EqGains;
       next[band] = value;
       latestGains.current = next;
       setGainsState(next);
-      write<EqGains>("eq", {
-        value: next,
-        send: async (g) => {
-          await client.setEq(g);
-          committedGains.current = g;
-        },
-        onFail: (_attempted, err) => {
-          // Nothing newer is queued: every band goes back to what the core holds.
-          latestGains.current = committedGains.current;
-          setGainsState(committedGains.current);
-          reportError(err);
-        },
-      });
+      q.eq.push(next, shown);
     },
-    [client, reportError, write],
+    [q],
   );
 
   const setRate = useCallback(
     (side: "input" | "output", hz: number) => {
-      const key: WriteKey = side === "input" ? "input_hz" : "output_hz";
+      const queue = side === "input" ? q.input_hz : q.output_hz;
       const setState = side === "input" ? setInputHzState : setOutputHzState;
-      const committed = side === "input" ? committedInputHz : committedOutputHz;
+      const latest = side === "input" ? latestInputHz : latestOutputHz;
+      const shown = latest.current;
+      latest.current = hz;
       setState(hz);
-      write<number>(key, {
-        value: hz,
-        send: async (v) => {
-          await client.setSampleRate(side === "input" ? { input_hz: v } : { output_hz: v });
-          committed.current = v;
-          // Changing one side can change the other's supported list.
-          await refresh("config").catch(() => undefined);
-        },
-        onFail: (_attempted, err) => {
-          setState(committed.current);
-          reportError(err);
-        },
-      });
+      queue.push(hz, shown);
     },
-    [client, refresh, reportError, write],
+    [q],
   );
 
   const inputRates = rate?.input?.supported_hz?.length ? rate.input.supported_hz : DEFAULT_RATES;
