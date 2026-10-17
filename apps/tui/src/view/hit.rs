@@ -23,6 +23,9 @@ pub enum Target {
     CdProgress,
     MonitorTag,
     StatusTag,
+    Refresh,
+    Firewall,
+    AudioCheck,
     Overlay,
     OverlayOutside,
 }

@@ -1,7 +1,7 @@
 use crate::api::auth::Paired;
 use crate::api::error::{ApiError, JsonBody};
 use crate::cd::AUDIO_CD_INPUT;
-use crate::pipeline::capture;
+use crate::pipeline::{capture, sources};
 use crate::state::CoreState;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -27,17 +27,22 @@ pub async fn list_inputs(
             inputs: with_cd_input(&state, state.input().mock_inputs()),
         }));
     }
-    // CPAL enumeration and the Linux `pactl` fallback are synchronous and may
-    // take up to two seconds. Never pin an async request worker while probing.
-    let devices = tokio::task::spawn_blocking(|| {
+    // CPAL enumeration and `pactl` are synchronous and may take up to two
+    // seconds. Never pin an async request worker while probing.
+    let names = tokio::task::spawn_blocking(|| {
+        // On Linux the curated PipeWire list replaces the raw ALSA one.
+        if let Some(sources) = sources::query() {
+            return Ok(sources.curated().into_iter().map(|c| c.label).collect());
+        }
         let host = cpal::default_host();
         capture::list_input_devices(&host)
+            .map(|devices| devices.into_iter().map(|d| d.name).collect::<Vec<_>>())
     })
     .await
     .map_err(|error| ApiError::internal(error.to_string()))?
     .map_err(|error| ApiError::internal(error.to_string()))?;
     Ok(Json(InputsResponse {
-        inputs: with_cd_input(&state, devices.into_iter().map(|d| d.name).collect()),
+        inputs: with_cd_input(&state, names),
     }))
 }
 

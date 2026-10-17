@@ -1,7 +1,7 @@
 //! A Linux routing adapter. Pulse/PipeWire owns local mixing and fan-out;
 //! each network sink gets an isolated instance of the existing sender and
 //! capture sessions. The legacy exclusive API continues to own its session.
-mod pulse;
+pub(crate) mod pulse;
 
 use crate::{session, state::CoreState};
 use on_air_api::{
@@ -393,7 +393,10 @@ impl Inner {
             vec![],
             "System audio enters the Desktop source here.",
         );
-        for (id, (info, _)) in &self.networks.clone() {
+        // HashMap order would reshuffle the panel on every poll.
+        let mut networks: Vec<_> = self.networks.clone().into_iter().collect();
+        networks.sort_by(|(_, (a, _)), (_, (b, _))| a.name.cmp(&b.name));
+        for (id, (info, _)) in &networks {
             let present = discovered
                 .iter()
                 .any(|d| d.transport == info.transport && d.id == info.id);

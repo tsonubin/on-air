@@ -22,7 +22,8 @@ pub fn transport_rates(transport: &str) -> &'static [u32] {
     match transport {
         "sonos" => SONOS_RATES_HZ,
         "airplay" => AIRPLAY_RATES_HZ,
-        "bluetooth" => BLUETOOTH_RATES_HZ,
+        // Local outputs play through the same `pacat` path as Bluetooth.
+        "bluetooth" | "local" => BLUETOOTH_RATES_HZ,
         _ => STANDARD_RATES_HZ,
     }
 }

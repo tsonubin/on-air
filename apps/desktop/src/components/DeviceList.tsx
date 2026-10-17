@@ -1,5 +1,5 @@
 import type { ActiveOutputView, AirPlayMode, OutputInfo } from "@on-air/api-types";
-import { outputPhase } from "@on-air/api-types";
+import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
 import { inputLabels } from "@on-air/control-client";
 import { useMemo } from "react";
 import { isPickerOnly, outputKey } from "../hooks/useOutputSelection";
@@ -180,7 +180,7 @@ export function DeviceList({
                       ? "unavailable · info"
                       : output.needs_pair && !output.paired
                         ? "pin"
-                        : output.transport}
+                        : TRANSPORT_LABELS[output.transport]}
                   </span>
                 </button>
               </li>

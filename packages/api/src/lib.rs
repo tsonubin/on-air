@@ -140,6 +140,37 @@ pub struct StatusResponse {
     /// a phone must type. Absent on cores older than 0.2.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan_addresses: Option<Vec<String>>,
+    /// A recent, observed host firewall block affecting the audio port.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub firewall_warning: Option<FirewallWarning>,
+    /// Zero means the capture backend's default buffer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_buffer_ms: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioBenchmark {
+    pub input_hz: u32,
+    pub output_hz: u32,
+    pub duration_ms: u64,
+    pub pipeline_p95_ms: f64,
+    pub scheduler_p95_ms: f64,
+    pub worst_case_ms: f64,
+    pub recommended_buffer_ms: u32,
+    pub within_buffer_budget: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetCaptureBufferRequest {
+    pub buffer_ms: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FirewallWarning {
+    pub subnet: String,
+    pub port: u16,
+    pub message: String,
+    pub repair_command: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -483,6 +514,8 @@ mod tests {
             service_enabled: true,
             sleep_inhibited: None,
             lan_addresses: None,
+            firewall_warning: None,
+            capture_buffer_ms: None,
         };
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(

@@ -143,6 +143,111 @@ pub(super) fn eject_overlay(frame: &mut Frame, area: Rect) -> Rect {
 /// The core's default port, for a base URL that does not parse.
 const DEFAULT_PORT: u16 = 47990;
 
+pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
+    let current = model
+        .snapshot
+        .status
+        .as_ref()
+        .and_then(|s| s.capture_buffer_ms)
+        .unwrap_or(0);
+    let label = |ms| {
+        if ms == 0 {
+            "system default".to_string()
+        } else {
+            format!("{ms} ms")
+        }
+    };
+    let mut lines = vec![
+        Line::from(format!("Current requested buffer: {}", label(current))),
+        Line::from(format!(
+            "Selected buffer: {}   ← / → to choose",
+            label(model.buffer_choice_ms)
+        )),
+        Line::from("Enter: run ~2 second check   a: apply selected buffer   Esc: close"),
+        Line::from("Check during your usual workload; settings stay unchanged until applied."),
+        Line::from("Larger buffers trade more delay for tolerance of scheduling stalls."),
+    ];
+    if let Some(report) = &model.benchmark {
+        lines.extend(
+            crate::cli::benchmark_text(report)
+                .lines()
+                .map(|line| Line::from(line.to_string())),
+        );
+    }
+    if model.pending.is_some() {
+        lines.push(Line::from("Working…"));
+    }
+    if let Some(error) = &model.error {
+        lines.push(Line::from(Span::styled(
+            error.clone(),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    let rect = centered(area, area.width.min(92), area.height.min(20));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title(" Audio performance ")),
+        rect,
+    );
+    rect
+}
+
+pub(super) fn firewall_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
+    let mut lines = vec![Line::from(
+        "Allow local devices to reach on-air's audio port.",
+    )];
+    if let Some(warning) = model
+        .snapshot
+        .status
+        .as_ref()
+        .and_then(|s| s.firewall_warning.as_ref())
+    {
+        lines.push(Line::from(format!(
+            "Allow {} → TCP {}",
+            warning.subnet, warning.port
+        )));
+        lines.push(Line::from(
+            "Run these commands on the host if automatic repair is unavailable:",
+        ));
+        for command in warning.repair_command.lines() {
+            lines.push(Line::from(command.to_string()));
+        }
+    }
+    lines.push(Line::from(
+        if crate::handoff::is_loopback_base(&model.base) {
+            "Enter: add rule (administrator authentication)   Esc: cancel"
+        } else {
+            "Open on-air on the host to authorize this rule. Esc: close"
+        },
+    ));
+    if model
+        .pending
+        .as_ref()
+        .is_some_and(|p| p.label == crate::update::LABEL_FIREWALL)
+    {
+        lines.push(Line::from(
+            "Complete the administrator authentication prompt on this computer…",
+        ));
+    }
+    if let Some(error) = &model.error {
+        lines.push(Line::from(Span::styled(
+            error.clone(),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    let rect = centered(area, area.width.min(90), area.height.min(16));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::bordered().title(" Firewall help ")),
+        rect,
+    );
+    rect
+}
+
 /// The port the core answers on, from its base URL.
 fn core_port(base: &str) -> u16 {
     reqwest::Url::parse(base)

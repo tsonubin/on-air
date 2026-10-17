@@ -21,6 +21,17 @@ fn left_spans(model: &Model) -> Vec<Span<'static>> {
         .as_ref()
         .filter(|_| model.service_on());
     match active {
+        _ if model
+            .snapshot
+            .status
+            .as_ref()
+            .is_some_and(|s| s.firewall_warning.is_some()) =>
+        {
+            spans.push(Span::styled(
+                " ! audio blocked ",
+                Style::new().fg(Color::Yellow).bold(),
+            ));
+        }
         Some(active) => match active.state {
             Some(OutputPhase::Starting) => {
                 spans.push(Span::styled(

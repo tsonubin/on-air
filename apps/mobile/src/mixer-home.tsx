@@ -1,11 +1,12 @@
 import { Host, type IconName } from "@expo/ui";
-import type { CdStatus } from "@on-air/api-types";
+import type { CdStatus, FirewallWarning } from "@on-air/api-types";
 import type React from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeFader } from "./native-fader";
 import { colors, layout, radius } from "./theme";
 import { Card } from "./ui/card";
+import { FirewallNotice } from "./ui/firewall-notice";
 import { IconTile } from "./ui/icon-tile";
 import { icons } from "./ui/icons";
 import { NativeIcon } from "./ui/native-icon";
@@ -283,6 +284,7 @@ export function MixerHome({
   volume,
   status,
   error,
+  firewallWarning,
   volumeDisabled,
   soundDisabled,
   cd,
@@ -303,6 +305,7 @@ export function MixerHome({
   volume: number;
   status: HeaderStatus;
   error?: string | null;
+  firewallWarning?: FirewallWarning | null;
   volumeDisabled: boolean;
   soundDisabled: boolean;
   cd?: CdStatus | null;
@@ -333,7 +336,14 @@ export function MixerHome({
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }} testID="mixer-screen">
-      <Header status={status} onMore={onOpenMore} />
+      <Header
+        status={
+          firewallWarning
+            ? { text: "Audio blocked", announcement: "Firewall blocking audio", live: false }
+            : status
+        }
+        onMore={onOpenMore}
+      />
       <ScrollView
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
@@ -349,6 +359,7 @@ export function MixerHome({
         }}
       >
         {error ? <Notice message={error} testID="mixer-error" /> : null}
+        <FirewallNotice warning={firewallWarning} />
         <View
           testID={
             shortWide ? "mixer-landscape-layout" : wide ? "mixer-wide-layout" : "mixer-phone-layout"

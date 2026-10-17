@@ -15,8 +15,17 @@
 // Enumerations
 // ---------------------------------------------------------------------------
 
-/** Output transports the core can cast to (`session.rs`). */
-export type Transport = "sonos" | "airplay" | "bluetooth";
+/** Output transports the core can cast to (`session.rs`). `local` is the
+ * computer's own speakers and headphone jack (`sender/local.rs`). */
+export type Transport = "local" | "sonos" | "airplay" | "bluetooth";
+
+/** How each transport is named in pickers. */
+export const TRANSPORT_LABELS: Record<Transport, string> = {
+  local: "This computer",
+  sonos: "Sonos",
+  airplay: "AirPlay",
+  bluetooth: "Bluetooth",
+};
 
 /** How many speakers an output represents (`session.rs`, `airplay_mdns.rs`). */
 export type OutputKind = "solo" | "pair";
@@ -86,8 +95,29 @@ export interface StatusResponse {
    * the quality overhaul omit it.
    */
   lan_addresses?: string[];
+  firewall_warning?: FirewallWarning;
+  /** Requested capture buffer; 0 uses the backend default. */
+  capture_buffer_ms?: number;
   /** Reserved: a friendly service name. Not emitted by current cores. */
   name?: string;
+}
+
+export interface FirewallWarning {
+  subnet: string;
+  port: number;
+  message: string;
+  repair_command: string;
+}
+
+export interface AudioBenchmark {
+  input_hz: number;
+  output_hz: number;
+  duration_ms: number;
+  pipeline_p95_ms: number;
+  scheduler_p95_ms: number;
+  worst_case_ms: number;
+  recommended_buffer_ms: number;
+  within_buffer_budget: boolean;
 }
 
 export interface PinResponse {

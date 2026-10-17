@@ -139,6 +139,14 @@ pub(super) fn dest_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &mut
     // highlight are drawn by the items themselves.
     let mut state = ListState::default().with_selected(Some(model.output_index));
     frame.render_stateful_widget(List::new(items).block(block), area, &mut state);
+    if area.width >= 28 && area.height > 0 {
+        let button = Rect::new(area.right() - 14, area.y, 13, 1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(" [r Refresh] ", Style::new().bold())),
+            button,
+        );
+        hits.push(button, Target::Refresh);
+    }
     for (index, row) in dest_rows.iter().enumerate() {
         if matches!(row, DestRow::Entry(_)) {
             if let Some(rect) = row_rect(area, state.offset(), index) {

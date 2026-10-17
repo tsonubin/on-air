@@ -191,16 +191,18 @@ Two fixes:
 
 Run `on-air` in a terminal. Quitting never stops the service.
 
+Click `[r Refresh]` in the Destination pane or press `r` to reload devices and status.
+
 ### Keys
 
 | Key | Action |
 |---|---|
 | `Tab / Shift-Tab` | Next / previous pane |
-| `j` / `k`, `↓` / `↑` | Move within the pane |
+| `j` / `k` | Move within the pane |
 | `Enter` | Activate the source or output (opens pairing when needed) |
 | `h / l, ← / →` | Mixer: adjust the focused row |
 | `H / L` | Fine adjust (volume ±1, EQ ±0.5 dB) |
-| `+ / -` | Volume ±5 from any pane |
+| `↑ / ↓` (`+ / -` also work) | Volume ±5 from any pane |
 | `0` | Mixer: reset the focused EQ band |
 | `x` | Stop the live output |
 | `Space` | CD play / pause |
@@ -213,9 +215,60 @@ Run `on-air` in a terminal. Quitting never stops the service.
 | `i` | Status: version, addresses, monitor, login start |
 | `b` | Open Bluetooth settings |
 | `r` | Refresh devices |
+| `f` | Firewall help when UFW is blocking LAN audio |
+| `t` | Audio check and capture buffer settings |
 | `?` | This help |
 | `Esc` | Close, dismiss the error or notice |
 | `q / Ctrl-C` | Quit; the service keeps running |
+
+### Audio performance and buffering
+
+Open **Audio performance** in the desktop GUI, **Sound → Audio format** in
+the remote app, or press `t` in the TUI. The CLI offers the same controls:
+
+```bash
+on-air audio check
+on-air audio check --json
+on-air audio buffer 100
+on-air audio buffer default
+```
+
+Run the short check during your usual workload. It sends synthetic samples
+through an isolated copy of the real EQ, metering and rate-conversion path,
+and measures pipeline round trips and scheduler delays. Playback continues.
+The recommendation includes three times the observed worst timing plus one
+audio quantum, rounded up to 50, 100, 200 or 400 ms. This provides timing
+headroom for other work without changing process priority or reserving CPU.
+If the measured stalls exceed the available buffer budget, the result says
+so rather than claiming that a larger buffer will fix them.
+
+Checking never applies a setting. Use **Apply recommendation**, select a
+capture buffer manually, or run `on-air audio buffer N`. The setting is
+saved on the host and shared across clients. In the TUI, left/right selects
+a buffer and `a` applies it. Larger buffers trade more capture delay for
+tolerance of scheduling stalls; actual sizes depend on the audio driver.
+The check does not measure USB capture errors or network/speaker buffering.
+
+### UFW blocking LAN audio
+
+On Linux hosts with readable kernel journal logs, the core looks for recent
+UFW TCP drops on its listening port. The TUI, GUI and remote app show the
+same warning. Healthy radio playback clears a stale audio warning.
+
+Click the warning or press `f` in the TUI, or open **Firewall help** in the
+GUI. **Allow LAN audio** (Enter in the TUI) asks for administrator
+authentication on the host and adds a rule for the observed local subnet
+and on-air's TCP port. It also handles UFW's inconsistent state where its
+config says disabled but old kernel rules are still blocking traffic.
+Other firewall rules stay in place.
+
+```bash
+on-air firewall          # inspect the warning and manual commands
+on-air firewall allow    # explicitly request administrator-authorized repair
+```
+
+Remote apps show selectable commands and direct you to authorize on the
+host. Remote API clients cannot launch host administrator prompts.
 
 ### Mouse
 

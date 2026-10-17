@@ -34,6 +34,8 @@ fn model() -> Model {
             service_enabled: true,
             sleep_inhibited: Some(true),
             lan_addresses: Some(vec!["10.0.0.12".into()]),
+            firewall_warning: None,
+            capture_buffer_ms: None,
         }),
         pin: Some("123456".into()),
         inputs: vec!["Mock Monitor".into(), "Built-in mic".into()],
@@ -363,6 +365,26 @@ fn layout_80x24_stacks() {
 fn the_hint_line_offers_info() {
     let b = render(&model(), 100, 30);
     assert!(rows(&b).last().unwrap().contains("i info"));
+}
+
+#[test]
+fn refresh_button_click_runs_the_same_refresh_as_r() {
+    let mut m = model();
+    let (buffer, hits) = render_hits(&m, 100, 30);
+    let (column, row) = cell_of(&buffer, "r Refresh");
+    let (target, rect) = hits.hit(column, row).unwrap();
+    assert_eq!(target, Target::Refresh);
+    let commands = crate::update::update(
+        &mut m,
+        crate::update::Msg::Mouse {
+            target,
+            rect,
+            column,
+            row,
+            kind: crate::update::MouseKind::Down,
+        },
+    );
+    assert_eq!(commands, vec![crate::update::Cmd::Refresh]);
 }
 
 #[test]

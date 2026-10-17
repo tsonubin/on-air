@@ -94,6 +94,8 @@ pub enum Modal {
     ConfirmEject,
     /// The `i` info overlay.
     Status,
+    Firewall,
+    AudioCheck,
 }
 
 /// One action in flight, shown in the header until its `Done` arrives.
@@ -174,7 +176,8 @@ pub struct Activation {
 }
 
 /// Transports in display order with their header labels.
-pub const TRANSPORTS: [(&str, &str); 3] = [
+pub const TRANSPORTS: [(&str, &str); 4] = [
+    ("local", "This computer"),
     ("sonos", "Sonos"),
     ("airplay", "AirPlay"),
     ("bluetooth", "Bluetooth"),
@@ -208,6 +211,8 @@ impl Default for Meter {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
+    pub benchmark: Option<crate::api::AudioBenchmark>,
+    pub buffer_choice_ms: u32,
     pub connection: Connection,
     pub snapshot: Snapshot,
     pub pane: Pane,
@@ -256,6 +261,8 @@ impl Default for Model {
 impl Model {
     pub fn new() -> Self {
         Model {
+            benchmark: None,
+            buffer_choice_ms: 0,
             connection: Connection::Connecting,
             snapshot: Snapshot::default(),
             pane: Pane::Sources,
@@ -303,6 +310,12 @@ impl Model {
     pub fn dest_rows(&self) -> Vec<DestRow> {
         let mut rows = Vec::new();
         for (transport, label) in TRANSPORTS {
+            // The computer's own outputs exist only on Linux with PipeWire;
+            // elsewhere the group would only ever be empty.
+            if transport == "local" && !self.snapshot.outputs.iter().any(|o| o.transport == "local")
+            {
+                continue;
+            }
             rows.push(DestRow::Header(label));
             let start = rows.len();
             let outputs = || {
@@ -626,6 +639,19 @@ mod tests {
             m.dest_rows().last(),
             Some(&DestRow::Empty("Bluetooth list unavailable"))
         );
+    }
+
+    #[test]
+    fn this_computer_comes_first_and_only_when_present() {
+        let mut m = Model::new();
+        m.snapshot.bluetooth = Some(vec![]);
+        m.snapshot.outputs = vec![output("sink#speaker", "local"), output("s", "sonos")];
+        let rows = m.dest_rows();
+        assert_eq!(rows[0], DestRow::Header("This computer"));
+        assert!(matches!(&rows[1], DestRow::Entry(e) if e.transport == "local"));
+        assert_eq!(rows[2], DestRow::Header("Sonos"));
+        m.snapshot.outputs.retain(|o| o.transport != "local");
+        assert_eq!(m.dest_rows()[0], DestRow::Header("Sonos"));
     }
 
     #[test]

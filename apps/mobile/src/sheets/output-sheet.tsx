@@ -1,6 +1,6 @@
 import { BottomSheet, Button, Column, Row, Spacer, Text } from "@expo/ui";
 import type { OutputInfo, OutputPhase } from "@on-air/api-types";
-import { outputPhase } from "@on-air/api-types";
+import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
 import { useRemoteSession } from "@/remote-session";
 import { theme } from "@/theme";
 import { sheetProps } from "./sheet-props";
@@ -91,7 +91,7 @@ export function OutputSheet({
               <Row alignment="center" spacing={theme.spacing.sm}>
                 <Column spacing={theme.spacing.xs}>
                   <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
-                  <Text>{`${stereoPair ? "Stereo pair · " : ""}${output.transport}`}</Text>
+                  <Text>{`${stereoPair ? "Stereo pair · " : ""}${TRANSPORT_LABELS[output.transport]}`}</Text>
                 </Column>
                 <Spacer />
                 <Text>{outputAction({ desktopOnly, working, selected, phase, output })}</Text>

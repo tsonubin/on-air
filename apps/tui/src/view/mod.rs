@@ -21,7 +21,10 @@ use crate::model::{Modal, Model};
 use cd::cd_strip;
 use header::{hint_line, render_header};
 use mixer::mixer_pane;
-use overlay::{eject_overlay, help_overlay, pin_overlay, status_overlay, track_overlay};
+use overlay::{
+    audio_check_overlay, eject_overlay, firewall_overlay, help_overlay, pin_overlay,
+    status_overlay, track_overlay,
+};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Wrap};
@@ -65,6 +68,14 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
         );
     }
     if let Some(copy) = &model.notice {
+        if model
+            .snapshot
+            .status
+            .as_ref()
+            .is_some_and(|s| s.firewall_warning.is_some())
+        {
+            hits.push(areas.notice, Target::Firewall);
+        }
         frame.render_widget(
             Paragraph::new(Line::from(vec![
                 Span::styled(" ! ", Style::new().fg(Color::Yellow)),
@@ -84,6 +95,14 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
         dest_pane(model, frame, areas.dest, &mut hits);
     }
     mixer_pane(model, frame, areas.mixer, &mut hits);
+    if areas.mixer.width >= 32 && areas.mixer.height > 0 {
+        let button = ratatui::layout::Rect::new(areas.mixer.right() - 17, areas.mixer.y, 16, 1);
+        frame.render_widget(
+            Paragraph::new(Span::styled(" [t Audio check] ", Style::new().bold())),
+            button,
+        );
+        hits.push(button, Target::AudioCheck);
+    }
 
     frame.render_widget(hint_line(), areas.hints);
 
@@ -107,6 +126,8 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
         }
         Modal::ConfirmEject => Some(eject_overlay(frame, area)),
         Modal::Status => Some(status_overlay(model, frame, area)),
+        Modal::Firewall => Some(firewall_overlay(model, frame, area)),
+        Modal::AudioCheck => Some(audio_check_overlay(model, frame, area)),
     };
     if let Some(rect) = overlay {
         hits.push(area, Target::OverlayOutside);

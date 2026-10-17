@@ -6,7 +6,7 @@ use crate::events::{emit_catalog_diff, WsEvent};
 use crate::keep_awake::KeepAwake;
 use crate::pairing::PairingState;
 use crate::pipeline::input::InputWiring;
-use crate::pipeline::{InputError, InputSession};
+use crate::pipeline::{InputError, InputSession, LOOPBACK_INPUT};
 use crate::sender::airplay_mdns::CatalogDevice;
 use crate::sender::bluetooth::{
     BluetoothAdapter, BluetoothDevice, MockBluetoothAdapter, RecordingPcmSink,
@@ -20,7 +20,9 @@ use bytes::Bytes;
 use parking_lot::Mutex as StdMutex;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicU16, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering,
+};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
@@ -136,6 +138,11 @@ pub struct CoreState {
     /// The HTTP port, recorded by `serve_with_state`; receivers pull the
     /// radio stream from it.
     pub(crate) serve_port: Arc<AtomicU16>,
+    pub firewall_warning: Arc<StdMutex<Option<on_air_api::FirewallWarning>>>,
+    pub(crate) firewall_repair_lock: Arc<Mutex<()>>,
+    pub(crate) firewall_repaired_at: Arc<AtomicU64>,
+    pub(crate) capture_buffer_ms: Arc<AtomicU32>,
+    pub(crate) audio_benchmark_lock: Arc<Mutex<()>>,
 
     // Mode, config and host plumbing.
     pub(crate) mock: bool,
@@ -175,6 +182,20 @@ fn bluetooth_ids(devices: &[BluetoothDevice]) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Whether `name` would capture what this computer plays.
+async fn is_system_audio(name: &str) -> bool {
+    use crate::pipeline::sources::{self, SYSTEM_AUDIO};
+    if name == SYSTEM_AUDIO || name == LOOPBACK_INPUT {
+        return true;
+    }
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || {
+        sources::query().is_some_and(|s| s.label_for(&name) == SYSTEM_AUDIO)
+    })
+    .await
+    .unwrap_or(false)
+}
+
 impl CoreState {
     pub fn new() -> Self {
         Self::from_saved_settings(SavedSettings::default(), None)
@@ -210,12 +231,14 @@ impl CoreState {
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
         let output_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz));
         let output = OutputSession::new(ws_tx.clone(), output_sample_rate_hz.clone());
+        let capture_buffer_ms = Arc::new(AtomicU32::new(saved_settings.capture_buffer_ms));
         let input = InputSession::new(InputWiring {
             audio_tx: audio_tx.clone(),
             ws_tx: ws_tx.clone(),
             eq_gains_db: eq_gains_db.clone(),
             input_rate_hz: target_sample_rate_hz.clone(),
             cd: cd.clone(),
+            capture_buffer_ms: capture_buffer_ms.clone(),
         });
         CoreState {
             patchbay: Arc::new(crate::patchbay::Patchbay::new(None, false)),
@@ -250,6 +273,11 @@ impl CoreState {
             stream_clients: Arc::new(AtomicUsize::new(0)),
             stream_progress: Arc::new(AtomicU64::new(0)),
             serve_port: Arc::new(AtomicU16::new(crate::DEFAULT_PORT)),
+            firewall_warning: Arc::new(StdMutex::new(None)),
+            firewall_repair_lock: Arc::new(Mutex::new(())),
+            firewall_repaired_at: Arc::new(AtomicU64::new(0)),
+            capture_buffer_ms,
+            audio_benchmark_lock: Arc::new(Mutex::new(())),
             mock: false,
             config: CoreConfig::default(),
             background: Arc::new(StdMutex::new(BackgroundTasks::default())),
@@ -360,6 +388,8 @@ impl CoreState {
             eq_gains_db: child.eq_gains_db.clone(),
             input_rate_hz: child.target_sample_rate_hz.clone(),
             cd: child.cd.clone(),
+            // Patchbay captures follow the user's capture buffer too.
+            capture_buffer_ms: child.capture_buffer_ms.clone(),
         });
         child.input.set_mock(self.mock);
         child
@@ -383,6 +413,13 @@ impl CoreState {
 
     /// Activate an input and remember it. The caller holds `config_lock`.
     pub(crate) async fn activate_input_locked(&self, name: &str) -> Result<(), InputError> {
+        if self
+            .active_output()
+            .is_some_and(|output| output.transport == crate::sender::local::TRANSPORT)
+            && is_system_audio(name).await
+        {
+            return Err(InputError::Feedback(crate::session::FEEDBACK_LOOP));
+        }
         let resolved = self.input.activate(name).await?;
         self.remember_input(resolved);
         Ok(())
@@ -487,6 +524,10 @@ impl CoreState {
     pub(crate) fn remember_volume(&self, volume: u8) {
         self.output_volume.store(volume, Ordering::Release);
         self.update_saved_settings(|saved| saved.volume = volume);
+    }
+
+    pub(crate) fn remember_capture_buffer(&self, buffer_ms: u32) {
+        self.update_saved_settings(|saved| saved.capture_buffer_ms = buffer_ms);
     }
 
     pub(crate) fn remember_eq(&self, gains: [f32; 5]) {
@@ -615,6 +656,16 @@ impl CoreState {
             }
             if let Some(error) = last_error {
                 eprintln!("could not restore saved input {input:?}: {error}");
+                // Inputs saved before the curated list (raw ALSA names) are
+                // gone for good; carry on with what the computer plays.
+                if matches!(error, InputError::NotFound(_)) && input != LOOPBACK_INPUT {
+                    let _configuration = self.config_lock.lock().await;
+                    if still_current() {
+                        if let Err(error) = self.activate_input_locked(LOOPBACK_INPUT).await {
+                            eprintln!("could not fall back to system audio: {error}");
+                        }
+                    }
+                }
             }
         }
 

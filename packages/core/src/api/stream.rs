@@ -113,14 +113,31 @@ pub async fn stream_audio(
     );
     silence_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let stream_progress = state.stream_progress.clone();
+    let capture_buffer_ms = state.capture_buffer_ms.clone();
+    let mut last_pcm = tokio::time::Instant::now();
     let pcm = pcm
         .timeout_repeating(silence_interval)
-        .map(move |item| {
+        .filter_map(move |item| {
+            let pcm = match item {
+                Ok(pcm) => {
+                    last_pcm = tokio::time::Instant::now();
+                    pcm
+                }
+                Err(_) => {
+                    // A larger capture buffer delivers audio in larger,
+                    // less frequent batches. Do not fill normal intervals
+                    // between those batches with extra silence.
+                    let grace = std::time::Duration::from_millis(
+                        u64::from(capture_buffer_ms.load(Ordering::Acquire)) * 2 + 40,
+                    );
+                    if last_pcm.elapsed() < grace {
+                        return None;
+                    }
+                    Ok(silence.clone())
+                }
+            };
             stream_progress.fetch_add(1, Ordering::Relaxed);
-            match item {
-                Ok(pcm) => pcm,
-                Err(_) => Ok(silence.clone()),
-            }
+            Some(pcm)
         })
         .take_while({
             let output = state.output().subscribe();

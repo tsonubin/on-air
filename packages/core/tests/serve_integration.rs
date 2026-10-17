@@ -4,25 +4,36 @@ use tokio::net::TcpListener;
 async fn serve_responds_to_status_over_http() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    // A server smoke test must not restore the developer's saved session or
+    // inherit a paused service flag from their real configuration.
+    let state = on_air_core::state::CoreState::new();
 
     tokio::spawn(async move {
-        on_air_core::serve(listener).await.unwrap();
+        on_air_core::serve_with_state(listener, state)
+            .await
+            .unwrap();
     });
 
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let url = format!("http://{addr}/api/status");
-    let response = reqwest::get(url).await.unwrap();
+    let response = client.get(url).send().await.unwrap();
     assert!(response.status().is_success());
 
     let body: serde_json::Value = response.json().await.unwrap();
     assert_eq!(body["status"], "ok");
 
-    let outputs: serde_json::Value = reqwest::get(format!("http://{addr}/api/outputs"))
+    let outputs: serde_json::Value = client
+        .get(format!("http://{addr}/api/outputs"))
+        .send()
         .await
         .unwrap()
         .json()
         .await
         .unwrap();
-    assert!(outputs["outputs"].is_array());
+    assert!(
+        outputs["outputs"].is_array(),
+        "unexpected response: {outputs}"
+    );
 }
 
 #[tokio::test]
