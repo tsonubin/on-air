@@ -1,6 +1,8 @@
+import { AudioPerformance } from "./components/AudioPerformance";
 import { DeviceHelp } from "./components/DeviceHelp";
 import { DeviceList } from "./components/DeviceList";
 import { ErrorBanner } from "./components/ErrorBanner";
+import { FirewallWarning } from "./components/FirewallWarning";
 import { Header } from "./components/Header";
 import { MixerFooter } from "./components/MixerFooter";
 import { PairDialog } from "./components/PairDialog";
@@ -41,6 +43,10 @@ function App() {
           <p className="mx-3 mt-2 mb-0 text-sm text-amber">{UNREACHABLE_COPY} Retrying…</p>
         )}
         <ErrorBanner error={core.actionError} onDismiss={core.clearError} />
+        <FirewallWarning
+          warning={snapshot.status?.firewall_warning}
+          onRepaired={() => core.refresh("all")}
+        />
         <CdTransport
           status={snapshot.cd}
           disabled={locked}
@@ -73,6 +79,11 @@ function App() {
               onRefresh={() => void selection.refreshDevices()}
             />
             <MixerFooter mixer={mixer} disabled={locked} />
+            <AudioPerformance
+              bufferMs={snapshot.status?.capture_buffer_ms}
+              disabled={locked || connection !== "ok"}
+              onApplied={() => core.refresh("all")}
+            />
           </div>
           <PausedPanel
             paused={locked}

@@ -94,6 +94,8 @@ pub enum Modal {
     ConfirmEject,
     /// The `i` info overlay.
     Status,
+    Firewall,
+    AudioCheck,
 }
 
 /// One action in flight, shown in the header until its `Done` arrives.
@@ -209,6 +211,8 @@ impl Default for Meter {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
+    pub benchmark: Option<crate::api::AudioBenchmark>,
+    pub buffer_choice_ms: u32,
     pub connection: Connection,
     pub snapshot: Snapshot,
     pub pane: Pane,
@@ -257,6 +261,8 @@ impl Default for Model {
 impl Model {
     pub fn new() -> Self {
         Model {
+            benchmark: None,
+            buffer_choice_ms: 0,
             connection: Connection::Connecting,
             snapshot: Snapshot::default(),
             pane: Pane::Sources,

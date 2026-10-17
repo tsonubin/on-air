@@ -22,18 +22,43 @@ const USAGE: &str = "usage: on-air [--base URL]                 the terminal UI
        on-air status [--json] [--base URL] the core's state, for humans or scripts
        on-air monitor on|off|toggle        turn LAN audio capture and streaming on or off
        on-air service start|stop|restart   control the on-air-core systemd user service
+       on-air audio check [--json]         benchmark audio and recommend a buffer
+       on-air audio buffer [default|50|100|200|400]  read or set capture buffering
+       on-air firewall [allow]            show firewall help or authorize a scoped repair
        on-air --version | --help
 
 The base URL defaults to http://127.0.0.1:47990, the local on-air-core.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Invocation {
-    Tui { base: String },
-    Bar { base: String },
-    Status { base: String, json: bool },
-    Monitor { base: String, arg: String },
-    Service { verb: ServiceVerb },
+    Tui {
+        base: String,
+    },
+    Bar {
+        base: String,
+    },
+    Status {
+        base: String,
+        json: bool,
+    },
+    Monitor {
+        base: String,
+        arg: String,
+    },
+    Service {
+        verb: ServiceVerb,
+    },
     Version,
+    Audio {
+        base: String,
+        action: String,
+        value: Option<u32>,
+        json: bool,
+    },
+    Firewall {
+        base: String,
+        allow: bool,
+    },
     Help,
 }
 
@@ -66,6 +91,36 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
         [] => Ok(Invocation::Tui { base }),
         ["bar"] => Ok(Invocation::Bar { base }),
         ["status"] => Ok(Invocation::Status { base, json }),
+        ["firewall"] => Ok(Invocation::Firewall { base, allow: false }),
+        ["firewall", "allow"] => Ok(Invocation::Firewall { base, allow: true }),
+        ["audio", "check"] => Ok(Invocation::Audio {
+            base,
+            action: "check".into(),
+            value: None,
+            json,
+        }),
+        ["audio", "buffer"] => Ok(Invocation::Audio {
+            base,
+            action: "buffer".into(),
+            value: None,
+            json,
+        }),
+        ["audio", "buffer", value] => {
+            let buffer = if *value == "default" {
+                Some(0)
+            } else {
+                value.parse::<u32>().ok()
+            };
+            match buffer {
+                Some(value @ (0 | 50 | 100 | 200 | 400)) => Ok(Invocation::Audio {
+                    base,
+                    action: "buffer".into(),
+                    value: Some(value),
+                    json,
+                }),
+                _ => Err("buffer must be default, 50, 100, 200 or 400 ms".into()),
+            }
+        }
         ["monitor", arg @ ("on" | "off" | "toggle")] => Ok(Invocation::Monitor {
             base,
             arg: arg.to_string(),
@@ -113,6 +168,17 @@ async fn main() {
             .await
             .map_err(|error| error_copy::copy(&error)),
         Invocation::Service { verb } => service::control(verb).await,
+        Invocation::Audio {
+            base,
+            action,
+            value,
+            json,
+        } => cli::audio(&Client::new(&base), &action, value, json)
+            .await
+            .map_err(|error| error_copy::copy(&error)),
+        Invocation::Firewall { base, allow } => cli::firewall(&Client::new(&base), allow)
+            .await
+            .map_err(|error| error_copy::copy(&error)),
         Invocation::Tui { base } => {
             run_tui(Client::new(&base)).await;
             return;

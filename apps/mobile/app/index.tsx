@@ -64,6 +64,7 @@ function MixerScreen() {
         volume={remote.volume}
         status={{ text: view.statusText, announcement: view.statusAnnouncement, live: view.live }}
         error={remote.error ?? remote.warning}
+        firewallWarning={remote.firewallWarning}
         volumeDisabled={!view.volumeEnabled}
         soundDisabled={!view.soundEnabled}
         cd={cd}

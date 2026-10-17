@@ -33,6 +33,8 @@ pub enum Action {
     Status,
     Bluetooth,
     Refresh,
+    Firewall,
+    AudioCheck,
     Help,
     Back,
     Quit,
@@ -52,7 +54,7 @@ pub const KEYS: &[Binding] = &[
         help: "Next / previous pane",
     },
     Binding {
-        keys: "j / k, ↓ / ↑",
+        keys: "j / k",
         action: Action::Down,
         help: "Move within the pane",
     },
@@ -72,7 +74,7 @@ pub const KEYS: &[Binding] = &[
         help: "Fine adjust (volume ±1, EQ ±0.5 dB)",
     },
     Binding {
-        keys: "+ / -",
+        keys: "↑ / ↓, + / -",
         action: Action::VolumeUp,
         help: "Volume ±5 from any pane",
     },
@@ -142,6 +144,16 @@ pub const KEYS: &[Binding] = &[
         help: "This help",
     },
     Binding {
+        keys: "f",
+        action: Action::Firewall,
+        help: "Firewall help (when LAN audio is blocked)",
+    },
+    Binding {
+        keys: "t",
+        action: Action::AudioCheck,
+        help: "Audio check and capture buffer settings",
+    },
+    Binding {
         keys: "Esc",
         action: Action::Back,
         help: "Close, dismiss the error or notice",
@@ -156,10 +168,10 @@ pub const KEYS: &[Binding] = &[
 /// The short hints on the bottom line, in order.
 pub const HINTS: &[(&str, &str)] = &[
     ("Tab", "pane"),
-    ("j/k", "move"),
+    ("t", "audio"),
     ("Enter", "select"),
     ("h/l", "adjust"),
-    ("+/-", "volume"),
+    ("↑/↓", "volume"),
     ("m", "monitor"),
     ("i", "info"),
     ("?", "help"),
@@ -173,8 +185,8 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
     Some(match key.code {
         KeyCode::Tab => Action::NextPane,
         KeyCode::BackTab => Action::PrevPane,
-        KeyCode::Down => Action::Down,
-        KeyCode::Up => Action::Up,
+        KeyCode::Down => Action::VolumeDown,
+        KeyCode::Up => Action::VolumeUp,
         KeyCode::Enter => Action::Select,
         KeyCode::Right => Action::AdjustUp,
         KeyCode::Left => Action::AdjustDown,
@@ -202,6 +214,8 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             'i' => Action::Status,
             'b' => Action::Bluetooth,
             'r' => Action::Refresh,
+            'f' => Action::Firewall,
+            't' => Action::AudioCheck,
             '?' => Action::Help,
             'q' => Action::Quit,
             _ => return None,
@@ -230,7 +244,7 @@ mod tests {
         );
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 21);
+        assert_eq!(KEYS.len(), 23);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),

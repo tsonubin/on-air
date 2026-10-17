@@ -40,6 +40,7 @@ pub enum Msg {
     Tick,
     /// The 50 ms frame tick that animates the level meter.
     Frame,
+    Benchmark(Result<crate::api::AudioBenchmark, String>),
     Ws(Incoming),
     Snapshot(Result<Box<Snapshot>, String>),
     Done {
@@ -60,6 +61,9 @@ pub enum Msg {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
     Refresh,
+    RepairFirewall,
+    RunAudioCheck,
+    SetCaptureBuffer(u32),
     ActivateInput(String),
     ActivateOutput {
         transport: String,
@@ -121,6 +125,9 @@ pub const LABEL_PAIR: &str = "Pairing";
 pub const LABEL_CONNECT: &str = "Connecting";
 pub const LABEL_MONITOR: &str = "Changing monitor";
 pub const LABEL_REFRESH: &str = "Refreshing";
+pub const LABEL_FIREWALL: &str = "Authorizing firewall rule";
+pub const LABEL_BENCHMARK: &str = "Checking audio performance";
+pub const LABEL_BUFFER: &str = "Changing capture buffer";
 pub const LABEL_AUTOSTART: &str = "Changing autostart";
 pub const LABEL_SETTINGS: &str = "Opening Bluetooth settings";
 pub const LABEL_CD: &str = "Disc";
@@ -166,6 +173,18 @@ fn gated(model: &mut Model, input: impl FnOnce(&mut Model) -> Vec<Cmd>) -> Vec<C
 
 pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
     match msg {
+        Msg::Benchmark(result) => {
+            model.pending = None;
+            match result {
+                Ok(report) => {
+                    model.buffer_choice_ms = report.recommended_buffer_ms;
+                    model.benchmark = Some(report);
+                    model.error = None;
+                }
+                Err(error) => model.error = Some(error),
+            }
+            vec![]
+        }
         Msg::Key(key) => gated(model, |model| on_key(model, key)),
         Msg::Mouse {
             target,
@@ -310,6 +329,9 @@ fn keep_in_flight(model: &mut Model, previous: Snapshot) {
 /// mid-stream. Nothing to say while the monitor is off or the core is old.
 fn sleep_notice(snapshot: &Snapshot) -> Option<String> {
     let status = snapshot.status.as_ref()?;
+    if let Some(warning) = &status.firewall_warning {
+        return Some(format!("{} Press f for help.", warning.message));
+    }
     (status.service_enabled && status.sleep_inhibited == Some(false))
         .then(|| crate::error_copy::SLEEP_NOT_INHIBITED_COPY.to_string())
 }
@@ -335,6 +357,9 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
     match result {
         Ok(()) => {
             model.error = None;
+            if label == LABEL_FIREWALL {
+                model.modal = Modal::None;
+            }
             if chain_step.is_some() {
                 let Some(device) = current_device(model) else {
                     return vec![Cmd::Refresh];
@@ -600,6 +625,46 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         return vec![Cmd::Quit];
     }
     match &mut model.modal {
+        Modal::AudioCheck => {
+            return match key.code {
+                KeyCode::Esc | KeyCode::Char('t') => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                KeyCode::Enter if model.pending.is_none() => {
+                    pending(model, LABEL_BENCHMARK, vec![Cmd::RunAudioCheck])
+                }
+                KeyCode::Char('a') if model.pending.is_none() => pending(
+                    model,
+                    LABEL_BUFFER,
+                    vec![Cmd::SetCaptureBuffer(model.buffer_choice_ms)],
+                ),
+                KeyCode::Left | KeyCode::Right if model.pending.is_none() => {
+                    model.buffer_choice_ms = next_in_catalog(
+                        &[0, 50, 100, 200, 400],
+                        model.buffer_choice_ms,
+                        if key.code == KeyCode::Right { 1 } else { -1 },
+                    )
+                    .unwrap_or(0);
+                    vec![]
+                }
+                _ => vec![],
+            };
+        }
+        Modal::Firewall => {
+            return match key.code {
+                KeyCode::Esc | KeyCode::Char('f') => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                KeyCode::Enter
+                    if model.pending.is_none() && crate::handoff::is_loopback_base(&model.base) =>
+                {
+                    pending(model, LABEL_FIREWALL, vec![Cmd::RepairFirewall])
+                }
+                _ => vec![],
+            };
+        }
         Modal::Help => {
             model.modal = Modal::None;
             return vec![];
@@ -740,6 +805,18 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             model.modal = Modal::Status;
             return vec![];
         }
+        Action::Firewall => {
+            if model
+                .snapshot
+                .status
+                .as_ref()
+                .is_some_and(|s| s.firewall_warning.is_some())
+            {
+                model.modal = Modal::Firewall;
+            }
+            return vec![];
+        }
+        Action::AudioCheck => return open_audio_check(model),
         Action::Monitor => {
             let enabled = !model.service_on();
             model.pending = Some(Pending {
@@ -822,6 +899,8 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         | Action::Help
         | Action::Back
         | Action::Status
+        | Action::Firewall
+        | Action::AudioCheck
         | Action::Monitor
         | Action::Autostart => {
             unreachable!("handled above")
@@ -844,6 +923,14 @@ fn on_mouse(
         return vec![];
     }
     match target {
+        Target::AudioCheck if click => return open_audio_check(model),
+        Target::Firewall if click => {
+            model.modal = Modal::Firewall;
+            return vec![];
+        }
+        Target::Refresh if click => {
+            return pending(model, LABEL_REFRESH, vec![Cmd::Refresh]);
+        }
         Target::MonitorTag if click => {
             let enabled = !model.service_on();
             return pending(model, LABEL_MONITOR, vec![Cmd::SetService(enabled)]);
@@ -949,6 +1036,17 @@ fn on_mouse(
         }
         _ => vec![],
     }
+}
+
+fn open_audio_check(model: &mut Model) -> Vec<Cmd> {
+    model.buffer_choice_ms = model
+        .snapshot
+        .status
+        .as_ref()
+        .and_then(|s| s.capture_buffer_ms)
+        .unwrap_or(0);
+    model.modal = Modal::AudioCheck;
+    vec![]
 }
 
 /// What Esc does to an open overlay.

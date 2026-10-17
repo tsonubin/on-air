@@ -1,3 +1,4 @@
+export * from "./audioPerformance.ts";
 export * from "./discover.ts";
 export * from "./errorCopy.ts";
 export * from "./events.ts";

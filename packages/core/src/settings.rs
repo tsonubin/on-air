@@ -20,6 +20,7 @@ pub struct SavedSettings {
     pub input_sample_rate_hz: u32,
     pub output_sample_rate_hz: u32,
     pub service_enabled: bool,
+    pub capture_buffer_ms: u32,
 }
 
 impl Default for SavedSettings {
@@ -32,12 +33,16 @@ impl Default for SavedSettings {
             input_sample_rate_hz: crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ,
             output_sample_rate_hz: crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ,
             service_enabled: true,
+            capture_buffer_ms: 0,
         }
     }
 }
 
 impl SavedSettings {
     fn normalized(mut self) -> Self {
+        if !crate::audio_benchmark::BUFFER_OPTIONS_MS.contains(&self.capture_buffer_ms) {
+            self.capture_buffer_ms = 0;
+        }
         self.active_input = self.active_input.filter(|name| !name.trim().is_empty());
         self.active_output = self.active_output.filter(|output| {
             matches!(output.transport.as_str(), "sonos" | "airplay" | "bluetooth")
@@ -209,6 +214,7 @@ mod tests {
             input_sample_rate_hz: 48_000,
             output_sample_rate_hz: 44_100,
             service_enabled: false,
+            capture_buffer_ms: 0,
         };
         write_file(&path, &expected).unwrap();
         assert_eq!(load_file(&path).unwrap(), expected);

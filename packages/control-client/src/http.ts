@@ -8,6 +8,7 @@ import {
   type AirPlayModeResponse,
   type AirPlayPairRequest,
   type ApiErrorBody,
+  type AudioBenchmark,
   apiBase,
   type BluetoothIdRequest,
   type BluetoothListResponse,
@@ -41,6 +42,40 @@ export type FetchLike = typeof fetch;
 export const REQUEST_TIMEOUT_MS = 5_000;
 /** Budget for calls that wait on a device handshake (pairing, connecting, going live). */
 export const SLOW_REQUEST_TIMEOUT_MS = 60_000;
+
+export async function runAudioBenchmark(
+  base: string,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<AudioBenchmark> {
+  return request(
+    base,
+    "/api/audio/benchmark",
+    { method: "POST", headers: authHeaders(token) },
+    opts,
+    15_000,
+  );
+}
+
+export async function setCaptureBuffer(
+  base: string,
+  bufferMs: number,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(
+    base,
+    "/api/audio/buffer",
+    jsonInit("PUT", token, { buffer_ms: bufferMs }),
+    opts,
+    SLOW_REQUEST_TIMEOUT_MS,
+  );
+}
+
+/** Local host only. The caller must explain and confirm the rule first. */
+export async function repairFirewall(base: string, opts?: RequestOptions): Promise<void> {
+  await request(base, "/api/network/firewall", { method: "POST" }, opts, 125_000);
+}
 
 /** Per-call knobs accepted as the trailing argument of every HTTP function. */
 export interface RequestOptions {

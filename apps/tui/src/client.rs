@@ -200,6 +200,29 @@ impl Client {
         };
         match cmd {
             Cmd::Quit => vec![],
+            Cmd::RunAudioCheck => vec![Msg::Benchmark(
+                self.audio_check()
+                    .await
+                    .map_err(|error| error_copy::copy(&error)),
+            )],
+            Cmd::SetCaptureBuffer(buffer_ms) => done(
+                update::LABEL_BUFFER,
+                self.set_capture_buffer(buffer_ms).await,
+            ),
+            Cmd::RepairFirewall => {
+                let result = self.repair_firewall().await;
+                let mut messages = done(update::LABEL_FIREWALL, result);
+                if matches!(messages.first(), Some(Msg::Done { result: Ok(()), .. })) {
+                    let (snapshot, _) = self.load_snapshot().await;
+                    messages.push(Msg::Snapshot(Ok(Box::new(snapshot))));
+                } else if let Some(Msg::Done {
+                    result: Err(copy), ..
+                }) = messages.first_mut()
+                {
+                    *copy = "Firewall rule was not applied. Authorize on the host or run the displayed commands.".into();
+                }
+                messages
+            }
             Cmd::Refresh => {
                 let (snapshot, failures) = self.load_snapshot().await;
                 if snapshot.status.is_none() {
@@ -426,6 +449,36 @@ impl Client {
 
     pub async fn status(&self) -> Result<StatusResponse, ClientError> {
         self.get("/api/status").await
+    }
+
+    pub async fn audio_check(&self) -> Result<crate::api::AudioBenchmark, ClientError> {
+        self.send_json(
+            Method::POST,
+            "/api/audio/benchmark",
+            json!({}),
+            Duration::from_secs(15),
+        )
+        .await
+    }
+
+    pub async fn repair_firewall(&self) -> Result<(), ClientError> {
+        self.send_json(
+            Method::POST,
+            "/api/network/firewall",
+            json!({}),
+            Duration::from_secs(125),
+        )
+        .await
+    }
+
+    pub async fn set_capture_buffer(&self, buffer_ms: u32) -> Result<(), ClientError> {
+        self.send_json(
+            Method::PUT,
+            "/api/audio/buffer",
+            json!({"buffer_ms": buffer_ms}),
+            SLOW_TIMEOUT,
+        )
+        .await
     }
 
     pub async fn pin(&self) -> Result<String, ClientError> {

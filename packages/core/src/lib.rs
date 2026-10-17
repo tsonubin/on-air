@@ -7,9 +7,11 @@ use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
 pub mod api;
+pub mod audio_benchmark;
 pub mod cd;
 pub mod dsp;
 pub mod events;
+pub mod firewall;
 pub mod http;
 pub mod keep_awake;
 pub mod mdns;
@@ -36,6 +38,8 @@ pub fn status_for(state: &CoreState) -> StatusResponse {
         service_enabled: state.service_enabled.load(Ordering::Acquire),
         sleep_inhibited: Some(state.sleep_inhibited()),
         lan_addresses: Some(net::lan_addresses()),
+        firewall_warning: state.firewall_warning.lock().clone(),
+        capture_buffer_ms: Some(state.capture_buffer_ms.load(Ordering::Acquire)),
     }
 }
 
@@ -53,6 +57,12 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/patchbay",
             get(api::patchbay::snapshot).post(api::patchbay::command),
         )
+        .route("/api/network/firewall", post(api::firewall::repair))
+        .route(
+            "/api/audio/benchmark",
+            post(api::audio_performance::benchmark),
+        )
+        .route("/api/audio/buffer", put(api::audio_performance::set_buffer))
         .route("/stream/{nonce}/audio.wav", get(api::stream::stream_audio))
         .route("/api/cd", get(api::cd::get_cd))
         .route("/api/cd/control", post(api::cd::control_cd))
@@ -187,6 +197,7 @@ pub async fn serve_with_state_until(
             background.push(discovery);
         }
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
+        background.push(crate::firewall::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
     let patchbay_state = state.clone();

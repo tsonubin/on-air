@@ -1,4 +1,11 @@
-import { FieldGroup, Picker, Row, Spacer, Text } from "@expo/ui";
+import { Button, FieldGroup, Picker, Row, Spacer, Text } from "@expo/ui";
+import {
+  AUDIO_CHECK_DESCRIPTION,
+  AUDIO_CHECK_OVER_BUDGET,
+  audioBenchmarkSummary,
+  CAPTURE_BUFFER_OPTIONS,
+  captureBufferLabel,
+} from "@on-air/control-client";
 import { useRemoteSession } from "@/remote-session";
 import { SettingsForm } from "@/settings-form";
 
@@ -12,7 +19,10 @@ export default function AudioFormatScreen() {
     configuringRate,
     view,
     applyRate,
+    captureBufferMs,
+    audioPerformance,
   } = useRemoteSession();
+  const report = audioPerformance.report;
   const rows = [
     {
       kind: "input",
@@ -54,6 +64,50 @@ export default function AudioFormatScreen() {
             Keep the current rates unless your audio equipment requires a different format. Input is
             captured from the desktop; output is sent to the speaker.
           </Text>
+        </FieldGroup.SectionFooter>
+      </FieldGroup.Section>
+      <FieldGroup.Section title="Audio performance">
+        <Row alignment="center">
+          <Text>Requested capture buffer</Text>
+          <Spacer />
+          <Picker
+            selectedValue={captureBufferMs ?? 0}
+            appearance="menu"
+            enabled={
+              view.controlsEnabled && captureBufferMs !== undefined && !audioPerformance.busy
+            }
+            onValueChange={(value) => void audioPerformance.apply(Number(value))}
+            testID="capture-buffer-picker"
+          >
+            {CAPTURE_BUFFER_OPTIONS.map((ms) => (
+              <Picker.Item key={ms} label={captureBufferLabel(ms)} value={ms} />
+            ))}
+          </Picker>
+        </Row>
+        <Button
+          label={audioPerformance.busy ? "Working…" : "Run audio check"}
+          disabled={!view.controlsEnabled || captureBufferMs === undefined || audioPerformance.busy}
+          onPress={() => void audioPerformance.run()}
+          testID="audio-check"
+        />
+        {report && (
+          <>
+            <Text>{audioBenchmarkSummary(report)}</Text>
+            {!report.within_buffer_budget && <Text>{AUDIO_CHECK_OVER_BUDGET}</Text>}
+            <Button
+              label={`Apply recommendation (${report.recommended_buffer_ms} ms)`}
+              disabled={!view.controlsEnabled || audioPerformance.busy}
+              onPress={() => void audioPerformance.apply(report.recommended_buffer_ms)}
+              testID="apply-audio-buffer"
+            />
+          </>
+        )}
+        {audioPerformance.error && <Text>{audioPerformance.error}</Text>}
+        <FieldGroup.SectionFooter>
+          <Text>{AUDIO_CHECK_DESCRIPTION}</Text>
+          {captureBufferMs === undefined && (
+            <Text>Update the on-air core to use these settings.</Text>
+          )}
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>
     </SettingsForm>

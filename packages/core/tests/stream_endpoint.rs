@@ -120,6 +120,47 @@ async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
 }
 
 #[tokio::test]
+async fn a_larger_capture_buffer_does_not_insert_silence_between_normal_batches() {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+    let mut state = CoreState::new();
+    state.set_mock(true);
+    let nonce = new_stream_nonce();
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
+    let app = on_air_core::build_router(state.clone());
+    let response = app
+        .clone()
+        .oneshot(
+            Request::put("/api/audio/buffer")
+                .header("content-type", "application/json")
+                .body(Body::from("{\"buffer_ms\":200}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::NO_CONTENT);
+    let response = app
+        .oneshot(
+            Request::get(format!("/stream/{nonce}/audio.wav"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+    assert!(stream.next().await.unwrap().unwrap().starts_with(b"RIFF"));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), stream.next())
+            .await
+            .is_err(),
+        "normal capture batching must not add extra silence to the audio timeline"
+    );
+    let pcm = bytes::Bytes::from_static(&[1, 2, 3, 4]);
+    state.audio_tx.send(pcm.clone()).unwrap();
+    assert_eq!(stream.next().await.unwrap().unwrap(), pcm);
+}
+
+#[tokio::test]
 async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
     let state = CoreState::new();
     let nonce = new_stream_nonce();

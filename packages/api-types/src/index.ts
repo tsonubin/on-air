@@ -95,8 +95,29 @@ export interface StatusResponse {
    * the quality overhaul omit it.
    */
   lan_addresses?: string[];
+  firewall_warning?: FirewallWarning;
+  /** Requested capture buffer; 0 uses the backend default. */
+  capture_buffer_ms?: number;
   /** Reserved: a friendly service name. Not emitted by current cores. */
   name?: string;
+}
+
+export interface FirewallWarning {
+  subnet: string;
+  port: number;
+  message: string;
+  repair_command: string;
+}
+
+export interface AudioBenchmark {
+  input_hz: number;
+  output_hz: number;
+  duration_ms: number;
+  pipeline_p95_ms: number;
+  scheduler_p95_ms: number;
+  worst_case_ms: number;
+  recommended_buffer_ms: number;
+  within_buffer_budget: boolean;
 }
 
 export interface PinResponse {

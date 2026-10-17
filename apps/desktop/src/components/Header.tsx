@@ -54,7 +54,9 @@ export function Header({
   pin,
   ...popover
 }: HeaderProps) {
-  const lamp = lampState(connection, activeOutput);
+  const lamp = status?.firewall_warning
+    ? { mode: "warn" as const, label: "firewall blocking audio" }
+    : lampState(connection, activeOutput);
   const address = status?.lan_addresses?.[0];
   const allAddresses = status?.lan_addresses?.map((a) => `${a}:${DEFAULT_PORT}`).join(", ");
   const liveOff = liveUpdates === "reconnecting" && connection === "ok";

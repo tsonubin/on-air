@@ -125,6 +125,7 @@ mod pulse {
         source: &str,
         mut producer: HeapProd<f32>,
         preferred_rate_hz: Option<u32>,
+        buffer_ms: u32,
     ) -> Result<(PulseMonitorCapture, u32), String> {
         let rate = preferred_rate_hz.unwrap_or(48000);
         let mut child = Command::new("parec")
@@ -136,7 +137,10 @@ mod pulse {
                 "--rate",
                 &rate.to_string(),
                 "--channels=1",
-                "--latency-msec=50",
+                &format!(
+                    "--latency-msec={}",
+                    if buffer_ms == 0 { 50 } else { buffer_ms }
+                ),
             ])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -201,6 +205,7 @@ mod pulse {
         _source: &str,
         _producer: HeapProd<f32>,
         _preferred_rate_hz: Option<u32>,
+        _buffer_ms: u32,
     ) -> Result<(PulseMonitorCapture, u32), String> {
         Err("Pulse monitor capture is only available on Linux".to_string())
     }
@@ -252,6 +257,15 @@ pub fn start_capture_at(
     producer: HeapProd<f32>,
     preferred_rate_hz: Option<u32>,
 ) -> Result<(Stream, u32), cpal::Error> {
+    start_capture_buffered_at(device, producer, preferred_rate_hz, 0)
+}
+
+pub fn start_capture_buffered_at(
+    device: &Device,
+    producer: HeapProd<f32>,
+    preferred_rate_hz: Option<u32>,
+    buffer_ms: u32,
+) -> Result<(Stream, u32), cpal::Error> {
     let default = device.default_input_config()?;
     let supported = preferred_rate_hz
         .and_then(|rate| {
@@ -272,7 +286,9 @@ pub fn start_capture_at(
         .unwrap_or(default);
     let sample_format = supported.sample_format();
     let channels = supported.channels() as usize;
-    let config = supported.config();
+    let mut config = supported.config();
+    config.buffer_size =
+        capture_buffer_size(config.sample_rate, buffer_ms, supported.buffer_size());
     let actual_rate = config.sample_rate;
 
     let stream = match sample_format {
@@ -298,6 +314,26 @@ pub fn start_capture_at(
 
     stream.play()?;
     Ok((stream, actual_rate))
+}
+
+pub fn capture_buffer_size(
+    rate: u32,
+    buffer_ms: u32,
+    supported: &cpal::SupportedBufferSize,
+) -> cpal::BufferSize {
+    if buffer_ms == 0 {
+        return cpal::BufferSize::Default;
+    }
+    let frames =
+        ((u64::from(rate) * u64::from(buffer_ms) / 1000).min(u64::from(u32::MAX)) as u32).max(1);
+    match supported {
+        cpal::SupportedBufferSize::Range { min, max } => {
+            cpal::BufferSize::Fixed(frames.clamp(*min, *max))
+        }
+        // Unknown means limits cannot be queried, not that fixed buffers
+        // are unsupported. Let the backend honor or reject the request.
+        cpal::SupportedBufferSize::Unknown => cpal::BufferSize::Fixed(frames),
+    }
 }
 
 fn build_input_stream<T>(

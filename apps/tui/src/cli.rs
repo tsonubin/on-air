@@ -11,6 +11,64 @@ use serde::Serialize;
 const GLYPH_ON: &str = "\u{f075a}"; // nf-md-speaker
 const GLYPH_OFF: &str = "\u{f075b}"; // nf-md-speaker_off
 
+pub async fn firewall(client: &Client, allow: bool) -> Result<String, ClientError> {
+    let status = client.status().await?;
+    let Some(warning) = status.firewall_warning else {
+        return Ok("No recent UFW block affecting on-air was observed. Detection requires access to kernel logs.".into());
+    };
+    if allow {
+        println!(
+            "Allowing {} to reach TCP {}. Complete administrator authentication on the host.",
+            warning.subnet, warning.port
+        );
+        client.repair_firewall().await?;
+        Ok("Scoped LAN audio rule applied.".into())
+    } else {
+        Ok(format!(
+            "{}\nAllow {} → TCP {}.\nOn the host: on-air firewall allow\nOr run:\n{}",
+            warning.message, warning.subnet, warning.port, warning.repair_command
+        ))
+    }
+}
+
+pub fn benchmark_text(report: &crate::api::AudioBenchmark) -> String {
+    format!("Audio check: {} → {} Hz\nPipeline p95: {:.1} ms; scheduler p95: {:.1} ms\nWorst round trip: {:.1} ms\nRecommended capture buffer: {} ms (3× timing margin + one audio quantum)\n{}\nRun during your usual workload. This does not measure USB capture errors or network/speaker buffering.",
+        report.input_hz, report.output_hz, report.pipeline_p95_ms, report.scheduler_p95_ms,
+        report.worst_case_ms, report.recommended_buffer_ms,
+        if report.within_buffer_budget { "System priority stays unchanged." } else { "Measured stalls exceed the available buffer budget. Reduce load or sample rate and retry." })
+}
+
+pub async fn audio(
+    client: &Client,
+    action: &str,
+    value: Option<u32>,
+    json: bool,
+) -> Result<String, ClientError> {
+    if action == "check" {
+        let report = client.audio_check().await?;
+        return Ok(if json {
+            serde_json::to_string_pretty(&report).unwrap()
+        } else {
+            format!(
+                "{}\nApply with: on-air audio buffer {}",
+                benchmark_text(&report),
+                report.recommended_buffer_ms
+            )
+        });
+    }
+    if let Some(value) = value {
+        client.set_capture_buffer(value).await?;
+    }
+    let buffer = client.status().await?.capture_buffer_ms.unwrap_or(0);
+    Ok(if json {
+        format!("{{\"capture_buffer_ms\":{buffer}}}")
+    } else if buffer == 0 {
+        "Capture buffer: system default".into()
+    } else {
+        format!("Requested capture buffer: {buffer} ms")
+    })
+}
+
 /// One Waybar-style line for a bar module: `{"text","tooltip","class"}`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BarLine {
@@ -198,6 +256,8 @@ mod tests {
             service_enabled: enabled,
             sleep_inhibited: Some(enabled),
             lan_addresses: Some(vec!["10.0.0.12".into()]),
+            firewall_warning: None,
+            capture_buffer_ms: None,
         }
     }
 

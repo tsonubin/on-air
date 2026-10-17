@@ -26,6 +26,8 @@ fn model_with_mock_snapshot() -> Model {
             service_enabled: true,
             sleep_inhibited: Some(true),
             lan_addresses: Some(vec!["10.0.0.12".into()]),
+            firewall_warning: None,
+            capture_buffer_ms: None,
         }),
         pin: Some("123456".into()),
         inputs: vec!["Mock Monitor".into()],
@@ -172,8 +174,8 @@ fn enter_on_a_source_activates_it() {
 fn source_rows_skip_duplicate_names() {
     let mut m = model_with_mock_snapshot();
     m.snapshot.inputs = vec!["a.monitor".into(), "a.monitor".into(), "USB mic".into()];
-    update(&mut m, code(KeyCode::Down));
-    update(&mut m, code(KeyCode::Down));
+    update(&mut m, key('j'));
+    update(&mut m, key('j'));
     assert_eq!(m.source_index, 1);
     assert_eq!(
         update(&mut m, code(KeyCode::Enter)),
@@ -971,6 +973,79 @@ fn core_down_still_allows_refresh_settings_and_quit() {
     assert_eq!(update(&mut m, key('r')), vec![Cmd::Refresh]);
     assert_eq!(update(&mut m, key('b')), vec![Cmd::OpenBluetoothSettings]);
     assert_eq!(update(&mut m, key('q')), vec![Cmd::Quit]);
+}
+
+#[test]
+fn firewall_repair_requires_confirmation_and_only_runs_on_the_host() {
+    let mut m = model_with_mock_snapshot();
+    m.snapshot.status.as_mut().unwrap().firewall_warning = Some(crate::api::FirewallWarning {
+        subnet: "192.168.5.0/24".into(),
+        port: 47990,
+        message: "UFW is blocking on-air audio from the local network.".into(),
+        repair_command: "sudo ufw allow from 192.168.5.0/24 to any port 47990 proto tcp".into(),
+    });
+    assert!(update(&mut m, key('f')).is_empty());
+    assert_eq!(m.modal, Modal::Firewall);
+    assert!(update(&mut m, code(KeyCode::Esc)).is_empty());
+    assert_eq!(m.modal, Modal::None);
+    m.base = "http://192.168.5.101:47990".into();
+    update(&mut m, key('f'));
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    m.base = "http://127.0.0.1:47990".into();
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::RepairFirewall]
+    );
+    assert!(
+        update(&mut m, code(KeyCode::Enter)).is_empty(),
+        "no duplicate prompts"
+    );
+    update(&mut m, done(LABEL_FIREWALL, Ok(())));
+    assert_eq!(m.modal, Modal::None);
+}
+
+#[test]
+fn audio_check_recommends_without_applying_and_manual_selection_requires_a() {
+    let mut m = model_with_mock_snapshot();
+    assert!(update(&mut m, key('t')).is_empty());
+    assert_eq!(m.modal, Modal::AudioCheck);
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::RunAudioCheck]
+    );
+    let report = crate::api::AudioBenchmark {
+        input_hz: 44100,
+        output_hz: 44100,
+        duration_ms: 2200,
+        pipeline_p95_ms: 10.0,
+        scheduler_p95_ms: 2.0,
+        worst_case_ms: 25.0,
+        recommended_buffer_ms: 100,
+        within_buffer_budget: true,
+    };
+    assert!(update(&mut m, Msg::Benchmark(Ok(report))).is_empty());
+    assert_eq!(m.buffer_choice_ms, 100);
+    assert_eq!(update(&mut m, key('a')), vec![Cmd::SetCaptureBuffer(100)]);
+    update(&mut m, done(LABEL_BUFFER, Ok(())));
+    assert!(update(&mut m, code(KeyCode::Right)).is_empty());
+    assert_eq!(m.buffer_choice_ms, 200);
+    assert_eq!(update(&mut m, key('a')), vec![Cmd::SetCaptureBuffer(200)]);
+}
+
+#[test]
+fn arrows_adjust_volume_from_every_main_pane() {
+    for pane in [Pane::Sources, Pane::Outputs, Pane::Mixer] {
+        for (code_value, expected) in [(KeyCode::Up, 55), (KeyCode::Down, 45)] {
+            let mut m = model_with_mock_snapshot();
+            m.pane = pane;
+            m.snapshot.volume = 50;
+            assert_eq!(
+                update(&mut m, code(code_value)),
+                vec![Cmd::SetVolume(expected)]
+            );
+            assert_eq!(m.snapshot.volume, expected);
+        }
+    }
 }
 
 #[test]

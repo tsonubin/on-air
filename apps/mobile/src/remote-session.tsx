@@ -5,6 +5,7 @@ import type {
   CdStatus,
   DiscoveredHost,
   EqGains,
+  FirewallWarning,
   OutputInfo,
 } from "@on-air/api-types";
 import { outputPhase } from "@on-air/api-types";
@@ -30,6 +31,7 @@ import { createContext, use, useCallback, useEffect, useMemo, useRef, useState }
 import { AppState, type AppStateStatus } from "react-native";
 import { formatDesktopTarget, targetBase } from "@/desktop-target";
 import { friendlyError, isUnauthorized } from "@/errors";
+import { type AudioPerformanceHandle, useAudioPerformance } from "@/hooks/useAudioPerformance";
 import { useDesktopConnection } from "@/hooks/useDesktopConnection";
 import { useDiscovery } from "@/hooks/useDiscovery";
 import { useLatestWriteQueue } from "@/hooks/useLatestWriteQueue";
@@ -71,6 +73,9 @@ export type RemoteState = {
   error: string | null;
   /** Non-fatal notice (for example, the pairing could not be saved to the keychain). */
   warning: string | null;
+  firewallWarning?: FirewallWarning;
+  captureBufferMs?: number;
+  audioPerformance: AudioPerformanceHandle;
   paired: boolean;
   /** The paired desktop as `host` or `host:port`. */
   pairedHost: string;
@@ -165,6 +170,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     onNotice: setActionError,
   });
   const { patch, refreshNow, scheduleRefresh } = connection;
+  const audioPerformance = useAudioPerformance(base, token, () => refreshNow(["status"]));
 
   /** Shows the failure; a 401 from any call ends the pairing. */
   const fail = useCallback(
@@ -483,6 +489,9 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       view,
       error,
       warning: store.warning,
+      firewallWarning: connection.status?.firewall_warning,
+      captureBufferMs: connection.status?.capture_buffer_ms,
+      audioPerformance,
       paired: Boolean(saved),
       pairedHost,
       found: discovery.found,
@@ -529,6 +538,9 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       view,
       error,
       store.warning,
+      connection.status?.firewall_warning,
+      connection.status?.capture_buffer_ms,
+      audioPerformance,
       saved,
       pairedHost,
       discovery.found,

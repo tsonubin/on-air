@@ -1,9 +1,11 @@
 pub mod airplay;
+pub mod audio_performance;
 pub mod auth;
 pub mod bluetooth;
 pub mod cd;
 pub mod eq;
 pub mod error;
+pub mod firewall;
 pub mod inputs;
 pub mod outputs;
 pub mod pairing;
