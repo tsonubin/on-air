@@ -45,6 +45,7 @@ function Pressable(props) {
 module.exports = {
   ActivityIndicator: mock("ActivityIndicator"),
   AppState,
+  KeyboardAvoidingView: mock("KeyboardAvoidingView"),
   Pressable,
   SafeAreaView: mock("SafeAreaView"),
   ScrollView: mock("ScrollView"),

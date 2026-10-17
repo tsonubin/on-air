@@ -3,7 +3,7 @@ import * as client from "@on-air/control-client";
 import { FakeSocket } from "@on-air/control-client/testing";
 import * as expoRouter from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { useWindowDimensions } from "react-native";
+import { Platform, useWindowDimensions } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import RootLayout from "../app/_layout";
 
@@ -436,6 +436,24 @@ test("a late scan lists the desktop but keeps a manually typed address", async (
   expect(exists("discovered-192.168.5.14")).toBe(true);
   await pairWith();
   expect(api.verifyPin).toHaveBeenCalledWith("http://192.168.5.77:47990", "123456");
+});
+
+test("the pairing form moves up out of the keyboard's way", async () => {
+  const original = Platform.OS;
+  try {
+    // iOS insets the ScrollView itself and scrolls the focused field above the keyboard.
+    await renderApp();
+    expect(host("pairing-scroll").props.automaticallyAdjustKeyboardInsets).toBe(true);
+    expect(host("pairing-screen").props.behavior).toBeUndefined();
+
+    // Edge-to-edge Android does not resize the window for the keyboard, so the screen pads itself.
+    ReactTestRenderer.act(() => tree?.unmount());
+    (Platform as { OS: string }).OS = "android";
+    await renderApp();
+    expect(host("pairing-screen").props.behavior).toBe("padding");
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
 });
 
 test("an expired pairing returns to pairing with the desktop still selected", async () => {

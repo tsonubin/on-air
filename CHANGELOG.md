@@ -32,6 +32,11 @@ Notable changes to on-air. The format follows
   on the desktop; Jest 30 on the phone; TypeScript 7, Biome 2.5.15,
   Turbo 2.11, Playwright 1.64. Expo SDK 57 pins stay as Expo expects them.
 
+### Fixed
+
+- The phone's pairing screen scrolls up when the keyboard opens, so the
+  address and code fields are no longer hidden behind it on iOS or Android.
+
 ## [0.2.0] - unreleased
 
 ### Added

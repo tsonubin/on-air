@@ -3,6 +3,8 @@ import type React from "react";
 import { useRef, useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -193,12 +195,20 @@ export function PairingHome({
   const canPair = targetReady && pin.length === 6 && !pairing;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }} testID="pairing-screen">
+    // iOS insets the ScrollView and scrolls the focused field above the keyboard. Edge-to-edge
+    // Android no longer resizes the window for it (adjustResize is a no-op), so pad instead.
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "android" ? "padding" : undefined}
+      style={{ flex: 1, backgroundColor: colors.background }}
+      testID="pairing-screen"
+    >
       <ScrollView
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
+        automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        testID="pairing-scroll"
         contentContainerStyle={{
           minHeight: "100%",
           paddingTop: insets.top + (wide ? 24 : 16),
@@ -420,6 +430,6 @@ export function PairingHome({
           </View>
         </View>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
