@@ -76,6 +76,10 @@ impl BackgroundTasks {
 
 #[derive(Clone)]
 pub struct CoreState {
+    pub(crate) patchbay: Arc<crate::patchbay::Patchbay>,
+    pub(crate) patchbay_endpoint: bool,
+    pub(crate) sender_lock: Arc<Mutex<()>>,
+    pub(crate) legacy_output: Option<OutputSession>,
     // Sessions. Each owns its live resources under its own transition lock.
     output: OutputSession,
     input: InputSession,
@@ -187,7 +191,9 @@ impl CoreState {
             }
         };
         let pairing = PairingState::persistent(path.with_file_name("paired-remotes.json"));
+        let patchbay_path = path.with_file_name("patchbay.json");
         let mut state = Self::from_saved_settings(saved, Some(SettingsPersistence::new(path)));
+        state.patchbay = Arc::new(crate::patchbay::Patchbay::new(Some(patchbay_path), false));
         state.pairing = Arc::new(StdMutex::new(pairing));
         state
     }
@@ -212,6 +218,10 @@ impl CoreState {
             cd: cd.clone(),
         });
         CoreState {
+            patchbay: Arc::new(crate::patchbay::Patchbay::new(None, false)),
+            patchbay_endpoint: false,
+            sender_lock: Arc::new(Mutex::new(())),
+            legacy_output: None,
             output,
             input,
             config_lock: Arc::new(Mutex::new(())),
@@ -312,11 +322,48 @@ impl CoreState {
     /// list, and the laptop speakers are never touched.
     pub fn set_mock(&mut self, mock: bool) {
         self.mock = mock;
+        self.patchbay = Arc::new(crate::patchbay::Patchbay::new(None, mock));
         self.output.set_manage_local_sink(!mock);
         self.input.set_mock(mock);
     }
 
     // ---- sessions -------------------------------------------------------
+
+    /// Isolated PCM, sender, nonce and stream health for a virtual network
+    /// sink. Discovery and the service flag are shared with the parent.
+    pub(crate) fn patchbay_child(&self) -> Self {
+        let mut child = self.clone();
+        child.patchbay_endpoint = true;
+        child.legacy_output = Some(self.output.clone());
+        let (audio_tx, _) = broadcast::channel(AUDIO_BROADCAST_CAPACITY);
+        let (ws_tx, _) = broadcast::channel(64);
+        child.audio_tx = audio_tx;
+        child.ws_tx = ws_tx;
+        child.patchbay = Arc::new(crate::patchbay::Patchbay::new(None, self.mock));
+        child.settings_persistence = None;
+        child.saved_settings = Arc::new(StdMutex::new(SavedSettings::default()));
+        child.settings_revision = Arc::new(AtomicU64::new(0));
+        child.config_lock = Arc::new(Mutex::new(()));
+        child.eq_gains_db = Arc::new(StdMutex::new([0.0; 5]));
+        child.target_sample_rate_hz = Arc::new(StdMutex::new(44100));
+        child.output_sample_rate_hz = Arc::new(StdMutex::new(44100));
+        child.output_volume = Arc::new(AtomicU8::new(self.output_volume()));
+        child.stream_clients = Arc::new(AtomicUsize::new(0));
+        child.stream_progress = Arc::new(AtomicU64::new(0));
+        child.background = Arc::new(StdMutex::new(BackgroundTasks::default()));
+        child.cd = CdDeck::new();
+        child.output = OutputSession::new(child.ws_tx.clone(), child.output_sample_rate_hz.clone());
+        child.output.set_manage_local_sink(false);
+        child.input = InputSession::new(InputWiring {
+            audio_tx: child.audio_tx.clone(),
+            ws_tx: child.ws_tx.clone(),
+            eq_gains_db: child.eq_gains_db.clone(),
+            input_rate_hz: child.target_sample_rate_hz.clone(),
+            cd: child.cd.clone(),
+        });
+        child.input.set_mock(self.mock);
+        child
+    }
 
     /// The exclusive-output session.
     pub fn output(&self) -> &OutputSession {
@@ -663,6 +710,7 @@ impl CoreState {
     ///
     /// [`abort_background_tasks`]: Self::abort_background_tasks
     pub async fn shutdown(&self) {
+        self.patchbay.stop().await;
         let state = self.clone();
         let _ = tokio::task::spawn_blocking(move || state.persist_settings_now()).await;
         let _configuration = self.config_lock.lock().await;

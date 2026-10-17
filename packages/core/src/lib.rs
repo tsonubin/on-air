@@ -15,6 +15,7 @@ pub mod keep_awake;
 pub mod mdns;
 pub mod net;
 pub mod pairing;
+pub mod patchbay;
 pub mod pipeline;
 pub mod sender;
 pub mod session;
@@ -48,6 +49,10 @@ pub fn build_router(state: CoreState) -> Router {
     ];
     let mut router = Router::new()
         .route("/api/status", get(status_handler))
+        .route(
+            "/api/patchbay",
+            get(api::patchbay::snapshot).post(api::patchbay::command),
+        )
         .route("/stream/{nonce}/audio.wav", get(api::stream::stream_audio))
         .route("/api/cd", get(api::cd::get_cd))
         .route("/api/cd/control", post(api::cd::control_cd))
@@ -184,6 +189,17 @@ pub async fn serve_with_state_until(
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
+    let patchbay_state = state.clone();
+    state.background.lock().push(tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            if patchbay_state.patchbay.activated.load(Ordering::Acquire) {
+                patchbay_state.patchbay.refresh(&patchbay_state).await;
+            }
+        }
+    }));
     let server = axum::serve(
         listener,
         build_router(state.clone()).into_make_service_with_connect_info::<SocketAddr>(),

@@ -10,7 +10,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/tsonubin/on-air"
 license=('MIT')
 depends=('alsa-lib' 'openssl' 'libpulse' 'bluez-utils' 'xdg-terminal-exec' 'hicolor-icon-theme')
-optdepends=('python-pyatv: AirPlay without OwnTone')
+optdepends=('python-pyatv: AirPlay without OwnTone or independent patchbay streams' 'quickshell: native Omarchy patchbay panel')
 makedepends=('cargo' 'git')
 provides=('on-air' 'on-air-core')
 conflicts=('on-air-bin' 'on-air-core')
@@ -42,6 +42,9 @@ package() {
   cd "${pkgname}-${pkgver}"
   install -Dm755 target/release/on-air-core "$pkgdir/usr/bin/on-air-core"
   install -Dm755 target/release/on-air "$pkgdir/usr/bin/on-air"
+  install -Dm755 packaging/omarchy/install-plugin.sh "$pkgdir/usr/bin/on-air-install-plugin"
+  install -dm755 "$pkgdir/usr/share/on-air/quickshell"
+  install -m644 apps/quickshell/manifest.json apps/quickshell/*.qml apps/quickshell/Rope.js "$pkgdir/usr/share/on-air/quickshell/"
   install -Dm644 packaging/omarchy/on-air-core.service "$pkgdir/usr/lib/systemd/user/on-air-core.service"
   install -Dm644 packaging/omarchy/on-air.desktop "$pkgdir/usr/share/applications/on-air.desktop"
   install -Dm644 packaging/omarchy/on-air.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/on-air.svg"

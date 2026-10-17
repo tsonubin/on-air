@@ -51,6 +51,79 @@ pub struct ApiErrorBody {
 }
 
 // ---------------------------------------------------------------------------
+// Linux patchbay (additive; the original exclusive-session API is unchanged)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchbaySide {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchbayNode {
+    pub id: String,
+    pub name: String,
+    pub side: PatchbaySide,
+    pub kind: String,
+    pub members: Vec<String>,
+    pub volume: u8,
+    pub muted: bool,
+    pub is_default: bool,
+    pub state: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchbayLink {
+    pub source: String,
+    pub target: String,
+    pub state: String,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatchbaySnapshot {
+    pub supported: bool,
+    pub enabled: bool,
+    pub nodes: Vec<PatchbayNode>,
+    pub links: Vec<PatchbayLink>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PatchbayCommand {
+    Connect {
+        source: String,
+        target: String,
+    },
+    Disconnect {
+        source: String,
+        target: String,
+    },
+    Combine {
+        side: PatchbaySide,
+        members: Vec<String>,
+    },
+    RemoveGroup {
+        id: String,
+    },
+    SetDefault {
+        id: String,
+    },
+    SetVolume {
+        id: String,
+        volume: u8,
+    },
+    SetMuted {
+        id: String,
+        muted: bool,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Status, pairing, service
 // ---------------------------------------------------------------------------
 

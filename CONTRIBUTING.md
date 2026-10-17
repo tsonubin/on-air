@@ -40,6 +40,7 @@ start the core in mock mode (`ON_AIR_MOCK=1`) themselves.
 | --- | --- |
 | `packages/core` | The Rust core: capture, DSP, the Sonos/AirPlay/Bluetooth senders, the HTTP/WebSocket control plane. Headless binary `on-air-core`. |
 | `apps/tui` | `on-air`, the ratatui terminal UI and CLI for Linux. A client of the core. |
+| `apps/quickshell` | Native Omarchy 4 QML patchbay; rope physics and offscreen Qt interaction tests. |
 | `apps/desktop` | The Tauri tray app for macOS and Windows: React webview plus a Rust shell that embeds the core. |
 | `apps/mobile` | The Expo phone remote. |
 | `packages/api` | The control plane's wire types in Rust (`on-air-api`), serialized by the core and read by the TUI. |

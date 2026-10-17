@@ -182,3 +182,4 @@ grep -q 'inhibit-block-sleep' docs/omarchy.md || fail "docs polkit rule lacks in
 grep -q 'inhibit-block-idle' docs/omarchy.md || fail "docs polkit rule lacks inhibit-block-idle"
 echo "ok docs/omarchy.md polkit rule"
 echo "all ok"
+python3 packaging/omarchy/test-plugin.py

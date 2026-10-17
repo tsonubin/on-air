@@ -98,6 +98,28 @@ pub async fn activate(
     transport: &str,
     device_id: &str,
 ) -> Result<(), ActivateError> {
+    let _senders = state.sender_lock.lock().await;
+    if !state
+        .service_enabled
+        .load(std::sync::atomic::Ordering::Acquire)
+    {
+        return Err(SenderError::not_ready("The on-air service is paused.").into());
+    }
+    let reserved = if state.patchbay_endpoint {
+        state
+            .legacy_output
+            .as_ref()
+            .and_then(OutputSession::active)
+            .is_some_and(|active| active.transport == transport && active.device_id == device_id)
+    } else {
+        state.patchbay.uses_receiver(transport, device_id).await
+    };
+    if reserved {
+        return Err(SenderError::not_ready(
+            "This speaker is in use by another on-air session. Disconnect its route first.",
+        )
+        .into());
+    }
     let built = match transport {
         "sonos" => build_sonos(state, device_id).await?,
         "airplay" => build_airplay(state, device_id)?,
@@ -213,7 +235,9 @@ fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateEr
     let url = state.stream_url(lan_ip, &nonce);
     Ok(Built {
         sender: Box::new(
-            AirPlaySender::new(device.name, device.id, base).with_radio(url, device.address),
+            AirPlaySender::new(device.name, device.id, base)
+                .with_radio(url, device.address)
+                .with_independent_stream(state.patchbay_endpoint),
         ),
         identity,
         stream_nonce: Some(nonce),

@@ -11,7 +11,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/tsonubin/on-air"
 license=('MIT')
 depends=('alsa-lib' 'openssl' 'libpulse' 'bluez-utils' 'xdg-terminal-exec' 'hicolor-icon-theme')
-optdepends=('python-pyatv: AirPlay without OwnTone')
+optdepends=('python-pyatv: AirPlay without OwnTone or independent patchbay streams' 'quickshell: native Omarchy patchbay panel')
 provides=('on-air' 'on-air-core')
 conflicts=('on-air' 'on-air-core')
 install=on-air.install
@@ -32,6 +32,14 @@ source=(
         "hyprland-rules.conf::${_raw}/packaging/omarchy/snippets/hyprland-rules.conf"
         "shell-bar.json::${_raw}/packaging/omarchy/snippets/shell-bar.json"
         "waybar.jsonc::${_raw}/packaging/omarchy/snippets/waybar.jsonc"
+        "install-plugin.sh::${_raw}/packaging/omarchy/install-plugin.sh"
+        "quickshell-manifest.json::${_raw}/apps/quickshell/manifest.json"
+        "Widget.qml::${_raw}/apps/quickshell/Widget.qml"
+        "CoreClient.qml::${_raw}/apps/quickshell/CoreClient.qml"
+        "PatchbayView.qml::${_raw}/apps/quickshell/PatchbayView.qml"
+        "NodeColumn.qml::${_raw}/apps/quickshell/NodeColumn.qml"
+        "CableLayer.qml::${_raw}/apps/quickshell/CableLayer.qml"
+        "Rope.js::${_raw}/apps/quickshell/Rope.js"
 )
 source_x86_64=("on-air-core-${pkgver}-x86_64::${_rel}/on-air-core-serve-linux-x86_64"
                "on-air-tui-${pkgver}-x86_64::${_rel}/on-air-tui-linux-x86_64")
@@ -49,6 +57,14 @@ sha256sums=(
             '7c1a2fe81190e755474656fb85691553b7c39d28f0277849720512e8aae46919'
             '894fe86f379ccdc67672a32acac41405870c2a339c40f0f8612b495eaf406c23'
             '187677a6b2f1671a8776b41fc7db8a78f1bc631ffd81c847311ba3cca7376f15'
+            '5e9cfd083e6e13cdd5a56185e85bbc65829afef0eceb3c3dec8d31c70946dea8'
+            '8914f6b9023f05c0638a437c4c659aecb9cd63424805eb94f1775d2a14e7a387'
+            'f14f2a308cb0ad6eb579c221cb158c13e96dd191b1010af32b3de9aedcea1980'
+            '9d5e9f95a98bbd65111fe0be4734a48d321d172147b48bfa4985589fb6f16b91'
+            '0d6038d994be0470f8c107b59d1530dc3f594fdfd0a45dc2d7965721c6c33cc2'
+            'c0918d2d9c4d4d3026fef28fd1b6ed79bcea8dd0f182423dad3f1322ca30445f'
+            '720e0890d2f72807483ce3fb6e136051d865e4d11e3246c128f68ddefbdc3b85'
+            '64f2b0c5aaa180c2e415a07fe8a641523783dcfbe9afd4350d4ece571e273d09'
 )
 # Filled by packaging/update-checksums.sh from the release's SHA256SUMS.
 sha256sums_x86_64=('SKIP' 'SKIP')
@@ -58,6 +74,10 @@ package() {
   cd "$srcdir"
   install -Dm755 "on-air-core-${pkgver}-${CARCH}" "$pkgdir/usr/bin/on-air-core"
   install -Dm755 "on-air-tui-${pkgver}-${CARCH}" "$pkgdir/usr/bin/on-air"
+  install -Dm755 install-plugin.sh "$pkgdir/usr/bin/on-air-install-plugin"
+  install -dm755 "$pkgdir/usr/share/on-air/quickshell"
+  install -m644 Widget.qml CoreClient.qml PatchbayView.qml NodeColumn.qml CableLayer.qml Rope.js "$pkgdir/usr/share/on-air/quickshell/"
+  install -m644 quickshell-manifest.json "$pkgdir/usr/share/on-air/quickshell/manifest.json"
   install -Dm644 on-air-core.service "$pkgdir/usr/lib/systemd/user/on-air-core.service"
   install -Dm644 on-air.desktop "$pkgdir/usr/share/applications/on-air.desktop"
   install -Dm644 on-air.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/on-air.svg"

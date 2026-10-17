@@ -3,13 +3,16 @@
 [![CI](https://github.com/tsonubin/on-air/actions/workflows/ci.yml/badge.svg)](https://github.com/tsonubin/on-air/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Stream your computer's audio to **one** wireless speaker at a time, AirPlay,
-Bluetooth or Sonos, and control it from a terminal, a tray app or a phone
-on the same network. Everything stays on your LAN: there is no account and
-no cloud.
+Stream your computer's audio to AirPlay, Bluetooth or Sonos speakers.
+On Omarchy 4, a compact native Quickshell patchbay mixes inputs and routes
+audio to groups of local and network outputs. The terminal, tray app and
+phone remote retain their single-output controls. Everything stays on your
+LAN: there is no account and no cloud.
 
 - **Sources:** any capture device, the system monitor, or an audio CD.
-- **Outputs:** Sonos (direct UPnP), AirPlay (OwnTone or pyatv on Linux and
+- **Omarchy panel:** native Qt Quick/QML, system device defaults, input
+  mixes, output groups and hanging patch cables. See [the panel guide](apps/quickshell/README.md).
+- **Single-output clients:** Sonos (direct UPnP), AirPlay (OwnTone or pyatv on Linux and
   Windows, the system route picker on macOS), Bluetooth A2DP. Switching
   outputs tears the previous one down first.
 - **Mixer:** volume, a five-band EQ, input and output sample rates, a level
@@ -23,7 +26,7 @@ no cloud.
 
 | Host | What you run | Status |
 | --- | --- | --- |
-| Linux (Omarchy, Arch, any systemd desktop) | `on-air-core` as a systemd user service, the `on-air` terminal UI | Primary target. Sonos, AirPlay and Bluetooth all work. |
+| Linux (Omarchy, Arch, any systemd desktop) | `on-air-core` as a systemd user service; native Quickshell panel on Omarchy 4 or `on-air` terminal UI | Primary target. Sonos, AirPlay and Bluetooth all work. |
 | macOS | The tray app | Sonos and Bluetooth work. AirPlay goes through the system route picker and cannot be driven from the phone. |
 | Windows | The tray app | Sonos works. Bluetooth device detection still has gaps; see [docs/history](docs/history/2026-09-16-platform-device-support.md). |
 | iOS, Android | The Expo remote | Controls whichever host it pairs with. |
@@ -35,6 +38,7 @@ On Omarchy or Arch, from a clone (needs Rust and `base-devel`):
 ```bash
 git clone https://github.com/tsonubin/on-air.git && cd on-air
 packaging/omarchy/install.sh   # builds, installs, enables the service, prints the Omarchy snippets
+sh packaging/omarchy/install-plugin.sh --enable  # optional native Omarchy 4 panel
 on-air                         # the terminal UI
 ```
 
@@ -43,7 +47,8 @@ building from source, is in [INSTALL.md](INSTALL.md).
 
 ## Use
 
-On Linux the terminal UI is the control surface. `?` shows the keys; the
+On Omarchy 4 the native panel provides routing and device defaults. The terminal
+UI also provides EQ, CD transport and sample-rate controls. `?` shows its keys; the
 full key and mouse tables, the launcher entry, hotkey, menu rows and bar
 module are in [docs/omarchy.md](docs/omarchy.md). From a shell:
 
@@ -66,7 +71,7 @@ desktop shows.
 
 ## How it works
 
-The core is one Rust process. It captures audio, runs it through EQ and a
+The core is one Rust process. Its original exclusive session captures audio, runs it through EQ and a
 rate bridge, publishes PCM on an in-process bus, and owns exactly one
 *sender* at a time. Sonos and AirPlay senders point the speaker at a WAV
 stream the core serves under a per-activation nonce; the Bluetooth sender
@@ -75,12 +80,19 @@ port 47990 is the only way in: the terminal UI, the tray window and the
 phone are all clients of it and own no playback. Remote clients pair with
 a PIN and then a bearer token; the local desktop is trusted by origin.
 
+The Linux patchbay adds a separate graph: PipeWire/PulseAudio buses perform
+local mixing and fan-out, and each active network sink gets its own capture
+and sender session. Network sinks are selectable in system audio settings.
+Groups use independent timing; they do not promise synchronized playback.
+The shell only controls the graph, so it can close or reload during playback.
+
 ```
 packages/core        the core: capture, DSP, senders, control plane (binary on-air-core)
 packages/api         the control plane's Rust wire types (shared by core and TUI)
 packages/api-types   the same types in TypeScript
 packages/control-client   HTTP/WebSocket client the desktop and phone share
 apps/tui             on-air, the ratatui terminal UI and CLI (Linux)
+apps/quickshell      the native Omarchy 4 patchbay widget (Qt Quick/QML)
 apps/desktop         the Tauri tray app: React webview + a Rust shell embedding the core
 apps/mobile          the Expo phone remote
 e2e                  Playwright and node:test suites against the core in mock mode

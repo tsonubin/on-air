@@ -323,6 +323,44 @@ export interface DiscoveredHost {
 // Keep in sync with DEFAULT_PORT in packages/core/src/lib.rs
 export const DEFAULT_PORT = 47990;
 
+/** Linux patchbay wire types; mirrored in packages/api/src/lib.rs. */
+export type PatchbaySide = "input" | "output";
+
+export interface PatchbayNode {
+  id: string;
+  name: string;
+  side: PatchbaySide;
+  kind: string;
+  members: string[];
+  volume: number;
+  muted: boolean;
+  is_default: boolean;
+  state: string;
+  detail: string;
+}
+
+export interface PatchbayLink {
+  source: string;
+  target: string;
+  state: string;
+  error: string | null;
+}
+
+export interface PatchbaySnapshot {
+  supported: boolean;
+  enabled: boolean;
+  nodes: PatchbayNode[];
+  links: PatchbayLink[];
+  error: string | null;
+}
+
+export type PatchbayCommand =
+  | { op: "connect" | "disconnect"; source: string; target: string }
+  | { op: "combine"; side: PatchbaySide; members: string[] }
+  | { op: "remove_group" | "set_default"; id: string }
+  | { op: "set_volume"; id: string; volume: number }
+  | { op: "set_muted"; id: string; muted: boolean };
+
 /**
  * DNS-SD service type advertised by a running desktop/core.
  *

@@ -37,6 +37,7 @@ pub struct AirPlaySender {
     child: Option<Child>,
     active_backend: Option<ActiveBackend>,
     volume: u8,
+    independent: bool,
 }
 
 impl AirPlaySender {
@@ -55,12 +56,20 @@ impl AirPlaySender {
             child: None,
             active_backend: None,
             volume: 50,
+            independent: false,
         }
     }
 
     pub fn with_radio(mut self, stream_url: impl Into<String>, host: impl Into<String>) -> Self {
         self.stream_url = stream_url.into();
         self.host = host.into();
+        self
+    }
+
+    /// OwnTone has one global player/queue. Independent patchbay sinks use
+    /// one direct pyatv session each so changing one mix cannot replace another.
+    pub fn with_independent_stream(mut self, independent: bool) -> Self {
+        self.independent = independent;
         self
     }
 
@@ -181,6 +190,9 @@ impl AirPlaySender {
 
     async fn start_pyatv(&mut self) -> Result<(), SenderError> {
         if self.host.is_empty() || self.stream_url.is_empty() {
+            if self.independent {
+                return Err(SenderError::transport("Independent AirPlay needs the receiver's address from LAN discovery and a local pyatv installation."));
+            }
             return Err(SenderError::transport(format!(
                 "OwnTone is not running at {} (Linux AirPlay sidecar)",
                 self.base_url
@@ -372,7 +384,7 @@ impl AudioSender for AirPlaySender {
         if self.active_backend.is_some() {
             return Ok(());
         }
-        if self.owntone_reachable().await {
+        if !self.independent && self.owntone_reachable().await {
             self.start_owntone().await?;
             self.active_backend = Some(ActiveBackend::OwnTone);
         } else {

@@ -19,6 +19,45 @@ env:
   EXPO_NO_TELEMETRY: "1"
 
 jobs:
+  test-quickshell:
+    name: Quickshell physics / Qt interactions / Pulse routing
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install headless Qt and audio test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libssl-dev pkg-config pulseaudio libegl1 libopengl0
+          python -m pip install PySide6==6.12.0
+      - name: Test cable physics
+        run: node --test apps/quickshell/tests/rope.test.mjs
+      - name: Build core
+        run: cargo build --locked -p on-air-core
+      - name: Exercise the actual Qt panel against the mock core
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QUICK_BACKEND: software
+        run: python apps/quickshell/tests/render.py --core target/debug/on-air-core --output '${{ runner.temp }}/on-air-panel.png'
+      - name: Test routing and module recovery on an isolated audio server
+        run: |
+          pulseaudio -n --daemonize=yes --exit-idle-time=-1 --use-pid-file=no --load="module-native-protocol-unix socket=${{ runner.temp }}/on-air-pulse.sock auth-anonymous=1" --load="module-null-sink sink_name=headphones"
+          PULSE_SERVER='unix:${{ runner.temp }}/on-air-pulse.sock' cargo test --locked -p on-air-core --lib real_server_creates_routes_and_recovers_owned_modules -- --ignored
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: on-air-qt-panel
+          path: '${{ runner.temp }}/on-air-panel.png'
+          if-no-files-found: ignore
+
   check-web:
     name: biome / typecheck / JS tests and bundles
     runs-on: ubuntu-22.04

@@ -64,6 +64,11 @@ pub async fn stream_audio(
     State(state): State<CoreState>,
     Path(nonce): Path<String>,
 ) -> Result<Response, ApiError> {
+    let state = if radio_stream_is_live(&state, &nonce) {
+        state
+    } else {
+        state.patchbay.stream_state(&nonce).await.unwrap_or(state)
+    };
     if !state.service_enabled.load(Ordering::Acquire) {
         return Err(ApiError::service_paused());
     }

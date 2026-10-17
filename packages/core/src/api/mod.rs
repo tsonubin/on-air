@@ -7,6 +7,7 @@ pub mod error;
 pub mod inputs;
 pub mod outputs;
 pub mod pairing;
+pub mod patchbay;
 pub mod sample_rate;
 pub mod service;
 pub mod stream;

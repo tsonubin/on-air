@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "on-air.patchbay",
+  "name": "on-air",
+  "version": "0.2.0",
+  "description": "Compact audio patchbay with local and network outputs",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Widget.qml" },
+  "barWidget": {
+    "displayName": "on-air",
+    "description": "Audio routing, mixes and network speakers",
+    "category": "Audio",
+    "defaultSection": "centerEnd",
+    "allowMultiple": false
+  }
+}

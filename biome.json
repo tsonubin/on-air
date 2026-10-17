@@ -12,7 +12,8 @@
       "!apps/mobile/android",
       "!apps/desktop/src-tauri",
       "!apps/mobile/assets/AppIcon.icon",
-      "!packaging/omarchy/snippets"
+      "!packaging/omarchy/snippets",
+      "!apps/quickshell/Rope.js"
     ]
   },
   "formatter": {

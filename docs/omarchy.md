@@ -1,12 +1,10 @@
 # on-air on Omarchy
 
-On Omarchy (and any Arch with Hyprland) on-air is two things: the
-`on-air-core` service, which streams audio and serves the phone remote, and
-the `on-air` terminal UI, which controls it. No browser engine, no GPU
-toolkit: the UI runs in your terminal, so it is light on old hardware and
-follows every Omarchy theme the moment the terminal does. Closing the UI
-never stops streaming; the service owns playback, discovery and the sleep
-inhibitor.
+The `on-air-core` service owns audio, discovery and the sleep inhibitor.
+Omarchy 4 can control it through a small native Quickshell panel beside the
+clock, with system defaults, input mixes and local/network output groups.
+The `on-air` terminal UI remains available on Omarchy and other Linux
+desktops. Closing either interface never stops playback.
 
 This guide covers Omarchy 4 (the Quickshell "omarchy-shell", Lua config)
 and Omarchy 3 (Waybar, Walker, `.conf` config). Every snippet below also
@@ -47,6 +45,38 @@ PipeWire capture), `bluez-utils` (`bluetoothctl`) and `xdg-terminal-exec`
 needs `python-pyatv`.
 
 ## Launch
+
+### Native panel (Omarchy 4)
+
+After installing the core, install and enable the optional widget:
+
+```sh
+sh packaging/omarchy/install-plugin.sh --enable
+# From the installed Arch package, the same command is:
+on-air-install-plugin --enable
+```
+
+Use one of these commands. The widget is placed beside the centered clock;
+it can be moved with Omarchy's normal bar gestures. Updates use `--replace`
+and preserve the previous copy outside the plugin search path.
+
+Click a row for a system default, drag row bodies together to make a combo,
+or drag ports across the gap to connect audio. Groups start collapsed and
+the one footer slider follows the selection. Right-click for connection
+targets, mute and disconnect; Escape closes. The panel inherits the active
+Omarchy palette, font, border, scaling and reduced-motion preference.
+
+The **Desktop** source receives apps sent to **On-Air desktop**. Discovered
+AirPlay/Sonos speakers are also selectable directly as system outputs.
+Independent AirPlay needs `python-pyatv` and a receiver address from LAN
+discovery. Output groups use independent timing, and the network path
+retains the existing mono format. Physical speaker buffering remains.
+
+See [the panel guide](../apps/quickshell/README.md) for all gestures, keyboard
+controls, state persistence and the Qt preview. The sections below describe
+the terminal interface and the existing command-style bar integration.
+
+### Terminal
 
 - **App launcher** (`Super+Space`): the entry is called on-air. It opens
   your default terminal with the Wayland app id `org.omarchy.on-air`.
