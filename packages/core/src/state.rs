@@ -274,12 +274,17 @@ impl CoreState {
 
     /// E2E / CI: fake inputs and transports, fixed pairing PIN, no hardware.
     pub async fn new_mock() -> Self {
-        // The mock core must never start a real `systemd-inhibit` on CI.
-        let mut state = Self::new().with_keep_awake(KeepAwake::with_spawner(
-            None,
-            Box::new(crate::keep_awake::NoopSpawner),
-            true,
-        ));
+        // The mock core must never start a real `systemd-inhibit` on CI; the
+        // demo core keeps the real one, as the service it stands in for does.
+        let mut state = if crate::demo::enabled() {
+            Self::new()
+        } else {
+            Self::new().with_keep_awake(KeepAwake::with_spawner(
+                None,
+                Box::new(crate::keep_awake::NoopSpawner),
+                true,
+            ))
+        };
         state.set_mock(true);
         state.pairing = Arc::new(StdMutex::new(PairingState::mock()));
         state.input.set_mock_inputs(vec!["Mock Monitor".into()]);
@@ -315,6 +320,9 @@ impl CoreState {
             "Mock Sonos",
         );
         state.sonos.lock().await.upsert(sonos, Instant::now());
+        if crate::demo::enabled() {
+            crate::demo::dress(&mut state).await;
+        }
         state
     }
 

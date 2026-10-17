@@ -110,6 +110,13 @@ pub fn bus_name(id: &str) -> String {
 
 impl Pulse {
     pub fn new(mock: bool) -> Self {
+        if mock && crate::demo::enabled() {
+            return Self {
+                mock,
+                modules: HashMap::new(),
+                fake: crate::demo::pulse_catalog(),
+            };
+        }
         Self {
             mock,
             modules: HashMap::new(),

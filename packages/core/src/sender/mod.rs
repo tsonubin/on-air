@@ -85,6 +85,7 @@ pub trait AudioSender: Send + Sync {
 pub struct NullSender {
     name: String,
     log: Arc<Mutex<Vec<String>>>,
+    start_delay: std::time::Duration,
 }
 
 impl NullSender {
@@ -92,13 +93,21 @@ impl NullSender {
         NullSender {
             name: name.into(),
             log,
+            start_delay: std::time::Duration::ZERO,
         }
+    }
+
+    /// Answer `start` only after `delay`, like a real speaker would.
+    pub fn with_start_delay(mut self, delay: std::time::Duration) -> Self {
+        self.start_delay = delay;
+        self
     }
 }
 
 #[async_trait::async_trait]
 impl AudioSender for NullSender {
     async fn start(&mut self) -> Result<(), SenderError> {
+        tokio::time::sleep(self.start_delay).await;
         self.log.lock().await.push(format!("{}:start", self.name));
         Ok(())
     }

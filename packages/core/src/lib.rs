@@ -8,6 +8,7 @@ use tower_http::cors::CorsLayer;
 
 pub mod api;
 pub mod cd;
+pub mod demo;
 pub mod dsp;
 pub mod events;
 pub mod http;
@@ -115,8 +116,9 @@ async fn status_handler(
     Json(status_for(&state))
 }
 
+/// `ON_AIR_MOCK=1`, or `ON_AIR_DEMO=1` which implies it.
 pub fn mock_mode_enabled() -> bool {
-    std::env::var("ON_AIR_MOCK").ok().as_deref() == Some("1")
+    std::env::var("ON_AIR_MOCK").ok().as_deref() == Some("1") || demo::enabled()
 }
 
 pub async fn serve(listener: TcpListener) -> std::io::Result<()> {
@@ -189,6 +191,12 @@ pub async fn serve_with_state_until(
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
     }
     state.spawn_saved_session_restore();
+    if state.mock && demo::enabled() {
+        state
+            .background
+            .lock()
+            .push(demo::spawn_meter(state.clone()));
+    }
     let patchbay_state = state.clone();
     state.background.lock().push(tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(2));

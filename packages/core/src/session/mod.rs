@@ -173,10 +173,10 @@ async fn build_sonos(state: &CoreState, device_id: &str) -> Result<Built, Activa
     let nonce = new_stream_nonce();
     if state.mock {
         return Ok(Built {
-            sender: Box::new(NullSender::new(
-                device.friendly_name,
-                state.mock_log.clone(),
-            )),
+            sender: Box::new(
+                NullSender::new(device.friendly_name, state.mock_log.clone())
+                    .with_start_delay(demo_delay()),
+            ),
             identity,
             stream_nonce: Some(nonce),
         });
@@ -193,6 +193,14 @@ async fn build_sonos(state: &CoreState, device_id: &str) -> Result<Built, Activa
         identity,
         stream_nonce: Some(nonce),
     })
+}
+
+fn demo_delay() -> std::time::Duration {
+    if crate::demo::enabled() {
+        crate::demo::CONNECT_DELAY
+    } else {
+        std::time::Duration::ZERO
+    }
 }
 
 fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateError> {
@@ -219,7 +227,9 @@ fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateEr
     let nonce = new_stream_nonce();
     if state.mock {
         return Ok(Built {
-            sender: Box::new(NullSender::new(device.name, state.mock_log.clone())),
+            sender: Box::new(
+                NullSender::new(device.name, state.mock_log.clone()).with_start_delay(demo_delay()),
+            ),
             identity,
             stream_nonce: Some(nonce),
         });
