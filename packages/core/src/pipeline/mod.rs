@@ -15,12 +15,12 @@ pub fn new_ring_buffer(capacity_frames: usize) -> (HeapProd<f32>, HeapCons<f32>)
     HeapRb::<f32>::new(capacity_frames * PIPELINE_CHANNELS).split()
 }
 
-/// Pushes the most whole pipeline frames of `samples` that fit and returns
-/// how many samples went in. An overrun drops whole frames, never one
-/// channel of a frame, which would swap left and right from then on.
-pub fn push_frames(producer: &mut HeapProd<f32>, samples: &[f32]) -> usize {
+/// Pushes the most whole `channels`-sample frames of `samples` that fit and
+/// returns how many samples went in. An overrun drops whole frames, never
+/// one channel of a frame, which would swap left and right from then on.
+pub fn push_frames(producer: &mut HeapProd<f32>, samples: &[f32], channels: usize) -> usize {
     let fit = producer.vacant_len().min(samples.len());
-    producer.push_slice(&samples[..fit - fit % PIPELINE_CHANNELS])
+    producer.push_slice(&samples[..fit - fit % channels.max(1)])
 }
 
 pub struct ProcessingTaskHandle {

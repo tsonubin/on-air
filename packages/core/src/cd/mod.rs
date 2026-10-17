@@ -487,7 +487,11 @@ fn playback_loop(weak: Weak<CdInner>) {
                     if attached {
                         if let Some(producer) = inner.producer.lock().as_mut() {
                             for chunk in bytes.chunks(BYTES_PER_SECTOR) {
-                                crate::pipeline::push_frames(producer, &sector_to_stereo(chunk));
+                                crate::pipeline::push_frames(
+                                    producer,
+                                    &sector_to_stereo(chunk),
+                                    crate::dsp::PIPELINE_CHANNELS,
+                                );
                             }
                         }
                         *inner.sector_in_track.lock() = sector + read_sectors;

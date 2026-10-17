@@ -58,7 +58,7 @@ pub fn pump_f32le_stereo(mut reader: impl Read, producer: &mut HeapProd<f32>, st
                 for (sample, bytes) in samples.iter_mut().zip(raw) {
                     *sample = f32::from_le_bytes(*bytes);
                 }
-                push_frames(producer, &samples[..raw.len()]);
+                push_frames(producer, &samples[..raw.len()], PIPELINE_CHANNELS);
                 pending = total - complete;
                 buf.copy_within(complete..total, 0);
             }
@@ -381,7 +381,7 @@ where
         move |data: &[T], _: &InputCallbackInfo| {
             for frame in data.chunks_exact(channels) {
                 let stereo = stereo_frame(frame).map(f32::from_sample);
-                if push_frames(&mut producer, &stereo) == 0 {
+                if push_frames(&mut producer, &stereo, PIPELINE_CHANNELS) == 0 {
                     break;
                 }
             }

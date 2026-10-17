@@ -2,11 +2,12 @@
 //! platform discovery, never from the speaker's display name.
 use crate::dsp::bridge::RateBridge;
 use crate::dsp::rates::{self, BLUETOOTH_RATES_HZ};
+use crate::pipeline::push_frames;
 use crate::sender::{OutputFormat, SenderError};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig, I24, U24};
 use parking_lot::Mutex;
-use ringbuf::traits::{Consumer, Producer, Split};
+use ringbuf::traits::{Consumer, Observer, Split};
 use ringbuf::{HeapProd, HeapRb};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
@@ -257,9 +258,12 @@ impl CpalPcmSink {
 
 impl PcmSink for CpalPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let converted = self.bridge.lock().process_l16(pcm);
-        // Bound latency and memory: a slow device drops new samples.
-        self.producer.lock().push_slice(&converted);
+        let (converted, channels) = {
+            let mut bridge = self.bridge.lock();
+            (bridge.process_l16(pcm), bridge.channels())
+        };
+        // Bound latency and memory: a slow device drops new frames, whole.
+        push_frames(&mut self.producer.lock(), &converted, channels);
         Ok(())
     }
     fn set_volume(&self, volume: u8) -> Result<(), SenderError> {
@@ -273,6 +277,25 @@ impl PcmSink for CpalPcmSink {
     }
 }
 
+/// Fills one output callback buffer from the queue, scaled by `gain`. Only
+/// whole `channels`-sample frames are taken; the rest of the buffer is
+/// silence, so an underrun can never shift left into the right slot.
+fn fill_output<T>(data: &mut [T], consumer: &mut ringbuf::HeapCons<f32>, channels: usize, gain: f32)
+where
+    T: Sample + FromSample<f32>,
+{
+    let available = consumer.occupied_len().min(data.len());
+    let take = available - available % channels.max(1);
+    for (i, slot) in data.iter_mut().enumerate() {
+        let sample = if i < take {
+            consumer.try_pop().unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        *slot = T::from_sample(sample * gain);
+    }
+}
+
 fn build_output_stream<T>(
     device: &cpal::Device,
     config: StreamConfig,
@@ -282,15 +305,14 @@ fn build_output_stream<T>(
 where
     T: Sample + SizedSample + FromSample<f32>,
 {
+    let channels = usize::from(config.channels);
     device
         .build_output_stream(
             config,
             move |data: &mut [T], _| {
                 // Apply gain at playback, including samples queued before a mute request.
                 let gain = f32::from(volume.load(Ordering::Acquire)) / 100.0;
-                for slot in data {
-                    *slot = T::from_sample(consumer.try_pop().unwrap_or(0.0) * gain);
-                }
+                fill_output(data, &mut consumer, channels, gain);
             },
             |e| eprintln!("bluetooth audio output error: {e}"),
             None,
@@ -385,6 +407,36 @@ mod tests {
     use std::io::Write;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    #[test]
+    fn a_full_output_queue_drops_whole_frames() {
+        use crate::dsp::bridge::f32_to_l16_le;
+        use ringbuf::traits::Observer;
+        let (producer, consumer) = HeapRb::<f32>::new(5).split();
+        let sink = CpalPcmSink {
+            producer: Mutex::new(producer),
+            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2)),
+            volume: Arc::new(AtomicU8::new(100)),
+            stream: Mutex::new(None),
+        };
+        sink.write(&f32_to_l16_le(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3]))
+            .unwrap();
+        assert_eq!(consumer.occupied_len(), 4, "a frame was split");
+    }
+
+    #[test]
+    fn the_output_callback_never_plays_part_of_a_frame() {
+        use ringbuf::traits::Producer;
+        let (mut producer, mut consumer) = HeapRb::<f32>::new(16).split();
+        // A frame still being written: its left sample has landed, its right has not.
+        producer.push_slice(&[0.1, -0.1, 0.2]);
+        let mut data = [9.0f32; 4];
+        fill_output(&mut data, &mut consumer, 2, 1.0);
+        assert_eq!(data, [0.1, -0.1, 0.0, 0.0]);
+        producer.push_slice(&[-0.2]);
+        fill_output(&mut data, &mut consumer, 2, 1.0);
+        assert_eq!(data, [0.2, -0.2, 0.0, 0.0], "left and right swapped");
+    }
 
     #[test]
     fn closing_child_interrupts_a_full_pipe_without_taking_the_stdin_lock() {

@@ -48,13 +48,13 @@ fn push_frames_never_splits_a_frame() {
     use ringbuf::traits::{Consumer, Split};
     let (mut producer, mut consumer) = ringbuf::HeapRb::<f32>::new(5).split();
     assert_eq!(
-        push_frames(&mut producer, &[0.1, -0.1, 0.2, -0.2, 0.3, -0.3]),
+        push_frames(&mut producer, &[0.1, -0.1, 0.2, -0.2, 0.3, -0.3], 2),
         4
     );
     let mut popped = [0.0; 4];
     assert_eq!(consumer.pop_slice(&mut popped), 4);
     assert_eq!(popped, [0.1, -0.1, 0.2, -0.2]);
-    assert_eq!(push_frames(&mut producer, &[0.3, -0.3]), 2);
+    assert_eq!(push_frames(&mut producer, &[0.3, -0.3], 2), 2);
 }
 
 /// Runs interleaved stereo `frames` through a processing thread and returns
@@ -73,7 +73,7 @@ async fn through_the_pipeline(
 
     let mut pushed = 0;
     while pushed < frames.len() {
-        pushed += push_frames(&mut producer, &frames[pushed..]);
+        pushed += push_frames(&mut producer, &frames[pushed..], 2);
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
     let mut pcm = Vec::new();
