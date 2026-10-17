@@ -70,7 +70,7 @@ The **Desktop** source receives apps sent to **On-Air desktop**. Discovered
 AirPlay/Sonos speakers are also selectable directly as system outputs.
 Independent AirPlay needs `python-pyatv` and a receiver address from LAN
 discovery. Output groups use independent timing, and the network path
-retains the existing mono format. Physical speaker buffering remains.
+streams stereo PCM. Physical speaker buffering remains.
 
 See [the panel guide](../apps/quickshell/README.md) for all gestures, keyboard
 controls, state persistence and the Qt preview. The sections below describe

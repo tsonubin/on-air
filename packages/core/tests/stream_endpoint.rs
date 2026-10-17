@@ -846,3 +846,35 @@ async fn sonos_stream_reader_recovers_after_broadcast_lag() {
         .expect("lagged stream read failed");
     assert!(u16::from_le_bytes([recovered[0], recovered[1]]) > 0);
 }
+
+#[tokio::test]
+async fn radio_wav_announces_stereo_l16() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let state = CoreState::new();
+    let nonce = new_stream_nonce();
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
+    let response = on_air_core::build_router(state)
+        .oneshot(
+            Request::builder()
+                .uri(format!("/stream/{nonce}/audio.wav"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+
+    let header = stream.next().await.unwrap().unwrap();
+    let u16_at = |i: usize| u16::from_le_bytes([header[i], header[i + 1]]);
+    let u32_at = |i: usize| u32::from_le_bytes(header[i..i + 4].try_into().unwrap());
+    assert_eq!(u16_at(22), 2, "channels");
+    assert_eq!(u32_at(28), u32_at(24) * 4, "byte rate");
+    assert_eq!(u16_at(32), 4, "block align");
+    assert_eq!(u16_at(34), 16, "bits per sample");
+    // No audio was sent, so the next chunk is the silence fill.
+    let silence = stream.next().await.unwrap().unwrap();
+    assert_eq!(silence.len() % 4, 0, "silence fill is whole stereo frames");
+}

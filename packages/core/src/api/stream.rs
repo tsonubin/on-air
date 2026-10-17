@@ -1,5 +1,6 @@
 use crate::api::error::ApiError;
 use crate::dsp::bridge::RateBridge;
+use crate::dsp::PIPELINE_CHANNELS;
 use crate::state::CoreState;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -22,10 +23,9 @@ impl Drop for StreamClientGuard {
     }
 }
 
-/// Streaming WAV header: 16-bit PCM mono, unknown/very large data size so
+/// Streaming WAV header: 16-bit PCM stereo, unknown/very large data size so
 /// Sonos can treat the radio GET as a live HTTP source.
-fn wav_header(sample_rate: u32) -> Bytes {
-    let channels = 1u16;
+fn wav_header(sample_rate: u32, channels: u16) -> Bytes {
     let bits = 16u16;
     let byte_rate = sample_rate * u32::from(channels) * u32::from(bits) / 8;
     let block_align = channels * bits / 8;
@@ -50,7 +50,7 @@ fn wav_header(sample_rate: u32) -> Bytes {
 fn silence_chunk(sample_rate: u32) -> Bytes {
     let frames =
         ((u64::from(sample_rate) * SILENCE_INTERVAL.as_millis() as u64) / 1_000).max(1) as usize;
-    Bytes::from(vec![0; frames.saturating_mul(2)])
+    Bytes::from(vec![0; frames.saturating_mul(PIPELINE_CHANNELS * 2)])
 }
 
 /// True while a Sonos or AirPlay output owns `nonce`, the path segment
@@ -87,9 +87,9 @@ pub async fn stream_audio(
     let rx = state.audio_tx.subscribe();
     let pipeline_hz = *state.target_sample_rate_hz.lock();
     let output_hz = *state.output_sample_rate_hz.lock();
-    let header = wav_header(output_hz);
+    let header = wav_header(output_hz, PIPELINE_CHANNELS as u16);
     let pcm = BroadcastStream::new(rx).filter_map({
-        let mut bridge = RateBridge::new(pipeline_hz, output_hz, 1);
+        let mut bridge = RateBridge::new(pipeline_hz, output_hz, PIPELINE_CHANNELS);
         let _client_guard = client_guard;
         move |item| {
             let _ = &_client_guard;
@@ -99,7 +99,7 @@ pub async fn stream_audio(
             if pipeline_hz == output_hz {
                 return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
             }
-            let resampled = bridge.process_l16_mono_to_l16(&chunk);
+            let resampled = bridge.process_l16_to_l16(&chunk);
             if resampled.is_empty() {
                 return None;
             }
