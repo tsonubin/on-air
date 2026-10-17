@@ -1,5 +1,5 @@
 use crate::dsp::eq::GraphicEq;
-use crate::dsp::resample::MonoResampler;
+use crate::dsp::resample::PcmResampler;
 use crate::events::WsEvent;
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -127,12 +127,12 @@ fn process_until_stopped(
         audio_tx,
         ws_tx,
     } = outputs;
-    let mut eq = GraphicEq::new(rates.input_hz as f32);
+    let mut eq = GraphicEq::new(rates.input_hz as f32, 1);
     let mut resampler = (rates.input_hz != rates.output_hz)
-        .then(|| MonoResampler::new(rates.input_hz, rates.output_hz));
+        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, 1));
     let chunk_frames = resampler
         .as_ref()
-        .map(MonoResampler::input_frames_next)
+        .map(PcmResampler::input_frames_next)
         .unwrap_or(1024);
     let mut chunk = vec![0.0f32; chunk_frames];
     let mut resampled = Vec::new();

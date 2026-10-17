@@ -1,17 +1,17 @@
-use super::resample::StreamingMonoResampler;
+use super::resample::StreamingResampler;
 
 /// Decode pipeline L16 LE mono, resample to the output rate, then upmix to
 /// the destination channel count. This is the sender-side half of the
 /// input/output sample-rate bridge.
 pub struct RateBridge {
-    resampler: StreamingMonoResampler,
+    resampler: StreamingResampler,
     channels: usize,
 }
 
 impl RateBridge {
     pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
         RateBridge {
-            resampler: StreamingMonoResampler::new(input_rate_hz, output_rate_hz),
+            resampler: StreamingResampler::new(input_rate_hz, output_rate_hz, 1),
             channels: channels.max(1),
         }
     }

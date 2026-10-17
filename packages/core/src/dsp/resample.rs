@@ -1,58 +1,65 @@
-use audioadapter_buffers::direct::SequentialSliceOfVecs;
+use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Async, FixedAsync, PolynomialDegree, Resampler};
 
 const CHUNK_SIZE: usize = 1024;
 
-pub struct MonoResampler {
+/// Resamples fixed-size chunks of interleaved PCM with `channels` samples
+/// per frame.
+pub struct PcmResampler {
     inner: Async<f32>,
-    input_data: Vec<Vec<f32>>,
-    output_data: Vec<Vec<f32>>,
+    channels: usize,
+    output_data: Vec<f32>,
 }
 
-impl MonoResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32) -> Self {
+impl PcmResampler {
+    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
+        let channels = channels.max(1);
         let ratio = output_rate_hz as f64 / input_rate_hz as f64;
         let inner = Async::<f32>::new_poly(
             ratio,
             1.1,
             PolynomialDegree::Cubic,
             CHUNK_SIZE,
-            1,
+            channels,
             FixedAsync::Input,
         )
         .expect("valid resample ratio");
-        let input_data = vec![vec![0.0; inner.input_frames_next()]];
-        let output_data = vec![vec![0.0; inner.output_frames_max()]];
-        MonoResampler {
+        let output_data = vec![0.0; inner.output_frames_max() * channels];
+        PcmResampler {
             inner,
-            input_data,
+            channels,
             output_data,
         }
     }
 
+    pub fn channels(&self) -> usize {
+        self.channels
+    }
+
+    /// Frames (not samples) the next `process` call needs.
     pub fn input_frames_next(&self) -> usize {
         self.inner.input_frames_next()
     }
 
     pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
-        let mut output = Vec::with_capacity(self.inner.output_frames_max());
+        let mut output = Vec::with_capacity(self.output_data.len());
         self.process_into(input, &mut output);
         output
     }
 
     pub fn process_into(&mut self, input: &[f32], output: &mut Vec<f32>) {
+        let frames = self.inner.input_frames_next();
         assert_eq!(
             input.len(),
-            self.inner.input_frames_next(),
-            "MonoResampler::process requires exactly input_frames_next() samples"
+            frames * self.channels,
+            "PcmResampler::process requires exactly input_frames_next() * channels samples"
         );
-        self.input_data[0].copy_from_slice(input);
         let out_capacity = self.inner.output_frames_max();
 
-        let in_adapter = SequentialSliceOfVecs::new(&self.input_data, 1, input.len())
-            .expect("valid input adapter shape");
+        let in_adapter =
+            InterleavedSlice::new(input, self.channels, frames).expect("valid input adapter shape");
         let mut out_adapter =
-            SequentialSliceOfVecs::new_mut(&mut self.output_data, 1, out_capacity)
+            InterleavedSlice::new_mut(&mut self.output_data, self.channels, out_capacity)
                 .expect("valid output adapter shape");
 
         let (_frames_read, frames_written) = self
@@ -61,27 +68,27 @@ impl MonoResampler {
             .expect("resample succeeds for a full, correctly-sized chunk");
 
         output.clear();
-        output.extend_from_slice(&self.output_data[0][..frames_written]);
+        output.extend_from_slice(&self.output_data[..frames_written * self.channels]);
     }
 }
 
-/// Buffers arbitrary-sized mono chunks into `MonoResampler`'s fixed input size.
-/// Same-rate I/O is a lossless passthrough (no rubato delay).
-pub struct StreamingMonoResampler {
+/// Buffers arbitrary whole-frame chunks into `PcmResampler`'s fixed input
+/// size. Same-rate I/O is a lossless passthrough (no rubato delay).
+pub struct StreamingResampler {
     input_rate_hz: u32,
     output_rate_hz: u32,
-    inner: Option<MonoResampler>,
+    inner: Option<PcmResampler>,
     pending: Vec<f32>,
 }
 
-impl StreamingMonoResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32) -> Self {
+impl StreamingResampler {
+    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(MonoResampler::new(input_rate_hz, output_rate_hz))
+            Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels))
         };
-        StreamingMonoResampler {
+        StreamingResampler {
             input_rate_hz,
             output_rate_hz,
             inner,
@@ -106,7 +113,7 @@ impl StreamingMonoResampler {
         let mut resampled = Vec::new();
         let mut consumed = 0;
         loop {
-            let need = resampler.input_frames_next();
+            let need = resampler.input_frames_next() * resampler.channels();
             if self.pending.len() - consumed < need {
                 break;
             }
