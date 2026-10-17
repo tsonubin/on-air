@@ -69,20 +69,6 @@ pub fn sector_to_stereo(sector: &[u8]) -> Vec<f32> {
     crate::dsp::bridge::l16_le_to_f32(&sector[..usable])
 }
 
-/// Interleaved CDDA stereo i16 LE → mono f32.
-pub fn downmix_sector(sector: &[u8]) -> Vec<f32> {
-    let usable = sector.len() - (sector.len() % 4);
-    let (frames, _) = sector[..usable].as_chunks::<4>();
-    frames
-        .iter()
-        .map(|frame| {
-            let left = i16::from_le_bytes([frame[0], frame[1]]) as f32 / i16::MAX as f32;
-            let right = i16::from_le_bytes([frame[2], frame[3]]) as f32 / i16::MAX as f32;
-            (left + right) * 0.5
-        })
-        .collect()
-}
-
 pub trait CdMedium: Send + Sync {
     fn toc(&self) -> CdToc;
     fn read_sectors(&self, lba: u32, count: u32) -> Result<Vec<u8>, String>;
@@ -500,10 +486,8 @@ fn playback_loop(weak: Weak<CdInner>) {
                     let attached = inner.producer.lock().as_mut().is_some();
                     if attached {
                         if let Some(producer) = inner.producer.lock().as_mut() {
-                            use ringbuf::traits::Producer;
                             for chunk in bytes.chunks(BYTES_PER_SECTOR) {
-                                let mono = downmix_sector(chunk);
-                                let _ = producer.push_slice(&mono);
+                                crate::pipeline::push_frames(producer, &sector_to_stereo(chunk));
                             }
                         }
                         *inner.sector_in_track.lock() = sector + read_sectors;
@@ -540,18 +524,6 @@ mod tests {
         let medium = GeneratedCd::from_titles(Some("Test Album".into()), &titles, duration_ms);
         deck.set_medium(Some(Arc::new(medium)));
         deck
-    }
-
-    #[test]
-    fn downmix_averages_left_and_right() {
-        let mut sector = vec![0u8; 8];
-        sector[0..2].copy_from_slice(&i16::MAX.to_le_bytes());
-        sector[2..4].copy_from_slice(&0i16.to_le_bytes());
-        sector[4..6].copy_from_slice(&0i16.to_le_bytes());
-        sector[6..8].copy_from_slice(&(-i16::MAX).to_le_bytes());
-        let mono = downmix_sector(&sector);
-        assert!((mono[0] - 0.5).abs() < 0.01);
-        assert!((mono[1] + 0.5).abs() < 0.01);
     }
 
     #[test]

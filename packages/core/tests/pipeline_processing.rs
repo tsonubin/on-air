@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use on_air_core::dsp::bridge::l16_le_to_f32;
 use on_air_core::pipeline::{new_ring_buffer, push_frames, spawn_processing_task};
 use parking_lot::Mutex;
 use ringbuf::traits::Producer;
@@ -31,7 +32,11 @@ async fn processes_synthetic_frames_into_broadcast_pcm() {
         .expect("channel not closed");
 
     assert!(!chunk.is_empty());
-    assert_eq!(chunk.len() % 2, 0, "L16 PCM is 2 bytes per sample");
+    assert_eq!(
+        chunk.len() % 4,
+        0,
+        "a bus chunk holds whole stereo L16 frames"
+    );
 
     tokio::task::spawn_blocking(move || handle.stop())
         .await
@@ -50,4 +55,66 @@ fn push_frames_never_splits_a_frame() {
     assert_eq!(consumer.pop_slice(&mut popped), 4);
     assert_eq!(popped, [0.1, -0.1, 0.2, -0.2]);
     assert_eq!(push_frames(&mut producer, &[0.3, -0.3]), 2);
+}
+
+/// Runs interleaved stereo `frames` through a processing thread and returns
+/// at least 2048 output frames, decoded and still interleaved.
+async fn through_the_pipeline(
+    input_hz: u32,
+    output_hz: u32,
+    gains_db: [f32; 5],
+    frames: &[f32],
+) -> Vec<f32> {
+    let (mut producer, consumer) = new_ring_buffer(1024 * 8);
+    let (audio_tx, mut audio_rx) = broadcast::channel(64);
+    let (ws_tx, _) = broadcast::channel::<on_air_core::api::ws::WsEvent>(8);
+    let gains = Arc::new(Mutex::new(gains_db));
+    let handle = spawn_processing_task(consumer, input_hz, output_hz, gains, audio_tx, ws_tx);
+
+    let mut pushed = 0;
+    while pushed < frames.len() {
+        pushed += push_frames(&mut producer, &frames[pushed..]);
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    let mut pcm = Vec::new();
+    while pcm.len() < 2048 * 4 {
+        let chunk = tokio::time::timeout(Duration::from_secs(2), audio_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            chunk.len() % 4,
+            0,
+            "a bus chunk holds whole stereo L16 frames"
+        );
+        pcm.extend_from_slice(&chunk);
+    }
+    tokio::task::spawn_blocking(move || handle.stop())
+        .await
+        .unwrap();
+    l16_le_to_f32(&pcm)
+}
+
+#[tokio::test]
+async fn stereo_frames_keep_their_sides_through_the_eq() {
+    let tone = |n: usize| (2.0 * std::f32::consts::PI * 1000.0 * n as f32 / 44_100.0).sin() * 0.25;
+    let frames: Vec<f32> = (0..4096).flat_map(|n| [tone(n), 0.0]).collect();
+    let out = through_the_pipeline(44_100, 44_100, [0.0, 0.0, 12.0, 0.0, 0.0], &frames).await;
+    assert!(out.chunks_exact(2).any(|frame| frame[0].abs() > 0.1));
+    assert!(
+        out.chunks_exact(2).all(|frame| frame[1] == 0.0),
+        "the boosted left tone leaked into the right channel"
+    );
+}
+
+#[tokio::test]
+async fn resampled_stereo_frames_keep_their_sides() {
+    let frames = [0.5f32, -0.5].repeat(4096);
+    let out = through_the_pipeline(48_000, 44_100, [0.0; 5], &frames).await;
+    for frame in out.chunks_exact(2).skip(64) {
+        assert!(
+            (frame[0] - 0.5).abs() < 0.02 && (frame[1] + 0.5).abs() < 0.02,
+            "{frame:?}"
+        );
+    }
 }

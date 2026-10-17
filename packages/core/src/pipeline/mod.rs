@@ -10,8 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 
+/// A capture ring holding `capacity_frames` interleaved pipeline frames.
 pub fn new_ring_buffer(capacity_frames: usize) -> (HeapProd<f32>, HeapCons<f32>) {
-    HeapRb::<f32>::new(capacity_frames).split()
+    HeapRb::<f32>::new(capacity_frames * PIPELINE_CHANNELS).split()
 }
 
 /// Pushes the most whole pipeline frames of `samples` that fit and returns
@@ -46,8 +47,8 @@ fn f32_to_le_i16_bytes(samples: &[f32]) -> Bytes {
 /// panic message.
 pub type ProcessingDeathHook = Box<dyn FnOnce(String) + Send>;
 
-/// An extra stage run on every captured chunk before the EQ. Test-only
-/// fault injection uses it to make the thread panic.
+/// An extra stage run on every captured chunk (interleaved pipeline frames)
+/// before the EQ. Test-only fault injection uses it to make the thread panic.
 pub(crate) type ProcessingStage = Box<dyn FnMut(&mut [f32]) + Send>;
 
 pub fn spawn_processing_task(
@@ -136,24 +137,24 @@ fn process_until_stopped(
         audio_tx,
         ws_tx,
     } = outputs;
-    let mut eq = GraphicEq::new(rates.input_hz as f32, 1);
+    let mut eq = GraphicEq::new(rates.input_hz as f32, PIPELINE_CHANNELS);
     let mut resampler = (rates.input_hz != rates.output_hz)
-        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, 1));
+        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS));
     let chunk_frames = resampler
         .as_ref()
         .map(PcmResampler::input_frames_next)
         .unwrap_or(1024);
-    let mut chunk = vec![0.0f32; chunk_frames];
+    let mut chunk = vec![0.0f32; chunk_frames * PIPELINE_CHANNELS];
     let mut resampled = Vec::new();
 
     while !stop_flag.load(Ordering::Relaxed) {
         let mut filled = 0;
-        while filled < chunk_frames {
+        while filled < chunk.len() {
             if stop_flag.load(Ordering::Relaxed) {
                 return;
             }
             filled += consumer.pop_slice(&mut chunk[filled..]);
-            if filled < chunk_frames {
+            if filled < chunk.len() {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }

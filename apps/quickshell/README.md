@@ -62,7 +62,7 @@ Pairing and receiver-model limitations of the existing transports still apply.
 Output groups use **independent timing**. Network buffering and different
 device clocks can produce delay or audible differences between rooms.
 Input mixes attenuate each member by `1 / member_count` to provide headroom.
-The existing network pipeline's mono format is retained. This frontend
+Network sinks stream the pipeline's stereo PCM. This frontend
 does not claim synchronized playback across transports.
 
 Routes and groups belong to the core, are saved in `patchbay.json` beside

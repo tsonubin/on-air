@@ -5,6 +5,12 @@ Notable changes to on-air. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Stereo: capture, the Audio CD, the EQ and every speaker stream keep left
+  and right apart, so Sonos and HomePod stereo pairs play true stereo. A
+  radio stream now uses about 1.5 Mbit/s at 48 kHz.
+
 ### Changed
 
 - Repository reorganised for contributors: design records live in

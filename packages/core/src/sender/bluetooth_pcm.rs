@@ -257,7 +257,7 @@ impl CpalPcmSink {
 
 impl PcmSink for CpalPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let converted = self.bridge.lock().process_l16_mono(pcm);
+        let converted = self.bridge.lock().process_l16(pcm);
         // Bound latency and memory: a slow device drops new samples.
         self.producer.lock().push_slice(&converted);
         Ok(())
@@ -333,7 +333,7 @@ impl PacatPcmSink {
 }
 impl PcmSink for PacatPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let mut bytes = self.bridge.lock().process_l16_mono_to_l16(pcm);
+        let mut bytes = self.bridge.lock().process_l16_to_l16(pcm);
         scale_l16(&mut bytes, self.volume.load(Ordering::Acquire));
         use std::io::Write;
         self.stdin

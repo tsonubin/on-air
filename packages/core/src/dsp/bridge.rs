@@ -1,7 +1,7 @@
 use super::resample::StreamingResampler;
 use super::PIPELINE_CHANNELS;
 
-/// Decode pipeline L16 LE mono, resample to the output rate, then upmix to
+/// Decode pipeline stereo L16 LE, resample to the output rate, then fit it to
 /// the destination channel count. This is the sender-side half of the
 /// input/output sample-rate bridge.
 pub struct RateBridge {
@@ -12,19 +12,18 @@ pub struct RateBridge {
 impl RateBridge {
     pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
         RateBridge {
-            resampler: StreamingResampler::new(input_rate_hz, output_rate_hz, 1),
+            resampler: StreamingResampler::new(input_rate_hz, output_rate_hz, PIPELINE_CHANNELS),
             channels: channels.max(1),
         }
     }
 
-    pub fn process_l16_mono(&mut self, pcm: &[u8]) -> Vec<f32> {
-        let mono = l16_le_to_f32(pcm);
-        let resampled = self.resampler.process(&mono);
-        upmix_mono(&resampled, self.channels)
+    pub fn process_l16(&mut self, pcm: &[u8]) -> Vec<f32> {
+        let resampled = self.resampler.process(&l16_le_to_f32(pcm));
+        map_stereo(&resampled, self.channels)
     }
 
-    pub fn process_l16_mono_to_l16(&mut self, pcm: &[u8]) -> Vec<u8> {
-        f32_to_l16_le(&self.process_l16_mono(pcm))
+    pub fn process_l16_to_l16(&mut self, pcm: &[u8]) -> Vec<u8> {
+        f32_to_l16_le(&self.process_l16(pcm))
     }
 
     pub fn output_rate_hz(&self) -> u32 {
@@ -73,19 +72,6 @@ pub fn map_stereo(samples: &[f32], channels: usize) -> Vec<f32> {
     out
 }
 
-pub fn upmix_mono(samples: &[f32], channels: usize) -> Vec<f32> {
-    if channels <= 1 {
-        return samples.to_vec();
-    }
-    let mut out = Vec::with_capacity(samples.len() * channels);
-    for &sample in samples {
-        for _ in 0..channels {
-            out.push(sample);
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,18 +84,18 @@ mod tests {
     }
 
     #[test]
-    fn upmix_duplicates_each_mono_sample() {
-        assert_eq!(upmix_mono(&[0.1, -0.2], 2), vec![0.1, 0.1, -0.2, -0.2]);
-        assert_eq!(upmix_mono(&[0.5], 1), vec![0.5]);
+    fn same_rate_bridge_keeps_left_and_right() {
+        let mut bridge = RateBridge::new(44_100, 44_100, 2);
+        let out = bridge.process_l16(&f32_to_l16_le(&[0.25, -0.25]));
+        assert_eq!(out.len(), 2);
+        assert!((out[0] - 0.25).abs() < 0.01 && (out[1] + 0.25).abs() < 0.01);
     }
 
     #[test]
-    fn same_rate_stereo_bridge_does_not_change_pitch() {
-        let mut bridge = RateBridge::new(44_100, 44_100, 2);
-        let pcm = f32_to_l16_le(&[0.25, -0.25]);
-        let out = bridge.process_l16_mono(&pcm);
-        assert_eq!(out.len(), 4);
-        assert!((out[0] - out[1]).abs() < f32::EPSILON);
+    fn mono_destination_hears_both_sides() {
+        let mut bridge = RateBridge::new(44_100, 44_100, 1);
+        let out = bridge.process_l16(&f32_to_l16_le(&[0.5, 0.0]));
+        assert_eq!(out.len(), 1);
         assert!((out[0] - 0.25).abs() < 0.01);
     }
 }
