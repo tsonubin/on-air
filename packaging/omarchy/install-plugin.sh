@@ -38,6 +38,8 @@ fi
 mv "$stage" "$destination"
 echo "Installed $destination"
 if [ -n "$enable" ]; then
+  # A running shell only learns about new plugin folders on a rescan.
+  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
   omarchy plugin enable on-air.patchbay
   omarchy bar move on-air.patchbay --after omarchy.clock \
     || echo 'Could not move the widget beside the clock; it is in the center section.' >&2
