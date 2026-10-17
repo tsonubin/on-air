@@ -9,12 +9,16 @@ audio to groups of local and network outputs. The terminal, tray app and
 phone remote retain their single-output controls. Everything stays on your
 LAN: there is no account and no cloud.
 
-- **Sources:** any capture device, the system monitor, or an audio CD.
+- **Sources:** System audio (what the computer plays), microphones and USB
+  audio interfaces, or an audio CD. On Linux the list comes from PipeWire, so
+  ALSA aliases and on-air's own buses never show up.
 - **Omarchy panel:** native Qt Quick/QML, system device defaults, input
   mixes, output groups and hanging patch cables. See [the panel guide](apps/quickshell/README.md).
 - **Single-output clients:** Sonos (direct UPnP), AirPlay (OwnTone or pyatv on Linux and
-  Windows, the system route picker on macOS), Bluetooth A2DP. Switching
-  outputs tears the previous one down first.
+  Windows, the system route picker on macOS), Bluetooth A2DP, and on Linux
+  this computer's own speakers or headphone jack. Switching outputs tears the
+  previous one down first. System audio cannot play on this computer, since
+  that would loop it back into itself.
 - **Mixer:** volume, a five-band EQ, input and output sample rates, a level
   meter, CD transport.
 - **Remote:** the phone app finds the desktop on the LAN, pairs with a PIN

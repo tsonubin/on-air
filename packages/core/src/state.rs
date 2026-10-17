@@ -6,7 +6,7 @@ use crate::events::{emit_catalog_diff, WsEvent};
 use crate::keep_awake::KeepAwake;
 use crate::pairing::PairingState;
 use crate::pipeline::input::InputWiring;
-use crate::pipeline::{InputError, InputSession};
+use crate::pipeline::{InputError, InputSession, LOOPBACK_INPUT};
 use crate::sender::airplay_mdns::CatalogDevice;
 use crate::sender::bluetooth::{
     BluetoothAdapter, BluetoothDevice, MockBluetoothAdapter, RecordingPcmSink,
@@ -173,6 +173,20 @@ fn bluetooth_ids(devices: &[BluetoothDevice]) -> Vec<(String, String)> {
         .iter()
         .map(|d| (d.id.clone(), d.name.clone()))
         .collect()
+}
+
+/// Whether `name` would capture what this computer plays.
+async fn is_system_audio(name: &str) -> bool {
+    use crate::pipeline::sources::{self, SYSTEM_AUDIO};
+    if name == SYSTEM_AUDIO || name == LOOPBACK_INPUT {
+        return true;
+    }
+    let name = name.to_string();
+    tokio::task::spawn_blocking(move || {
+        sources::query().is_some_and(|s| s.label_for(&name) == SYSTEM_AUDIO)
+    })
+    .await
+    .unwrap_or(false)
 }
 
 impl CoreState {
@@ -383,6 +397,13 @@ impl CoreState {
 
     /// Activate an input and remember it. The caller holds `config_lock`.
     pub(crate) async fn activate_input_locked(&self, name: &str) -> Result<(), InputError> {
+        if self
+            .active_output()
+            .is_some_and(|output| output.transport == crate::sender::local::TRANSPORT)
+            && is_system_audio(name).await
+        {
+            return Err(InputError::Feedback(crate::session::FEEDBACK_LOOP));
+        }
         let resolved = self.input.activate(name).await?;
         self.remember_input(resolved);
         Ok(())
@@ -615,6 +636,16 @@ impl CoreState {
             }
             if let Some(error) = last_error {
                 eprintln!("could not restore saved input {input:?}: {error}");
+                // Inputs saved before the curated list (raw ALSA names) are
+                // gone for good; carry on with what the computer plays.
+                if matches!(error, InputError::NotFound(_)) && input != LOOPBACK_INPUT {
+                    let _configuration = self.config_lock.lock().await;
+                    if still_current() {
+                        if let Err(error) = self.activate_input_locked(LOOPBACK_INPUT).await {
+                            eprintln!("could not fall back to system audio: {error}");
+                        }
+                    }
+                }
             }
         }
 

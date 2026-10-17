@@ -164,6 +164,7 @@ impl From<ActivateError> for ApiError {
             ActivateError::NoLanAddress(_) | ActivateError::Discovery(_) => {
                 ApiError::internal(error.to_string())
             }
+            ActivateError::Feedback(message) => ApiError::conflict(message),
             ActivateError::Sender(sender) => ApiError::from(sender),
         }
     }
@@ -175,6 +176,7 @@ impl From<InputError> for ApiError {
             InputError::NotFound(_) => ApiError::not_found(error.to_string()),
             InputError::NoDisc => ApiError::not_found(error.to_string()),
             InputError::Capture(_) => ApiError::internal(error.to_string()),
+            InputError::Feedback(message) => ApiError::conflict(message),
         }
     }
 }

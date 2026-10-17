@@ -184,6 +184,7 @@ fn process_until_stopped(
 pub mod capture;
 pub mod input;
 pub mod local_sink;
+pub mod sources;
 
 pub use input::{InputError, InputSession, InputSnapshot, LOOPBACK_INPUT};
 

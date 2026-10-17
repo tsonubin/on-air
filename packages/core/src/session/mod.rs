@@ -25,14 +25,36 @@ pub enum ActivateError {
     NoLanAddress(std::io::Error),
     #[error("{0}")]
     Discovery(String),
+    #[error("{0}")]
+    Feedback(&'static str),
     #[error(transparent)]
     Sender(#[from] SenderError),
 }
 
 pub use on_air_api::OutputInfo;
 
+/// Why System audio cannot play on this computer.
+pub const FEEDBACK_LOOP: &str =
+    "System audio already plays on this computer. Choose a capture input or another speaker.";
+
 pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     let mut outputs = Vec::new();
+    if !state.mock && !state.patchbay_endpoint {
+        let local = tokio::task::spawn_blocking(crate::sender::local::query)
+            .await
+            .unwrap_or_default();
+        for d in local {
+            outputs.push(OutputInfo {
+                id: d.id,
+                name: d.name,
+                transport: crate::sender::local::TRANSPORT.into(),
+                kind: "solo".into(),
+                member_count: 1,
+                needs_pair: false,
+                paired: true,
+            });
+        }
+    }
     for d in state.sonos.lock().await.list() {
         outputs.push(OutputInfo {
             id: d.usn,
@@ -124,6 +146,7 @@ pub async fn activate(
         "sonos" => build_sonos(state, device_id).await?,
         "airplay" => build_airplay(state, device_id)?,
         "bluetooth" => build_bluetooth(state, device_id).await?,
+        "local" => build_local(state, device_id).await?,
         _ => return Err(ActivateError::UnknownTransport(transport.to_string())),
     };
     let result = state
@@ -241,6 +264,48 @@ fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateEr
         ),
         identity,
         stream_nonce: Some(nonce),
+    })
+}
+
+async fn build_local(state: &CoreState, device_id: &str) -> Result<Built, ActivateError> {
+    if state.mock || state.patchbay_endpoint {
+        return Err(ActivateError::NotFound);
+    }
+    if state.input().active_name().as_deref() == Some(crate::pipeline::sources::SYSTEM_AUDIO) {
+        return Err(ActivateError::Feedback(FEEDBACK_LOOP));
+    }
+    snap_output_rate(state, "local");
+    let output = tokio::task::spawn_blocking(crate::sender::local::query)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .find(|o| o.id == device_id)
+        .ok_or(ActivateError::NotFound)?;
+    let adapter = crate::sender::local::LocalPortAdapter::new(output);
+    let device = adapter.device();
+    let identity = ActiveOutput {
+        transport: "local".into(),
+        device_id: device.id.clone(),
+        device_name: device.name.clone(),
+    };
+    let config = BluetoothPlaybackConfig {
+        pipeline_hz: *state.target_sample_rate_hz.lock(),
+        output_hz: *state.output_sample_rate_hz.lock(),
+        volume: state.output_volume(),
+    };
+    Ok(Built {
+        sender: Box::new(
+            BluetoothSender::new(
+                device,
+                adapter,
+                state.audio_tx.clone(),
+                std::sync::Arc::new(SystemPcmOutput),
+                config,
+            )
+            .with_transport("local"),
+        ),
+        identity,
+        stream_nonce: None,
     })
 }
 

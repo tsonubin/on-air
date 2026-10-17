@@ -244,6 +244,7 @@ pub struct BluetoothSender {
     config: BluetoothPlaybackConfig,
     connection_attempted: bool,
     live: Option<LivePlayback>,
+    transport: &'static str,
 }
 
 impl BluetoothSender {
@@ -262,7 +263,14 @@ impl BluetoothSender {
             config,
             connection_attempted: false,
             live: None,
+            transport: "bluetooth",
         }
+    }
+
+    /// Report another transport: local outputs reuse this PCM lifecycle.
+    pub fn with_transport(mut self, transport: &'static str) -> Self {
+        self.transport = transport;
+        self
     }
 }
 
@@ -390,7 +398,7 @@ impl AudioSender for BluetoothSender {
         &self.device.name
     }
     fn transport(&self) -> &'static str {
-        "bluetooth"
+        self.transport
     }
     fn output_format(&self) -> Option<OutputFormat> {
         self.live.as_ref().map(|live| live.opened.format.clone())

@@ -237,7 +237,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   // Choose a speaker; the desktop's event marks it live without a full refetch.
   await press("output-row");
   expect(text()).toContain("Living Room AirPlay");
-  expect(text()).toContain("Stereo pair · airplay");
+  expect(text()).toContain("Stereo pair · AirPlay");
   const listsBefore = api.listInputs.mock.calls.length;
   api.getActiveOutput.mockResolvedValue({
     transport: "sonos",

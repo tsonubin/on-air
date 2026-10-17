@@ -41,6 +41,8 @@ pub enum InputError {
     NoDisc,
     #[error("{0}")]
     Capture(String),
+    #[error("{0}")]
+    Feedback(&'static str),
 }
 
 /// Point-in-time view of the input session.
@@ -265,7 +267,7 @@ impl InputSession {
         let name = if requested == LOOPBACK_INPUT {
             resolve_loopback().await?
         } else {
-            requested
+            display_label(requested).await
         };
         let mut state = self.inner.state.lock().await;
         let (capture, supported_hz) = self.start_capture(&name).await?;
@@ -448,8 +450,21 @@ impl InputSession {
             ));
         }
 
-        if capture::is_pulse_monitor_name(name) {
-            let src = name.to_string();
+        let (pulse_running, pulse_source) = {
+            let name = name.to_string();
+            tokio::task::spawn_blocking(move || match super::sources::query() {
+                Some(sources) => (true, sources.resolve(&name)),
+                None => (false, capture::is_pulse_monitor_name(&name).then_some(name)),
+            })
+            .await
+            .map_err(|e| InputError::Capture(e.to_string()))?
+        };
+        // With a Pulse server running, raw ALSA devices are off limits: opening
+        // one directly fights PipeWire for the hardware.
+        if pulse_running && pulse_source.is_none() {
+            return Err(InputError::NotFound("input device not found"));
+        }
+        if let Some(src) = pulse_source {
             let started = tokio::task::spawn_blocking(move || {
                 capture::start_pulse_monitor(&src, producer, Some(target_rate))
             })
@@ -504,8 +519,25 @@ impl InputSession {
     }
 }
 
+/// The curated label for a requested input (a raw Pulse monitor name
+/// becomes "System audio"); unchanged when there is no Pulse server.
+async fn display_label(requested: String) -> String {
+    let fallback = requested.clone();
+    tokio::task::spawn_blocking(move || match super::sources::query() {
+        Some(sources) => sources.label_for(&requested),
+        None => requested,
+    })
+    .await
+    .unwrap_or(fallback)
+}
+
 async fn resolve_loopback() -> Result<String, InputError> {
     let resolved = tokio::task::spawn_blocking(|| {
+        if let Some(sources) = super::sources::query() {
+            if sources.resolve(super::sources::SYSTEM_AUDIO).is_some() {
+                return Ok(Some(super::sources::SYSTEM_AUDIO.to_string()));
+            }
+        }
         let host = cpal::default_host();
         capture::find_preferred_loopback(&host).map(|device| {
             device

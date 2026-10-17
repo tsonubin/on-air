@@ -183,6 +183,8 @@ pub fn apply_for_transport(transport: &str, device_id: &str) {
     let keep = match transport {
         "bluetooth" => Some(device_id),
         "sonos" | "airplay" => None,
+        // Playing on this computer: undo any silencing from a previous output.
+        "local" => return restore_local_speakers(),
         _ => return,
     };
     silence_local_speakers(keep);

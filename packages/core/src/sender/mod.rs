@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 pub mod airplay;
 pub mod airplay_mdns;
 pub mod bluetooth;
+pub mod local;
 pub mod sonos;
 
 /// Failure of a transport sender. Variants carry a human message but callers

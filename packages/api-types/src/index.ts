@@ -15,8 +15,17 @@
 // Enumerations
 // ---------------------------------------------------------------------------
 
-/** Output transports the core can cast to (`session.rs`). */
-export type Transport = "sonos" | "airplay" | "bluetooth";
+/** Output transports the core can cast to (`session.rs`). `local` is the
+ * computer's own speakers and headphone jack (`sender/local.rs`). */
+export type Transport = "local" | "sonos" | "airplay" | "bluetooth";
+
+/** How each transport is named in pickers. */
+export const TRANSPORT_LABELS: Record<Transport, string> = {
+  local: "This computer",
+  sonos: "Sonos",
+  airplay: "AirPlay",
+  bluetooth: "Bluetooth",
+};
 
 /** How many speakers an output represents (`session.rs`, `airplay_mdns.rs`). */
 export type OutputKind = "solo" | "pair";
