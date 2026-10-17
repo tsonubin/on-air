@@ -78,7 +78,12 @@ fn stereo_eq_keeps_channel_state_apart() {
     let mut interleaved: Vec<f32> = left.iter().flat_map(|&l| [l, 0.0]).collect();
     stereo.process(&mut interleaved);
 
-    let (l, r): (Vec<f32>, Vec<f32>) = interleaved.chunks_exact(2).map(|f| (f[0], f[1])).unzip();
+    let (l, r): (Vec<f32>, Vec<f32>) = interleaved
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[l, r]| (*l, *r))
+        .unzip();
     assert_eq!(l, expected, "left must match a mono EQ bit for bit");
     assert!(
         r.iter().all(|&s| s == 0.0),

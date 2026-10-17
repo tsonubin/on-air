@@ -100,9 +100,16 @@ async fn stereo_frames_keep_their_sides_through_the_eq() {
     let tone = |n: usize| (2.0 * std::f32::consts::PI * 1000.0 * n as f32 / 44_100.0).sin() * 0.25;
     let frames: Vec<f32> = (0..4096).flat_map(|n| [tone(n), 0.0]).collect();
     let out = through_the_pipeline(44_100, 44_100, [0.0, 0.0, 12.0, 0.0, 0.0], &frames).await;
-    assert!(out.chunks_exact(2).any(|frame| frame[0].abs() > 0.1));
+    assert!(out
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .any(|[left, _]| left.abs() > 0.1));
     assert!(
-        out.chunks_exact(2).all(|frame| frame[1] == 0.0),
+        out.as_chunks::<2>()
+            .0
+            .iter()
+            .all(|[_, right]| *right == 0.0),
         "the boosted left tone leaked into the right channel"
     );
 }
@@ -111,7 +118,7 @@ async fn stereo_frames_keep_their_sides_through_the_eq() {
 async fn resampled_stereo_frames_keep_their_sides() {
     let frames = [0.5f32, -0.5].repeat(4096);
     let out = through_the_pipeline(48_000, 44_100, [0.0; 5], &frames).await;
-    for frame in out.chunks_exact(2).skip(64) {
+    for frame in out.as_chunks::<2>().0.iter().skip(64) {
         assert!(
             (frame[0] - 0.5).abs() < 0.02 && (frame[1] + 0.5).abs() < 0.02,
             "{frame:?}"

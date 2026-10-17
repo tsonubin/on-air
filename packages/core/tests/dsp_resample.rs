@@ -84,7 +84,8 @@ fn stereo_resample_keeps_channels_apart() {
         out.extend(r.process(&chunk));
     }
     assert_eq!(out.len() % 2, 0);
-    let (left, right): (Vec<f32>, Vec<f32>) = out.chunks_exact(2).map(|f| (f[0], f[1])).unzip();
+    let (left, right): (Vec<f32>, Vec<f32>) =
+        out.as_chunks::<2>().0.iter().map(|[l, r]| (*l, *r)).unzip();
     assert!(
         right.iter().all(|s| s.abs() < 1e-6),
         "right picked up the left tone"

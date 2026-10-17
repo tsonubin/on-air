@@ -61,7 +61,8 @@ pub fn map_stereo(samples: &[f32], channels: usize) -> Vec<f32> {
         return samples.to_vec();
     }
     let mut out = Vec::with_capacity(samples.len() / PIPELINE_CHANNELS * channels);
-    for frame in samples.chunks_exact(PIPELINE_CHANNELS) {
+    let (frames, _) = samples.as_chunks::<PIPELINE_CHANNELS>();
+    for frame in frames {
         if channels == 1 {
             out.push((frame[0] + frame[1]) * 0.5);
         } else {

@@ -73,5 +73,5 @@ fn pulse_reads_that_end_mid_frame_keep_left_and_right() {
     );
     let samples: Vec<f32> = consumer.pop_iter().collect();
     assert_eq!(samples.len(), 200);
-    assert!(samples.chunks_exact(2).all(|f| f == [0.5, -0.5]));
+    assert!(samples.as_chunks::<2>().0.iter().all(|f| *f == [0.5, -0.5]));
 }
