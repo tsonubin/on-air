@@ -29,6 +29,7 @@ impl ServiceVerb {
         }
     }
 
+    #[cfg(target_os = "linux")]
     fn done(self) -> &'static str {
         match self {
             Self::Start => "started",
@@ -43,6 +44,7 @@ pub fn systemctl_args(verb: ServiceVerb) -> Vec<&'static str> {
 }
 
 /// systemctl's stderr when the unit file is not installed.
+#[cfg(any(target_os = "linux", test))]
 fn not_installed(stderr: &str) -> bool {
     stderr.contains("not found") || stderr.contains("not loaded")
 }
