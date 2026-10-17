@@ -1,5 +1,6 @@
 """Installer updates must preserve local edits and avoid duplicate manifests."""
 import json
+import re
 import os
 from pathlib import Path
 import subprocess
@@ -45,6 +46,26 @@ class PluginInstall(unittest.TestCase):
             self.assertIn("plugin enable on-air.patchbay", log.read_text())
             self.assertIn("bar move on-air.patchbay --after omarchy.clock", log.read_text())
             self.assertNotEqual(run("--unknown").returncode, 0)
+
+
+OMARCHY_SHELL = Path("/usr/share/omarchy/shell")
+
+
+@unittest.skipUnless((OMARCHY_SHELL / "Ui/KeyboardPanel.qml").is_file(), "Omarchy shell not installed")
+class HostApi(unittest.TestCase):
+    """`omarchy plugin validate` checks only the manifest; an unknown property
+    makes the shell drop the widget at load time with nothing on screen."""
+
+    def test_keyboard_panel_properties_exist_in_the_installed_shell(self):
+        host = (OMARCHY_SHELL / "Ui/KeyboardPanel.qml").read_text()
+        declared = set(re.findall(r"^\s*(?:required |default |readonly )*property \S+ (\w+)", host, re.M))
+        declared |= {"id", "screen", "visible", "color"}
+        widget = (Path(__file__).resolve().parents[2] / "apps/quickshell/Widget.qml").read_text()
+        block = widget.split("Ui.KeyboardPanel {", 1)[1]
+        indent = re.search(r"\n(\s+)\w", block).group(1)
+        assigned = set(re.findall(rf"^{indent}(\w+):", block, re.M))
+        self.assertTrue(assigned)
+        self.assertEqual(assigned - declared, set())
 
 
 if __name__ == "__main__":

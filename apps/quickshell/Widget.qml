@@ -14,8 +14,8 @@ Ui.Panel {
         id: client
         panelOpen: root.opened
         port: Number(root.setting("port", 47990))
-        onUpdated: if (panel.loadedContent && !busy && queue.length === 0)
-            panel.loadedContent.requestDone()
+        onUpdated: if (!busy && queue.length === 0)
+            board.requestDone()
     }
     Ui.BarIconButton {
         id: button
@@ -37,31 +37,32 @@ Ui.Panel {
         open: root.opened
         padding: 0
         contentWidth: panel.fittedContentWidth(Style.space(380))
-        contentHeight: panel.fittedContentHeight(panel.loadedContentHeight, Style.space(320))
-        focusTarget: panel.loadedContent
-        content: Component {
-            PatchbayView {
-                panelActive: root.opened
-                snapshot: client.snapshot
-                clientError: client.error
-                foreground: Commons.Color.popups.text
-                background: Commons.Color.popups.background
-                accent: Commons.Color.accent
-                muted: Commons.Color.muted
-                urgent: Commons.Color.urgent
-                fontFamily: Style.font.family
-                fontPixels: Style.font.body
-                uiScale: Style.spaceReal(100) / 100
-                reducedMotion: Style.reduceMotion || root.setting("reducedMotion", false)
-                onCommand: function (body) {
-                    client.command(body);
-                }
-                onCloseRequested: root.close()
-                onResumeRequested: client.command({
-                    op: "__service",
-                    enabled: true
-                })
+        contentHeight: panel.fittedContentHeight(board.implicitHeight, Style.space(320))
+        focusTarget: board
+        // Omarchy 4's KeyboardPanel takes its content as default children.
+        PatchbayView {
+            id: board
+            anchors.fill: parent
+            panelActive: root.opened
+            snapshot: client.snapshot
+            clientError: client.error
+            foreground: Commons.Color.popups.text
+            background: Commons.Color.popups.background
+            accent: Commons.Color.accent
+            muted: Commons.Color.muted
+            urgent: Commons.Color.urgent
+            fontFamily: Style.font.family
+            fontPixels: Style.font.body
+            uiScale: Style.spaceReal(100) / 100
+            reducedMotion: Style.reduceMotion || root.setting("reducedMotion", false)
+            onCommand: function (body) {
+                client.command(body);
             }
+            onCloseRequested: root.close()
+            onResumeRequested: client.command({
+                op: "__service",
+                enabled: true
+            })
         }
     }
 }
