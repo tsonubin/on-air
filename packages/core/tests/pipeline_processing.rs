@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use on_air_core::pipeline::{new_ring_buffer, spawn_processing_task};
+use on_air_core::pipeline::{new_ring_buffer, push_frames, spawn_processing_task};
 use parking_lot::Mutex;
 use ringbuf::traits::Producer;
 use std::sync::Arc;
@@ -36,4 +36,18 @@ async fn processes_synthetic_frames_into_broadcast_pcm() {
     tokio::task::spawn_blocking(move || handle.stop())
         .await
         .unwrap();
+}
+
+#[test]
+fn push_frames_never_splits_a_frame() {
+    use ringbuf::traits::{Consumer, Split};
+    let (mut producer, mut consumer) = ringbuf::HeapRb::<f32>::new(5).split();
+    assert_eq!(
+        push_frames(&mut producer, &[0.1, -0.1, 0.2, -0.2, 0.3, -0.3]),
+        4
+    );
+    let mut popped = [0.0; 4];
+    assert_eq!(consumer.pop_slice(&mut popped), 4);
+    assert_eq!(popped, [0.1, -0.1, 0.2, -0.2]);
+    assert_eq!(push_frames(&mut producer, &[0.3, -0.3]), 2);
 }

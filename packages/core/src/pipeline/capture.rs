@@ -1,9 +1,70 @@
+use super::push_frames;
+use crate::dsp::PIPELINE_CHANNELS;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
     Device, FromSample, Host, InputCallbackInfo, Sample, SampleFormat, SizedSample, Stream,
-    StreamConfig, I24, U24,
+    StreamConfig, SupportedStreamConfig, SupportedStreamConfigRange, I24, U24,
 };
 use ringbuf::{traits::Producer, HeapProd};
+use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Bytes in one interleaved f32 LE pipeline frame, as `parec` writes it.
+const F32_FRAME_BYTES: usize = 4 * PIPELINE_CHANNELS;
+
+/// The left and right of one captured frame: a mono frame feeds both sides,
+/// and a surround frame keeps its front pair. Panics on an empty frame.
+pub fn stereo_frame<T: Copy>(frame: &[T]) -> [T; 2] {
+    let left = frame[0];
+    let right = *frame.get(1).unwrap_or(&left);
+    [left, right]
+}
+
+/// The capture config at `rate_hz`, preferring stereo so the OS does any
+/// surround downmix, then the device's default sample format.
+pub fn pick_capture_config(
+    configs: impl IntoIterator<Item = SupportedStreamConfigRange>,
+    default_format: SampleFormat,
+    rate_hz: u32,
+) -> Option<SupportedStreamConfig> {
+    let stereo = PIPELINE_CHANNELS as u16;
+    configs
+        .into_iter()
+        .filter(|config| rate_hz >= config.min_sample_rate() && rate_hz <= config.max_sample_rate())
+        .min_by_key(|config| {
+            (
+                config.channels() != stereo,
+                config.sample_format() != default_format,
+                config.channels().abs_diff(stereo),
+            )
+        })
+        .map(|config| config.with_sample_rate(rate_hz))
+}
+
+/// Reads interleaved f32 LE stereo into `producer` until EOF, an error or
+/// `stop`. Pipe reads need not end on a frame boundary, so up to one frame
+/// less a byte is carried into the next read.
+pub fn pump_f32le_stereo(mut reader: impl Read, producer: &mut HeapProd<f32>, stop: &AtomicBool) {
+    let mut buf = [0u8; 4096 + F32_FRAME_BYTES - 1];
+    let mut samples = [0.0f32; 4096 / 4];
+    let mut pending = 0;
+    while !stop.load(Ordering::Relaxed) {
+        match reader.read(&mut buf[pending..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let total = pending + n;
+                let complete = total - total % F32_FRAME_BYTES;
+                let (raw, _) = buf[..complete].as_chunks::<4>();
+                for (sample, bytes) in samples.iter_mut().zip(raw) {
+                    *sample = f32::from_le_bytes(*bytes);
+                }
+                push_frames(producer, &samples[..raw.len()]);
+                pending = total - complete;
+                buf.copy_within(complete..total, 0);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputDeviceInfo {

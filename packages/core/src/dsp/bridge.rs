@@ -1,4 +1,5 @@
 use super::resample::StreamingResampler;
+use super::PIPELINE_CHANNELS;
 
 /// Decode pipeline L16 LE mono, resample to the output rate, then upmix to
 /// the destination channel count. This is the sender-side half of the
@@ -52,6 +53,26 @@ pub fn f32_to_l16_le(samples: &[f32]) -> Vec<u8> {
     buf
 }
 
+/// Fits interleaved pipeline stereo to a destination with `channels`
+/// channels: one channel gets the average of left and right, two pass
+/// through, and any further channels get silence.
+pub fn map_stereo(samples: &[f32], channels: usize) -> Vec<f32> {
+    let channels = channels.max(1);
+    if channels == PIPELINE_CHANNELS {
+        return samples.to_vec();
+    }
+    let mut out = Vec::with_capacity(samples.len() / PIPELINE_CHANNELS * channels);
+    for frame in samples.chunks_exact(PIPELINE_CHANNELS) {
+        if channels == 1 {
+            out.push((frame[0] + frame[1]) * 0.5);
+        } else {
+            out.extend_from_slice(frame);
+            out.extend(std::iter::repeat_n(0.0, channels - PIPELINE_CHANNELS));
+        }
+    }
+    out
+}
+
 pub fn upmix_mono(samples: &[f32], channels: usize) -> Vec<f32> {
     if channels <= 1 {
         return samples.to_vec();
@@ -68,6 +89,13 @@ pub fn upmix_mono(samples: &[f32], channels: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_stereo_fits_the_destination_layout() {
+        assert_eq!(map_stereo(&[0.5, 0.25], 1), vec![0.375]);
+        assert_eq!(map_stereo(&[0.5, 0.25], 2), vec![0.5, 0.25]);
+        assert_eq!(map_stereo(&[0.5, 0.25], 4), vec![0.5, 0.25, 0.0, 0.0]);
+    }
 
     #[test]
     fn upmix_duplicates_each_mono_sample() {

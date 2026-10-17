@@ -61,6 +61,14 @@ pub fn ms_to_sectors(ms: u64) -> u32 {
     ((ms * u64::from(SECTORS_PER_SECOND)) / 1000) as u32
 }
 
+/// Interleaved CDDA stereo i16 LE → interleaved stereo f32. A trailing
+/// partial frame is dropped.
+pub fn sector_to_stereo(sector: &[u8]) -> Vec<f32> {
+    let frame_bytes = BYTES_PER_SECTOR / STEREO_FRAMES_PER_SECTOR;
+    let usable = sector.len() - sector.len() % frame_bytes;
+    crate::dsp::bridge::l16_le_to_f32(&sector[..usable])
+}
+
 /// Interleaved CDDA stereo i16 LE → mono f32.
 pub fn downmix_sector(sector: &[u8]) -> Vec<f32> {
     let usable = sector.len() - (sector.len() % 4);
@@ -544,6 +552,17 @@ mod tests {
         let mono = downmix_sector(&sector);
         assert!((mono[0] - 0.5).abs() < 0.01);
         assert!((mono[1] + 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn sector_to_stereo_keeps_left_and_right() {
+        let mut sector = Vec::new();
+        sector.extend_from_slice(&16_384i16.to_le_bytes());
+        sector.extend_from_slice(&(-16_384i16).to_le_bytes());
+        sector.extend_from_slice(&[0x01, 0x02]); // half a frame: dropped
+        let stereo = sector_to_stereo(&sector);
+        assert_eq!(stereo.len(), 2);
+        assert!((stereo[0] - 0.5).abs() < 0.01 && (stereo[1] + 0.5).abs() < 0.01);
     }
 
     #[test]
