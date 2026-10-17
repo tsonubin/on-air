@@ -39,6 +39,8 @@ mv "$stage" "$destination"
 echo "Installed $destination"
 if [ -n "$enable" ]; then
   omarchy plugin enable on-air.patchbay
+  omarchy bar move on-air.patchbay --after omarchy.clock \
+    || echo 'Could not move the widget beside the clock; it is in the center section.' >&2
 else
   echo 'Enable beside the clock: omarchy plugin enable on-air.patchbay'
 fi

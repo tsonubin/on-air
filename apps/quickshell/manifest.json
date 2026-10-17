@@ -10,7 +10,7 @@
     "displayName": "on-air",
     "description": "Audio routing, mixes and network speakers",
     "category": "Audio",
-    "defaultSection": "centerEnd",
+    "defaultSection": "center",
     "allowMultiple": false
   }
 }

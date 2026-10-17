@@ -43,6 +43,7 @@ class PluginInstall(unittest.TestCase):
             self.assertEqual(len(list((root / "config/omarchy/plugins").glob("*/manifest.json"))), 1)
             self.assertIn("plugin validate", log.read_text())
             self.assertIn("plugin enable on-air.patchbay", log.read_text())
+            self.assertIn("bar move on-air.patchbay --after omarchy.clock", log.read_text())
             self.assertNotEqual(run("--unknown").returncode, 0)
 
 
