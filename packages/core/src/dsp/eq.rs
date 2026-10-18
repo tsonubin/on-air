@@ -52,22 +52,25 @@ fn process_one(coeffs: &BiquadCoeffs, state: &mut BiquadState, x0: f32) -> f32 {
     y0
 }
 
+/// Five peaking bands over interleaved PCM. Coefficients are shared; each
+/// channel keeps its own filter state so channels never bleed into each
+/// other.
 pub struct GraphicEq {
     sample_rate_hz: f32,
     gains_db: [f32; 5],
     coeffs: [BiquadCoeffs; 5],
-    state: [BiquadState; 5],
+    state: Vec<[BiquadState; 5]>,
 }
 
 impl GraphicEq {
-    pub fn new(sample_rate_hz: f32) -> Self {
+    pub fn new(sample_rate_hz: f32, channels: usize) -> Self {
         let gains_db = [0.0; 5];
         let coeffs = Self::compute_coeffs(sample_rate_hz, &gains_db);
         GraphicEq {
             sample_rate_hz,
             gains_db,
             coeffs,
-            state: [BiquadState::default(); 5],
+            state: vec![[BiquadState::default(); 5]; channels.max(1)],
         }
     }
 
@@ -99,16 +102,20 @@ impl GraphicEq {
         self.gains_db
     }
 
+    /// `samples` is interleaved, one sample per channel per frame.
     pub fn process(&mut self, samples: &mut [f32]) {
         if self.gains_db == [0.0; 5] {
             return;
         }
-        for sample in samples.iter_mut() {
-            let mut x = *sample;
-            for band in 0..5 {
-                x = process_one(&self.coeffs[band], &mut self.state[band], x);
+        let channels = self.state.len();
+        for frame in samples.chunks_exact_mut(channels) {
+            for (sample, state) in frame.iter_mut().zip(self.state.iter_mut()) {
+                let mut x = *sample;
+                for (coeffs, band) in self.coeffs.iter().zip(state.iter_mut()) {
+                    x = process_one(coeffs, band, x);
+                }
+                *sample = x;
             }
-            *sample = x;
         }
     }
 }

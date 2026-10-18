@@ -28,7 +28,7 @@ A compact disc of CDDA tracks in an attached optical drive. Inserting one takes 
 
 ## Pipeline PCM
 
-Processed mono L16 at the input/pipeline rate, published on an in-process bus. Senders subscribe; the bus is not a public LAN stream.
+Processed interleaved stereo (left, right) L16 at the input/pipeline rate, published on an in-process bus. Senders subscribe; the bus is not a public LAN stream.
 
 ## Sonos radio
 

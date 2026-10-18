@@ -92,7 +92,7 @@ pub struct CoreState {
     pub(crate) cd: CdDeck,
 
     // Buses.
-    /// Pipeline PCM: processed mono L16 at the input rate.
+    /// Pipeline PCM: processed interleaved stereo L16 at the input rate.
     pub audio_tx: broadcast::Sender<Bytes>,
     pub ws_tx: broadcast::Sender<WsEvent>,
 
@@ -170,8 +170,8 @@ pub fn service_transition(current: bool, requested: bool) -> ServiceTransition {
 }
 
 pub const TARGET_SAMPLE_RATE_DEFAULT_HZ: u32 = 44100;
-// Network speakers buffer and read live radio streams in bursts. At 1024 mono
-// frames per chunk this retains roughly 12 seconds / 1 MiB at 44.1 kHz, enough
+// Network speakers buffer and read live radio streams in bursts. At 1024 stereo
+// frames per chunk this retains roughly 12 seconds / 2 MiB at 44.1 kHz, enough
 // to absorb Sonos read pauses without making the audio path unbounded.
 const AUDIO_BROADCAST_CAPACITY: usize = 512;
 

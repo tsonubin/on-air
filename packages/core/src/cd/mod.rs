@@ -61,18 +61,12 @@ pub fn ms_to_sectors(ms: u64) -> u32 {
     ((ms * u64::from(SECTORS_PER_SECOND)) / 1000) as u32
 }
 
-/// Interleaved CDDA stereo i16 LE → mono f32.
-pub fn downmix_sector(sector: &[u8]) -> Vec<f32> {
-    let usable = sector.len() - (sector.len() % 4);
-    let (frames, _) = sector[..usable].as_chunks::<4>();
-    frames
-        .iter()
-        .map(|frame| {
-            let left = i16::from_le_bytes([frame[0], frame[1]]) as f32 / i16::MAX as f32;
-            let right = i16::from_le_bytes([frame[2], frame[3]]) as f32 / i16::MAX as f32;
-            (left + right) * 0.5
-        })
-        .collect()
+/// Interleaved CDDA stereo i16 LE → interleaved stereo f32. A trailing
+/// partial frame is dropped.
+pub fn sector_to_stereo(sector: &[u8]) -> Vec<f32> {
+    let frame_bytes = BYTES_PER_SECTOR / STEREO_FRAMES_PER_SECTOR;
+    let usable = sector.len() - sector.len() % frame_bytes;
+    crate::dsp::bridge::l16_le_to_f32(&sector[..usable])
 }
 
 pub trait CdMedium: Send + Sync {
@@ -492,10 +486,12 @@ fn playback_loop(weak: Weak<CdInner>) {
                     let attached = inner.producer.lock().as_mut().is_some();
                     if attached {
                         if let Some(producer) = inner.producer.lock().as_mut() {
-                            use ringbuf::traits::Producer;
                             for chunk in bytes.chunks(BYTES_PER_SECTOR) {
-                                let mono = downmix_sector(chunk);
-                                let _ = producer.push_slice(&mono);
+                                crate::pipeline::push_frames(
+                                    producer,
+                                    &sector_to_stereo(chunk),
+                                    crate::dsp::PIPELINE_CHANNELS,
+                                );
                             }
                         }
                         *inner.sector_in_track.lock() = sector + read_sectors;
@@ -535,15 +531,14 @@ mod tests {
     }
 
     #[test]
-    fn downmix_averages_left_and_right() {
-        let mut sector = vec![0u8; 8];
-        sector[0..2].copy_from_slice(&i16::MAX.to_le_bytes());
-        sector[2..4].copy_from_slice(&0i16.to_le_bytes());
-        sector[4..6].copy_from_slice(&0i16.to_le_bytes());
-        sector[6..8].copy_from_slice(&(-i16::MAX).to_le_bytes());
-        let mono = downmix_sector(&sector);
-        assert!((mono[0] - 0.5).abs() < 0.01);
-        assert!((mono[1] + 0.5).abs() < 0.01);
+    fn sector_to_stereo_keeps_left_and_right() {
+        let mut sector = Vec::new();
+        sector.extend_from_slice(&16_384i16.to_le_bytes());
+        sector.extend_from_slice(&(-16_384i16).to_le_bytes());
+        sector.extend_from_slice(&[0x01, 0x02]); // half a frame: dropped
+        let stereo = sector_to_stereo(&sector);
+        assert_eq!(stereo.len(), 2);
+        assert!((stereo[0] - 0.5).abs() < 0.01 && (stereo[1] + 0.5).abs() < 0.01);
     }
 
     #[test]

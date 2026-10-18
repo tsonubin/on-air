@@ -1,9 +1,70 @@
+use super::push_frames;
+use crate::dsp::PIPELINE_CHANNELS;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{
     Device, FromSample, Host, InputCallbackInfo, Sample, SampleFormat, SizedSample, Stream,
-    StreamConfig, I24, U24,
+    StreamConfig, SupportedStreamConfig, SupportedStreamConfigRange, I24, U24,
 };
-use ringbuf::{traits::Producer, HeapProd};
+use ringbuf::HeapProd;
+use std::io::Read;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Bytes in one interleaved f32 LE pipeline frame, as `parec` writes it.
+const F32_FRAME_BYTES: usize = 4 * PIPELINE_CHANNELS;
+
+/// The left and right of one captured frame: a mono frame feeds both sides,
+/// and a surround frame keeps its front pair. Panics on an empty frame.
+pub fn stereo_frame<T: Copy>(frame: &[T]) -> [T; 2] {
+    let left = frame[0];
+    let right = *frame.get(1).unwrap_or(&left);
+    [left, right]
+}
+
+/// The capture config at `rate_hz`, preferring stereo so the OS does any
+/// surround downmix, then the device's default sample format.
+pub fn pick_capture_config(
+    configs: impl IntoIterator<Item = SupportedStreamConfigRange>,
+    default_format: SampleFormat,
+    rate_hz: u32,
+) -> Option<SupportedStreamConfig> {
+    let stereo = PIPELINE_CHANNELS as u16;
+    configs
+        .into_iter()
+        .filter(|config| rate_hz >= config.min_sample_rate() && rate_hz <= config.max_sample_rate())
+        .min_by_key(|config| {
+            (
+                config.channels() != stereo,
+                config.sample_format() != default_format,
+                config.channels().abs_diff(stereo),
+            )
+        })
+        .map(|config| config.with_sample_rate(rate_hz))
+}
+
+/// Reads interleaved f32 LE stereo into `producer` until EOF, an error or
+/// `stop`. Pipe reads need not end on a frame boundary, so up to one frame
+/// less a byte is carried into the next read.
+pub fn pump_f32le_stereo(mut reader: impl Read, producer: &mut HeapProd<f32>, stop: &AtomicBool) {
+    let mut buf = [0u8; 4096 + F32_FRAME_BYTES - 1];
+    let mut samples = [0.0f32; 4096 / 4];
+    let mut pending = 0;
+    while !stop.load(Ordering::Relaxed) {
+        match reader.read(&mut buf[pending..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                let total = pending + n;
+                let complete = total - total % F32_FRAME_BYTES;
+                let (raw, _) = buf[..complete].as_chunks::<4>();
+                for (sample, bytes) in samples.iter_mut().zip(raw) {
+                    *sample = f32::from_le_bytes(*bytes);
+                }
+                push_frames(producer, &samples[..raw.len()], PIPELINE_CHANNELS);
+                pending = total - complete;
+                buf.copy_within(complete..total, 0);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InputDeviceInfo {
@@ -82,9 +143,8 @@ pub fn is_pulse_monitor_name(name: &str) -> bool {
 /// capture through `parec`. Other platforms never spawn these binaries.
 #[cfg(target_os = "linux")]
 mod pulse {
-    use super::parse_pactl_monitor_sources;
-    use ringbuf::{traits::Producer, HeapProd};
-    use std::io::Read;
+    use super::{parse_pactl_monitor_sources, pump_f32le_stereo};
+    use ringbuf::HeapProd;
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -136,7 +196,7 @@ mod pulse {
                 "--format=float32le",
                 "--rate",
                 &rate.to_string(),
-                "--channels=1",
+                "--channels=2",
                 &format!(
                     "--latency-msec={}",
                     if buffer_ms == 0 { 50 } else { buffer_ms }
@@ -146,34 +206,15 @@ mod pulse {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|e| format!("parec: {e}"))?;
-        let mut stdout = child.stdout.take().ok_or_else(|| {
+        let stdout = child.stdout.take().ok_or_else(|| {
             let _ = child.kill();
             let _ = child.wait();
             "parec stdout missing".to_string()
         })?;
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = stop.clone();
-        let reader = std::thread::spawn(move || {
-            // Keep up to three bytes between reads because pipe reads are not
-            // guaranteed to end on an f32 sample boundary.
-            let mut buf = [0u8; 4099];
-            let mut pending = 0;
-            while !stop_thread.load(Ordering::Relaxed) {
-                match stdout.read(&mut buf[pending..]) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let total = pending + n;
-                        let complete_bytes = total - (total % 4);
-                        let (samples, _) = buf[..complete_bytes].as_chunks::<4>();
-                        producer
-                            .push_iter(samples.iter().map(|sample| f32::from_le_bytes(*sample)));
-                        pending = total - complete_bytes;
-                        buf.copy_within(complete_bytes..total, 0);
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
+        let reader =
+            std::thread::spawn(move || pump_f32le_stereo(stdout, &mut producer, &stop_thread));
         Ok((
             PulseMonitorCapture {
                 stop,
@@ -247,7 +288,7 @@ pub fn supported_input_rate_ranges(device: &Device) -> Vec<(u32, u32)> {
 }
 
 /// Opens an input config on `device` and starts pushing captured samples
-/// into `producer`, downmixing to mono. `preferred_rate_hz` is tried first
+/// into `producer` as interleaved stereo frames. `preferred_rate_hz` is tried first
 /// so the user-selected input rate can be the native capture rate (no extra
 /// resample). Returns the running `Stream` (dropping it stops capture; cpal's
 /// Drop joins its worker thread, so drop it via `spawn_blocking` from async
@@ -269,19 +310,8 @@ pub fn start_capture_buffered_at(
     let default = device.default_input_config()?;
     let supported = preferred_rate_hz
         .and_then(|rate| {
-            device.supported_input_configs().ok().and_then(|configs| {
-                configs
-                    .filter(|config| {
-                        rate >= config.min_sample_rate() && rate <= config.max_sample_rate()
-                    })
-                    .min_by_key(|config| {
-                        (
-                            config.sample_format() != default.sample_format(),
-                            config.channels().abs_diff(default.channels()),
-                        )
-                    })
-                    .map(|config| config.with_sample_rate(rate))
-            })
+            let configs = device.supported_input_configs().ok()?;
+            pick_capture_config(configs, default.sample_format(), rate)
         })
         .unwrap_or(default);
     let sample_format = supported.sample_format();
@@ -349,15 +379,9 @@ where
     device.build_input_stream(
         config,
         move |data: &[T], _: &InputCallbackInfo| {
-            if channels <= 1 {
-                producer.push_iter(data.iter().copied().map(f32::from_sample));
-                return;
-            }
-
             for frame in data.chunks_exact(channels) {
-                let sample =
-                    frame.iter().copied().map(f32::from_sample).sum::<f32>() / channels as f32;
-                if producer.try_push(sample).is_err() {
+                let stereo = stereo_frame(frame).map(f32::from_sample);
+                if push_frames(&mut producer, &stereo, PIPELINE_CHANNELS) == 0 {
                     break;
                 }
             }
