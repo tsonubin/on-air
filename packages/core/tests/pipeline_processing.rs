@@ -1,11 +1,19 @@
 use bytes::Bytes;
-use on_air_core::dsp::bridge::l16_le_to_f32;
+use on_air_core::dsp::bridge::l16_le_to_f32_into;
+use on_air_core::dsp::DspQuality;
 use on_air_core::pipeline::{new_ring_buffer, push_frames, spawn_processing_task};
 use parking_lot::Mutex;
 use ringbuf::traits::Producer;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
+
+/// Decode pipeline L16 to f32 (test-side, not a hot path).
+fn decode(pcm: &[u8]) -> Vec<f32> {
+    let mut out = Vec::new();
+    l16_le_to_f32_into(pcm, &mut out);
+    out
+}
 
 #[tokio::test]
 async fn processes_synthetic_frames_into_broadcast_pcm() {
@@ -14,7 +22,15 @@ async fn processes_synthetic_frames_into_broadcast_pcm() {
     let (ws_tx, _) = broadcast::channel::<on_air_core::api::ws::WsEvent>(8);
     let eq_gains_db = Arc::new(Mutex::new([0.0; 5]));
 
-    let handle = spawn_processing_task(consumer, 44100, 44100, eq_gains_db, audio_tx, ws_tx);
+    let handle = spawn_processing_task(
+        consumer,
+        44100,
+        44100,
+        eq_gains_db,
+        audio_tx,
+        ws_tx,
+        DspQuality::default(),
+    );
 
     // push more than one resampler chunk's worth of a known sine wave
     let samples: Vec<f32> = (0..1024 * 2)
@@ -69,7 +85,15 @@ async fn through_the_pipeline(
     let (audio_tx, mut audio_rx) = broadcast::channel(64);
     let (ws_tx, _) = broadcast::channel::<on_air_core::api::ws::WsEvent>(8);
     let gains = Arc::new(Mutex::new(gains_db));
-    let handle = spawn_processing_task(consumer, input_hz, output_hz, gains, audio_tx, ws_tx);
+    let handle = spawn_processing_task(
+        consumer,
+        input_hz,
+        output_hz,
+        gains,
+        audio_tx,
+        ws_tx,
+        DspQuality::default(),
+    );
 
     let mut pushed = 0;
     while pushed < frames.len() {
@@ -92,7 +116,7 @@ async fn through_the_pipeline(
     tokio::task::spawn_blocking(move || handle.stop())
         .await
         .unwrap();
-    l16_le_to_f32(&pcm)
+    decode(&pcm)
 }
 
 #[tokio::test]

@@ -6,6 +6,16 @@ use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 
+#[cfg(test)]
+mod alloc_counting;
+
+/// The C7 allocation-guard tests measure real allocation behaviour, so the
+/// test build swaps in the counting allocator. Tests are unaffected beyond
+/// a per-allocation counter increment.
+#[cfg(test)]
+#[global_allocator]
+static ALLOCATOR: alloc_counting::CountingAllocator = alloc_counting::CountingAllocator;
+
 pub mod api;
 pub mod audio_benchmark;
 pub mod cd;
@@ -23,6 +33,7 @@ pub mod sender;
 pub mod session;
 pub mod settings;
 pub mod state;
+pub mod tuning;
 
 use state::CoreState;
 
@@ -62,7 +73,15 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/audio/benchmark",
             post(api::audio_performance::benchmark),
         )
+        .route(
+            "/api/audio/tuning",
+            get(api::audio_performance::tuning_status),
+        )
         .route("/api/audio/buffer", put(api::audio_performance::set_buffer))
+        .route(
+            "/api/audio/quality",
+            put(api::audio_performance::set_quality),
+        )
         .route("/stream/{nonce}/audio.wav", get(api::stream::stream_audio))
         .route("/api/cd", get(api::cd::get_cd))
         .route("/api/cd/control", post(api::cd::control_cd))
@@ -199,6 +218,12 @@ pub async fn serve_with_state_until(
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
         background.push(crate::firewall::spawn_watch(state.clone()));
     }
+    // Automatic first-use tuning: cheap to start and self-skipping (mock
+    // mode, or a machine that has already been checked). See `tuning.rs`.
+    state
+        .background
+        .lock()
+        .push(crate::tuning::spawn_first_run_watcher(state.clone()));
     state.spawn_saved_session_restore();
     let patchbay_state = state.clone();
     state.background.lock().push(tokio::spawn(async move {

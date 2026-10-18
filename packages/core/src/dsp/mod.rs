@@ -4,5 +4,8 @@ pub const PIPELINE_CHANNELS: usize = 2;
 
 pub mod bridge;
 pub mod eq;
+pub mod quality;
 pub mod rates;
 pub mod resample;
+
+pub use quality::DspQuality;

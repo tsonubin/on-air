@@ -105,6 +105,9 @@ pub struct CoreState {
 
     // Settings.
     pub(crate) eq_gains_db: Arc<StdMutex<[f32; 5]>>,
+    /// The DSP quality profile in effect: shared with the input wiring so
+    /// each capture's processing task builds its resampler with it.
+    pub(crate) dsp_quality: Arc<StdMutex<crate::dsp::DspQuality>>,
     pub(crate) target_sample_rate_hz: Arc<StdMutex<u32>>,
     pub(crate) output_sample_rate_hz: Arc<StdMutex<u32>>,
     output_volume: Arc<AtomicU8>,
@@ -159,6 +162,15 @@ pub enum ServiceTransition {
     Unchanged,
     TurnOn,
     TurnOff,
+}
+
+/// Why a settings apply could not happen right now.
+#[derive(Debug, thiserror::Error)]
+pub enum ApplyError {
+    #[error("the service is paused")]
+    Paused,
+    #[error("{0}")]
+    Failed(String),
 }
 
 pub fn service_transition(current: bool, requested: bool) -> ServiceTransition {
@@ -228,6 +240,7 @@ impl CoreState {
         let cd = CdDeck::new();
         cd.set_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
+        let dsp_quality = Arc::new(StdMutex::new(saved_settings.dsp_quality.unwrap_or_default()));
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
         let output_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz));
         let output = OutputSession::new(ws_tx.clone(), output_sample_rate_hz.clone());
@@ -239,6 +252,7 @@ impl CoreState {
             input_rate_hz: target_sample_rate_hz.clone(),
             cd: cd.clone(),
             capture_buffer_ms: capture_buffer_ms.clone(),
+            dsp_quality: dsp_quality.clone(),
         });
         CoreState {
             patchbay: Arc::new(crate::patchbay::Patchbay::new(None, false)),
@@ -257,6 +271,7 @@ impl CoreState {
             bluetooth: Arc::new(SystemBluetoothAdapter::from_host()),
             bluetooth_cache: Arc::new(Mutex::new(None)),
             eq_gains_db,
+            dsp_quality,
             target_sample_rate_hz,
             output_sample_rate_hz,
             output_volume: Arc::new(AtomicU8::new(saved_settings.volume)),
@@ -373,6 +388,7 @@ impl CoreState {
         child.settings_revision = Arc::new(AtomicU64::new(0));
         child.config_lock = Arc::new(Mutex::new(()));
         child.eq_gains_db = Arc::new(StdMutex::new([0.0; 5]));
+        child.dsp_quality = Arc::new(StdMutex::new(crate::dsp::DspQuality::default()));
         child.target_sample_rate_hz = Arc::new(StdMutex::new(44100));
         child.output_sample_rate_hz = Arc::new(StdMutex::new(44100));
         child.output_volume = Arc::new(AtomicU8::new(self.output_volume()));
@@ -390,6 +406,7 @@ impl CoreState {
             cd: child.cd.clone(),
             // Patchbay captures follow the user's capture buffer too.
             capture_buffer_ms: child.capture_buffer_ms.clone(),
+            dsp_quality: child.dsp_quality.clone(),
         });
         child.input.set_mock(self.mock);
         child
@@ -528,6 +545,133 @@ impl CoreState {
 
     pub(crate) fn remember_capture_buffer(&self, buffer_ms: u32) {
         self.update_saved_settings(|saved| saved.capture_buffer_ms = buffer_ms);
+    }
+
+    // ---- first-run tuning and DSP quality ------------------------------
+
+    /// The DSP quality profile in effect: the user's explicit choice, or
+    /// [`crate::dsp::DspQuality::default`] while they have not chosen one.
+    pub fn dsp_quality(&self) -> crate::dsp::DspQuality {
+        *self.dsp_quality.lock()
+    }
+
+    /// A snapshot of the saved settings for the status surfaces.
+    pub fn saved_settings(&self) -> SavedSettings {
+        self.saved_settings.lock().clone()
+    }
+
+    /// Whether automatic first-run tuning is still pending here (`None` in
+    /// [`SavedSettings::recommended_dsp_quality`]).
+    pub fn first_run_tuning_pending(&self) -> bool {
+        self.saved_settings.lock().recommended_dsp_quality.is_none()
+    }
+
+    /// Record that an audio check completed on this machine (the manual
+    /// button included): the first-run trigger flips to "tuned".
+    /// Non-destructive — no audio setting changes.
+    pub fn record_check_verdict(&self, quality: crate::dsp::DspQuality) {
+        self.update_saved_settings(|saved| saved.recommended_dsp_quality = Some(quality));
+    }
+
+    /// Apply and record the automatic first-run tuning verdict (see
+    /// [`crate::tuning`]): settings the user has chosen are never
+    /// overwritten, and the whole verdict is recorded in
+    /// [`SavedSettings::first_run_tuning`]. One capture restart makes the
+    /// applied settings take effect; if it fails, everything is restored
+    /// and nothing is recorded, so a later run retries.
+    pub(crate) async fn record_first_run_tuning(
+        &self,
+        outcome: &crate::audio_benchmark::BenchmarkOutcome,
+    ) -> Result<crate::tuning::AppliedTuning, ApplyError> {
+        let _configuration = self.config_lock.lock().await;
+        if !self.service_enabled.load(Ordering::Acquire) {
+            return Err(ApplyError::Paused);
+        }
+        let previous = self.saved_settings.lock().clone();
+        let mut applied = crate::tuning::AppliedTuning::default();
+        self.update_saved_settings(|saved| {
+            applied = crate::tuning::apply_verdict(
+                saved,
+                outcome.report.recommended_buffer_ms,
+                outcome.recommended_quality,
+                crate::tuning::now_unix_s(),
+            );
+        });
+        *self.dsp_quality.lock() = self.saved_settings.lock().dsp_quality.unwrap_or_default();
+        // The quality profile only shapes a resampler when the rates
+        // differ; no resampler, no restart for it.
+        let quality_needs_restart =
+            applied.quality && self.input_sample_rate_hz() != self.output_sample_rate_hz();
+        if applied.buffer || quality_needs_restart {
+            if let Err(error) = self.input().restart().await {
+                self.update_saved_settings(|saved| *saved = previous.clone());
+                *self.dsp_quality.lock() = previous.dsp_quality.unwrap_or_default();
+                return Err(ApplyError::Failed(format!(
+                    "could not apply the first-run tuning: {error}"
+                )));
+            }
+        }
+        Ok(applied)
+    }
+
+    /// Set the capture buffer and restart capture so it takes effect. The
+    /// shared path behind `PUT /api/audio/buffer` and the first-run tuning.
+    pub(crate) async fn apply_capture_buffer(&self, buffer_ms: u32) -> Result<(), ApplyError> {
+        let _configuration = self.config_lock.lock().await;
+        if !self.service_enabled.load(Ordering::Acquire) {
+            return Err(ApplyError::Paused);
+        }
+        let previous = self.capture_buffer_ms.swap(buffer_ms, Ordering::AcqRel);
+        if previous == buffer_ms {
+            return Ok(());
+        }
+        if let Err(error) = self.input().restart().await {
+            self.capture_buffer_ms.store(previous, Ordering::Release);
+            let restore = self
+                .input()
+                .restart()
+                .await
+                .err()
+                .map(|e| format!("; restoring capture also failed: {e}"))
+                .unwrap_or_default();
+            return Err(ApplyError::Failed(format!(
+                "could not apply capture buffer: {error}{restore}"
+            )));
+        }
+        self.remember_capture_buffer(buffer_ms);
+        Ok(())
+    }
+
+    /// Record the user's explicit DSP quality choice and restart capture
+    /// when the effective profile changes, so the new resampler takes
+    /// effect. The path behind `PUT /api/audio/quality`; a choice always
+    /// wins over the first-run tuning's recommendation.
+    pub(crate) async fn apply_dsp_quality(
+        &self,
+        quality: crate::dsp::DspQuality,
+    ) -> Result<(), ApplyError> {
+        let _configuration = self.config_lock.lock().await;
+        if !self.service_enabled.load(Ordering::Acquire) {
+            return Err(ApplyError::Paused);
+        }
+        let previous = self.saved_settings.lock().dsp_quality;
+        if previous == Some(quality) {
+            return Ok(());
+        }
+        let effective_before = previous.unwrap_or_default();
+        self.update_saved_settings(|saved| saved.dsp_quality = Some(quality));
+        *self.dsp_quality.lock() = quality;
+        let resampler_live = self.input_sample_rate_hz() != self.output_sample_rate_hz();
+        if effective_before != quality && resampler_live {
+            if let Err(error) = self.input().restart().await {
+                self.update_saved_settings(|saved| saved.dsp_quality = previous);
+                *self.dsp_quality.lock() = effective_before;
+                return Err(ApplyError::Failed(format!(
+                    "could not apply DSP quality: {error}"
+                )));
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn remember_eq(&self, gains: [f32; 5]) {
@@ -1049,5 +1193,103 @@ mod tests {
             Some(live.device_name.as_str())
         );
         state.shutdown().await;
+    }
+
+    // ---- first-run tuning ----------------------------------------------
+
+    fn outcome(
+        recommended_buffer_ms: u32,
+        recommended_quality: crate::dsp::DspQuality,
+    ) -> crate::audio_benchmark::BenchmarkOutcome {
+        crate::audio_benchmark::BenchmarkOutcome {
+            report: on_air_api::AudioBenchmark {
+                input_hz: 44_100,
+                output_hz: 48_000,
+                duration_ms: 1,
+                pipeline_p95_ms: 1.0,
+                scheduler_p95_ms: 0.0,
+                worst_case_ms: 1.0,
+                recommended_buffer_ms,
+                within_buffer_budget: true,
+            },
+            profile_costs_ms: [0.1, 0.2, 0.3],
+            recommended_quality,
+        }
+    }
+
+    #[tokio::test]
+    async fn first_run_tuning_applies_the_verdict_to_untouched_settings_and_records_it() {
+        use crate::tuning::AppliedTuning;
+        let state = CoreState::new_mock().await;
+        state.input().activate("Mock Monitor").await.unwrap();
+        let applied = state
+            .record_first_run_tuning(&outcome(100, crate::dsp::DspQuality::Balanced))
+            .await
+            .unwrap();
+        assert_eq!(
+            applied,
+            AppliedTuning {
+                buffer: true,
+                quality: true
+            }
+        );
+        let saved = state.saved_settings();
+        assert_eq!(saved.capture_buffer_ms, 100);
+        assert_eq!(saved.dsp_quality, Some(crate::dsp::DspQuality::Balanced));
+        assert_eq!(
+            saved.recommended_dsp_quality,
+            Some(crate::dsp::DspQuality::Balanced)
+        );
+        let record = saved.first_run_tuning.expect("tuning is recorded");
+        assert!(record.applied_buffer && record.applied_quality);
+        assert_eq!(record.recommended_buffer_ms, 100);
+        assert!(!state.first_run_tuning_pending());
+        assert_eq!(state.dsp_quality(), crate::dsp::DspQuality::Balanced);
+    }
+
+    #[tokio::test]
+    async fn first_run_tuning_never_overwrites_a_users_choices() {
+        use crate::tuning::AppliedTuning;
+        let state = CoreState::new_mock().await;
+        state.input().activate("Mock Monitor").await.unwrap();
+        state.apply_capture_buffer(200).await.unwrap();
+        state
+            .apply_dsp_quality(crate::dsp::DspQuality::High)
+            .await
+            .unwrap();
+        let applied = state
+            .record_first_run_tuning(&outcome(100, crate::dsp::DspQuality::Balanced))
+            .await
+            .unwrap();
+        assert_eq!(applied, AppliedTuning::default());
+        let saved = state.saved_settings();
+        assert_eq!(saved.capture_buffer_ms, 200);
+        assert_eq!(saved.dsp_quality, Some(crate::dsp::DspQuality::High));
+        assert_eq!(
+            saved.recommended_dsp_quality,
+            Some(crate::dsp::DspQuality::Balanced)
+        );
+        let record = saved.first_run_tuning.expect("tuning is recorded");
+        assert!(!record.applied_buffer && !record.applied_quality);
+    }
+
+    #[tokio::test]
+    async fn a_tuning_apply_that_cannot_take_effect_records_nothing_and_retries_later() {
+        let mut state = CoreState::new_mock().await;
+        state.input().activate("Mock Monitor").await.unwrap();
+        // Hardware mode without that device: the capture restart fails and
+        // the whole apply must roll back.
+        state.set_mock(false);
+        let error = state
+            .record_first_run_tuning(&outcome(100, crate::dsp::DspQuality::Balanced))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ApplyError::Failed(_)), "{error}");
+        let saved = state.saved_settings();
+        assert_eq!(saved.capture_buffer_ms, 0, "rolled back");
+        assert_eq!(saved.dsp_quality, None);
+        assert_eq!(saved.recommended_dsp_quality, None);
+        assert_eq!(saved.first_run_tuning, None);
+        assert!(state.first_run_tuning_pending(), "a later run retries");
     }
 }

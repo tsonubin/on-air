@@ -89,7 +89,13 @@ pub async fn stream_audio(
     let output_hz = *state.output_sample_rate_hz.lock();
     let header = wav_header(output_hz, PIPELINE_CHANNELS as u16);
     let pcm = BroadcastStream::new(rx).filter_map({
-        let mut bridge = RateBridge::new(pipeline_hz, output_hz, PIPELINE_CHANNELS);
+        let mut bridge = RateBridge::new(
+            pipeline_hz,
+            output_hz,
+            PIPELINE_CHANNELS,
+            state.dsp_quality(),
+        );
+        let mut resampled = Vec::new();
         let _client_guard = client_guard;
         move |item| {
             let _ = &_client_guard;
@@ -99,11 +105,11 @@ pub async fn stream_audio(
             if pipeline_hz == output_hz {
                 return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
             }
-            let resampled = bridge.process_l16_to_l16(&chunk);
+            bridge.process_l16_to_l16_into(&chunk, &mut resampled);
             if resampled.is_empty() {
                 return None;
             }
-            Some(Ok(Bytes::from(resampled)))
+            Some(Ok(Bytes::copy_from_slice(&resampled)))
         }
     });
     let silence = silence_chunk(output_hz);

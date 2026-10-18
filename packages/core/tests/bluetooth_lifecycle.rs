@@ -25,6 +25,7 @@ fn config(volume: u8) -> BluetoothPlaybackConfig {
         pipeline_hz: 44_100,
         output_hz: 44_100,
         volume,
+        dsp_quality: on_air_core::dsp::DspQuality::default(),
     }
 }
 struct Adapter {
@@ -113,6 +114,7 @@ impl PcmOutput for Output {
         endpoint: &BluetoothEndpoint,
         pipeline_hz: u32,
         preferred_hz: u32,
+        _quality: on_air_core::dsp::DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
         assert_eq!(
             endpoint,
@@ -473,6 +475,7 @@ fn native_bluetooth_name_does_not_select_pacat() {
         &BluetoothEndpoint::Native("Bluetooth nonexistent lifecycle test endpoint".into()),
         44_100,
         44_100,
+        on_air_core::dsp::DspQuality::default(),
     );
     let error = match result {
         Ok(_) => panic!("nonexistent endpoint opened"),
@@ -499,8 +502,9 @@ impl PcmOutput for GatedOutput {
         endpoint: &BluetoothEndpoint,
         pipeline: u32,
         preferred: u32,
+        quality: on_air_core::dsp::DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
-        let opened = self.output.open(endpoint, pipeline, preferred)?;
+        let opened = self.output.open(endpoint, pipeline, preferred, quality)?;
         self.entered.notify_one();
         let mut released = self.released.lock().unwrap();
         while !*released {

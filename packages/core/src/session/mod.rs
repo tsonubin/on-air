@@ -292,6 +292,7 @@ async fn build_local(state: &CoreState, device_id: &str) -> Result<Built, Activa
         pipeline_hz: *state.target_sample_rate_hz.lock(),
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        dsp_quality: state.dsp_quality(),
     };
     Ok(Built {
         sender: Box::new(
@@ -333,6 +334,7 @@ async fn build_bluetooth(state: &CoreState, device_id: &str) -> Result<Built, Ac
         pipeline_hz: *state.target_sample_rate_hz.lock(),
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        dsp_quality: state.dsp_quality(),
     };
     Ok(Built {
         sender: Box::new(BluetoothSender::new(

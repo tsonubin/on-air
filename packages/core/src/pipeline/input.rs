@@ -125,6 +125,9 @@ pub struct InputWiring {
     pub input_rate_hz: Arc<SyncMutex<u32>>,
     pub cd: CdDeck,
     pub capture_buffer_ms: Arc<std::sync::atomic::AtomicU32>,
+    /// The DSP quality profile; each capture's processing task reads it
+    /// when the capture starts, so a settings change applies on restart.
+    pub dsp_quality: Arc<SyncMutex<crate::dsp::DspQuality>>,
 }
 
 struct Inner {
@@ -421,6 +424,7 @@ impl InputSession {
                 eq_gains_db: wiring.eq_gains_db.clone(),
                 audio_tx: wiring.audio_tx.clone(),
                 ws_tx: wiring.ws_tx.clone(),
+                dsp_quality: *wiring.dsp_quality.lock(),
             },
             self.fault_stage(),
             Some(self.death_hook(capture_id)),
@@ -589,6 +593,7 @@ mod tests {
             input_rate_hz: Arc::new(SyncMutex::new(44_100)),
             cd: cd.clone(),
             capture_buffer_ms: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            dsp_quality: Arc::new(SyncMutex::new(crate::dsp::DspQuality::default())),
         });
         (session, ws_rx, cd)
     }

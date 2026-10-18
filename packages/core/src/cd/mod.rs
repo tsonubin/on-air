@@ -61,12 +61,13 @@ pub fn ms_to_sectors(ms: u64) -> u32 {
     ((ms * u64::from(SECTORS_PER_SECOND)) / 1000) as u32
 }
 
-/// Interleaved CDDA stereo i16 LE → interleaved stereo f32. A trailing
-/// partial frame is dropped.
-pub fn sector_to_stereo(sector: &[u8]) -> Vec<f32> {
+/// Interleaved CDDA stereo i16 LE → interleaved stereo f32, written to
+/// `out` (cleared first). A trailing partial frame is dropped. `out` is
+/// caller-owned scratch so the decode allocates nothing per sector.
+pub fn sector_to_stereo_into(sector: &[u8], out: &mut Vec<f32>) {
     let frame_bytes = BYTES_PER_SECTOR / STEREO_FRAMES_PER_SECTOR;
     let usable = sector.len() - sector.len() % frame_bytes;
-    crate::dsp::bridge::l16_le_to_f32(&sector[..usable])
+    crate::dsp::bridge::l16_le_to_f32_into(&sector[..usable], out);
 }
 
 pub trait CdMedium: Send + Sync {
@@ -439,6 +440,8 @@ impl CdInner {
 }
 
 fn playback_loop(weak: Weak<CdInner>) {
+    // Sector decode scratch, reused across reads.
+    let mut decoded = Vec::new();
     while let Some(inner) = weak.upgrade() {
         let playing = inner.playing.load(Ordering::Acquire);
         let medium = inner.medium.lock().clone();
@@ -487,9 +490,10 @@ fn playback_loop(weak: Weak<CdInner>) {
                     if attached {
                         if let Some(producer) = inner.producer.lock().as_mut() {
                             for chunk in bytes.chunks(BYTES_PER_SECTOR) {
+                                sector_to_stereo_into(chunk, &mut decoded);
                                 crate::pipeline::push_frames(
                                     producer,
-                                    &sector_to_stereo(chunk),
+                                    &decoded,
                                     crate::dsp::PIPELINE_CHANNELS,
                                 );
                             }
@@ -536,7 +540,8 @@ mod tests {
         sector.extend_from_slice(&16_384i16.to_le_bytes());
         sector.extend_from_slice(&(-16_384i16).to_le_bytes());
         sector.extend_from_slice(&[0x01, 0x02]); // half a frame: dropped
-        let stereo = sector_to_stereo(&sector);
+        let mut stereo = Vec::new();
+        sector_to_stereo_into(&sector, &mut stereo);
         assert_eq!(stereo.len(), 2);
         assert!((stereo[0] - 0.5).abs() < 0.01 && (stereo[1] + 0.5).abs() < 0.01);
     }

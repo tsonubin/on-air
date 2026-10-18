@@ -103,6 +103,7 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
                 pipeline_hz: 44_100,
                 output_hz: 44_100,
                 volume: 100,
+                dsp_quality: on_air_core::dsp::DspQuality::default(),
             },
         )))
         .await

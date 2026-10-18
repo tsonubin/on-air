@@ -1,4 +1,4 @@
-use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates};
+use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates, DspQuality};
 use crate::session::ActiveOutput;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,37 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(200);
+
+/// What the automatic first-use tuning measured and did on this machine
+/// (`settings.json`, `first_run_tuning`). Persisted so the user can see
+/// that tuning ran and what it chose, and override it later.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FirstRunTuning {
+    /// Unix seconds when the automatic check ran.
+    pub ran_at_unix_s: u64,
+    /// The check's capture-buffer verdict, in milliseconds. This is what
+    /// was applied if [`FirstRunTuning::applied_buffer`].
+    pub recommended_buffer_ms: u32,
+    /// Whether the buffer verdict was applied: it is applied only while
+    /// `capture_buffer_ms` is untouched (`0`).
+    pub applied_buffer: bool,
+    /// Whether the quality verdict was applied: it is applied only while
+    /// `dsp_quality` is untouched (`None`). The verdict itself is
+    /// `recommended_dsp_quality`.
+    pub applied_quality: bool,
+}
+
+/// A stored DSP profile the wire enum no longer knows reads as "unset":
+/// the enum's equivalent of the [`SavedSettings::normalized`] membership
+/// check on `capture_buffer_ms`, so a settings file written by a version
+/// with other profiles still loads.
+fn de_opt_quality<'de, D>(deserializer: D) -> Result<Option<DspQuality>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(raw).ok().flatten())
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -21,6 +52,20 @@ pub struct SavedSettings {
     pub output_sample_rate_hz: u32,
     pub service_enabled: bool,
     pub capture_buffer_ms: u32,
+    /// The user's explicit DSP quality choice (`PUT /api/audio/quality`).
+    /// `None` = never chosen: the default profile is in effect until the
+    /// automatic first-run tuning applies its recommendation. A user's
+    /// choice is never overwritten.
+    #[serde(deserialize_with = "de_opt_quality")]
+    pub dsp_quality: Option<DspQuality>,
+    /// The most recent audio check's quality verdict (automatic or the
+    /// manual button). `None` = no check has ever completed on this
+    /// machine — the trigger for automatic first-run tuning.
+    #[serde(deserialize_with = "de_opt_quality")]
+    pub recommended_dsp_quality: Option<DspQuality>,
+    /// What the automatic first-use tuning measured and applied; `None`
+    /// until it has completed (or when it never applied anything).
+    pub first_run_tuning: Option<FirstRunTuning>,
 }
 
 impl Default for SavedSettings {
@@ -34,6 +79,9 @@ impl Default for SavedSettings {
             output_sample_rate_hz: crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ,
             service_enabled: true,
             capture_buffer_ms: 0,
+            dsp_quality: None,
+            recommended_dsp_quality: None,
+            first_run_tuning: None,
         }
     }
 }
@@ -215,9 +263,50 @@ mod tests {
             output_sample_rate_hz: 44_100,
             service_enabled: false,
             capture_buffer_ms: 0,
+            dsp_quality: Some(DspQuality::High),
+            recommended_dsp_quality: Some(DspQuality::Balanced),
+            first_run_tuning: Some(FirstRunTuning {
+                ran_at_unix_s: 1_760_000_000,
+                recommended_buffer_ms: 100,
+                applied_buffer: true,
+                applied_quality: false,
+            }),
         };
         write_file(&path, &expected).unwrap();
         assert_eq!(load_file(&path).unwrap(), expected);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_settings_file_from_an_older_version_loads_with_tuning_pending() {
+        let path = test_path("older-version");
+        // No `dsp_quality` / `recommended_dsp_quality` / `first_run_tuning`
+        // keys — a pre-tuning settings file.
+        fs::write(
+            &path,
+            br#"{"active_input":"System monitor","volume":40,"capture_buffer_ms":50}"#,
+        )
+        .unwrap();
+        let loaded = load_file(&path).unwrap();
+        assert_eq!(loaded.volume, 40);
+        assert_eq!(loaded.capture_buffer_ms, 50);
+        assert_eq!(loaded.dsp_quality, None);
+        assert_eq!(loaded.recommended_dsp_quality, None);
+        assert_eq!(loaded.first_run_tuning, None);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_profile_the_wire_enum_no_longer_knows_reads_as_unset() {
+        let path = test_path("unknown-profile");
+        fs::write(
+            &path,
+            br#"{"dsp_quality":"turbo","recommended_dsp_quality":"balanced"}"#,
+        )
+        .unwrap();
+        let loaded = load_file(&path).unwrap();
+        assert_eq!(loaded.dsp_quality, None);
+        assert_eq!(loaded.recommended_dsp_quality, Some(DspQuality::Balanced));
         let _ = fs::remove_file(path);
     }
 
