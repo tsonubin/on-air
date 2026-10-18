@@ -1,8 +1,8 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, AudioQualityResponse, CdStatus, DspQuality, MeterLevel,
-    OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
-    SyncGroupView, SyncState,
+    ActiveOutput, ActiveOutputView, AudioQualityResponse, CdStatus, ChannelMode, DspQuality,
+    MeterLevel, OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide,
+    StatusResponse, SyncGroupView, SyncState,
 };
 use crate::model::DestState;
 
@@ -15,6 +15,8 @@ fn output(id: &str, name: &str, transport: &str, needs_pair: bool, paired: bool)
         member_count: 1,
         needs_pair,
         paired,
+        channel_mode: None,
+        channels: None,
     }
 }
 
@@ -2596,4 +2598,95 @@ fn a_placeholder_row_cannot_be_activated() {
     assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
     assert_eq!(m.activation, None);
     assert_eq!(m.modal, Modal::None);
+}
+
+/// Roadmap A4 in the TUI: `c` cycles auto → stereo → mono → auto for the
+/// output under the cursor, and a refusal from the core (stereo on a mono
+/// device) shows its explanation without changing the saved mode.
+#[test]
+fn channel_mode_cycles_per_selected_output_and_a_refusal_keeps_the_saved_mode() {
+    let mut m = model_with_mock_snapshot();
+    let sonos = m
+        .dest_rows()
+        .iter()
+        .position(|row| matches!(row, DestRow::Entry(e) if e.id == "uuid:mock-sonos"))
+        .unwrap();
+    m.pane = Pane::Outputs;
+    m.output_index = sonos;
+
+    // Off the Destinations pane the key does nothing.
+    let mut mixer = model_with_mock_snapshot();
+    mixer.pane = Pane::Mixer;
+    assert_eq!(update(&mut mixer, key('c')), vec![]);
+
+    // auto (absent) cycles to stereo for the output under the cursor.
+    assert_eq!(
+        update(&mut m, key('c')),
+        vec![Cmd::SetChannelMode {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            mode: ChannelMode::Stereo,
+        }]
+    );
+    assert_eq!(
+        m.pending.as_ref().map(|p| p.label.as_str()),
+        Some(LABEL_CHANNEL_MODE)
+    );
+
+    // The core refuses stereo on a mono device with an explanation of what
+    // to do: the error shows and the row keeps its saved mode.
+    let cmds = update(
+        &mut m,
+        Msg::Done {
+            label: LABEL_CHANNEL_MODE.into(),
+            result: Err(
+                "Mock Sonos plays mono only; stereo would drop the right channel. Choose Auto or Mono."
+                    .into(),
+            ),
+        },
+    );
+    assert_eq!(cmds, vec![]);
+    assert!(m.pending.is_none());
+    assert!(
+        m.error
+            .as_deref()
+            .is_some_and(|e| e.contains("Choose Auto or Mono")),
+        "{:?}",
+        m.error
+    );
+    assert_eq!(
+        m.snapshot.outputs[0].channel_mode, None,
+        "a refused selection is never applied locally"
+    );
+
+    // With the core's saved mode showing, c steps to the next one.
+    m.snapshot.outputs[0].channel_mode = Some(ChannelMode::Stereo);
+    assert_eq!(
+        update(&mut m, key('c')),
+        vec![Cmd::SetChannelMode {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            mode: ChannelMode::Mono,
+        }]
+    );
+    assert!(
+        update(
+            &mut m,
+            Msg::Done {
+                label: LABEL_CHANNEL_MODE.into(),
+                result: Ok(())
+            }
+        )
+        .contains(&Cmd::Refresh),
+        "a saved mode is confirmed by a refresh"
+    );
+    m.snapshot.outputs[0].channel_mode = Some(ChannelMode::Mono);
+    assert_eq!(
+        update(&mut m, key('c')),
+        vec![Cmd::SetChannelMode {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            mode: ChannelMode::Auto,
+        }]
+    );
 }

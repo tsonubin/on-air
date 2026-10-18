@@ -32,6 +32,7 @@ import {
   REQUEST_TIMEOUT_MS,
   SLOW_REQUEST_TIMEOUT_MS,
   setAudioQuality,
+  setChannelMode,
   setEq,
   setSampleRate,
   setSyncTrim,
@@ -304,6 +305,20 @@ test("setVolume posts an integer fader value with the pairing token", async () =
   // The core deserialises `volume` as u8; a fractional fader value must not 422.
   await setVolume(BASE, 37.6, "tok", { fetchImpl });
   assert.equal(calls[1].init?.body, JSON.stringify({ volume: 38 }));
+});
+
+test("setChannelMode puts one output's channel mode with the pairing token", async () => {
+  const { fetchImpl, calls } = respond(() => new Response(null, { status: 204 }));
+  await setChannelMode(BASE, { transport: "bluetooth", device_id: "bt-1", mode: "mono" }, "tok", {
+    fetchImpl,
+  });
+  assert.equal(calls[0].url, `${BASE}/api/outputs/channel-mode`);
+  assert.equal(calls[0].init?.method, "PUT");
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({ transport: "bluetooth", device_id: "bt-1", mode: "mono" }),
+  );
+  assert.equal(headersOf(calls[0].init).authorization, "Bearer tok");
 });
 
 test("getVolume reads the service-owned volume setting", async () => {

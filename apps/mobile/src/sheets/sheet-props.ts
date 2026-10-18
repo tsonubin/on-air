@@ -21,12 +21,14 @@ function iosSnapPoints(spec: SheetSpec): NonNullable<BottomSheetProps["snapPoint
     case "source":
       return [{ height: 280 }];
     case "output": {
-      // Rows carry a sync line; the trim editor and the playing-together
-      // area add their own blocks below them.
+      // Every block both UIs add is counted: the sheet header (160) plus the
+      // channel-mode explainer line (50); per speaker the row (78), its sync
+      // line (18) and the channel-mode control below it (46); then the trim
+      // editor and the playing-together area below the rows.
       const groups = spec.groups ? 190 + spec.groups.speakers * 52 + spec.groups.groups * 130 : 0;
-      const height = 160 + spec.count * 96 + (spec.trim ? 150 : 0) + groups;
+      const height = 210 + spec.count * 142 + (spec.trim ? 150 : 0) + groups;
       // Taller than a phone screen: snap full instead of clipping the tail.
-      return spec.count > 5 || height > 800 ? ["full"] : [{ height: Math.max(300, height) }];
+      return spec.count > 5 || height > 800 ? ["full"] : [{ height: Math.max(340, height) }];
     }
     case "device-pair":
       return [{ height: spec.transport === "airplay" ? 360 : 300 }];

@@ -7,6 +7,7 @@ pub use pcm::{
     BluetoothEndpoint, OpenedPcmSink, PcmOutput, PcmSink, RecordingPcmSink, SystemPcmOutput,
 };
 
+use crate::dsp::channel::{ChannelMode, Destination};
 use crate::sender::{AudioSender, OutputFormat, SenderError};
 use crate::sync::{DriftController, SyncFeed};
 use crate::timeline::{PcmChunk, PcmDelayLine};
@@ -208,7 +209,8 @@ impl BluetoothAdapter for SystemBluetoothAdapter {
     }
 }
 
-/// Requested rates and initial app volume, retained across stop/start rollback.
+/// Requested rates, channel mode and initial app volume, retained across
+/// stop/start rollback.
 #[derive(Debug, Clone)]
 pub struct BluetoothPlaybackConfig {
     pub pipeline_hz: u32,
@@ -220,6 +222,11 @@ pub struct BluetoothPlaybackConfig {
     /// group's delay line and reports drift. Free-running outputs carry
     /// `None` and use the cheap fixed-rate path untouched.
     pub sync: Option<SyncFeed>,
+    /// The user's per-output channel mode (roadmap A4).
+    pub channel_mode: ChannelMode,
+    /// What the destination reported for its channel count, for the A4
+    /// rejection ("stereo on a mono device").
+    pub destination: Destination,
 }
 
 struct LivePlayback {
@@ -295,16 +302,16 @@ impl AudioSender for BluetoothSender {
         let id = self.device.id.clone();
         let output = self.output.clone();
         let config = self.config.clone();
-        let steered = config.sync.is_some();
+        let volume = config.volume;
+        let feed = config.sync.clone();
+        let delay_frames = config
+            .sync
+            .as_ref()
+            .map(SyncFeed::delay_frames)
+            .unwrap_or(0);
         let opened = tokio::task::spawn_blocking(move || {
             let endpoint = adapter.connect(&id)?;
-            output.open(
-                &endpoint,
-                config.pipeline_hz,
-                config.output_hz,
-                steered,
-                config.dsp_quality,
-            )
+            output.open(&endpoint, &config)
         })
         .await
         .map_err(|e| SenderError::internal(format!("Bluetooth preparation task failed: {e}")))??;
@@ -316,7 +323,7 @@ impl AudioSender for BluetoothSender {
         });
         // Apply retained volume before subscribing; rollback cannot emit a burst
         // at the default volume while the caller restores settings later.
-        self.set_volume(config.volume).await?;
+        self.set_volume(volume).await?;
         let live = self.live.as_mut().unwrap();
         let mut rx = self.audio_tx.subscribe();
         let (writer_tx, writer_rx) = sync_channel::<Bytes>(8);
@@ -324,7 +331,6 @@ impl AudioSender for BluetoothSender {
         let writer_stop = live.stop.clone();
         // Drift for a sync-group member: the writer observes what the
         // consumer actually accepted and steers the sink's rate conversion.
-        let feed = config.sync.clone();
         live.writer = Some(std::thread::spawn(move || {
             let consumption = sink.consumption();
             let mut drift = consumption
@@ -362,11 +368,6 @@ impl AudioSender for BluetoothSender {
             }
         }));
         let pump_stop = live.stop.clone();
-        let delay_frames = config
-            .sync
-            .as_ref()
-            .map(SyncFeed::delay_frames)
-            .unwrap_or(0);
         live.pump = Some(tokio::spawn(async move {
             // The sync-group member's delay line: a fast transport holds the
             // timeline back so it waits for the slowest member. Steady state

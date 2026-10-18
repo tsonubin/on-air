@@ -38,6 +38,8 @@ fn config(volume: u8) -> BluetoothPlaybackConfig {
         volume,
         dsp_quality: DspQuality::Economy,
         sync: None,
+        channel_mode: on_air_core::dsp::channel::ChannelMode::Auto,
+        destination: on_air_core::dsp::channel::Destination::stereo("test device"),
     }
 }
 struct Adapter {
@@ -124,10 +126,7 @@ impl PcmOutput for Output {
     fn open(
         &self,
         endpoint: &BluetoothEndpoint,
-        pipeline_hz: u32,
-        preferred_hz: u32,
-        _steered: bool,
-        _quality: DspQuality,
+        config: &BluetoothPlaybackConfig,
     ) -> Result<OpenedPcmSink, SenderError> {
         assert_eq!(
             endpoint,
@@ -136,7 +135,7 @@ impl PcmOutput for Output {
         self.log
             .lock()
             .unwrap()
-            .push(format!("open:{pipeline_hz}:{preferred_hz}"));
+            .push(format!("open:{}:{}", config.pipeline_hz, config.output_hz));
         if self.fail.load(Ordering::SeqCst) {
             return Err(SenderError::internal("open failed"));
         }
@@ -154,7 +153,7 @@ impl PcmOutput for Output {
         Ok(OpenedPcmSink {
             sink,
             format: OutputFormat {
-                sample_rate_hz: preferred_hz,
+                sample_rate_hz: config.output_hz,
                 supported_hz: vec![44_100, 48_000],
             },
         })
@@ -486,10 +485,7 @@ async fn failed_volume_write_keeps_saved_volume_and_rollback_volume() {
 fn native_bluetooth_name_does_not_select_pacat() {
     let result = SystemPcmOutput.open(
         &BluetoothEndpoint::Native("Bluetooth nonexistent lifecycle test endpoint".into()),
-        44_100,
-        44_100,
-        false,
-        DspQuality::Economy,
+        &config(100),
     );
     let error = match result {
         Ok(_) => panic!("nonexistent endpoint opened"),
@@ -514,14 +510,9 @@ impl PcmOutput for GatedOutput {
     fn open(
         &self,
         endpoint: &BluetoothEndpoint,
-        pipeline: u32,
-        preferred: u32,
-        steered: bool,
-        quality: DspQuality,
+        config: &BluetoothPlaybackConfig,
     ) -> Result<OpenedPcmSink, SenderError> {
-        let opened = self
-            .output
-            .open(endpoint, pipeline, preferred, steered, quality)?;
+        let opened = self.output.open(endpoint, config)?;
         self.entered.notify_one();
         let mut released = self.released.lock().unwrap();
         while !*released {

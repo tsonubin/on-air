@@ -115,6 +115,8 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
                 volume: 100,
                 dsp_quality: on_air_core::dsp::DspQuality::Economy,
                 sync: None,
+                channel_mode: on_air_core::dsp::channel::ChannelMode::Auto,
+                destination: on_air_core::dsp::channel::Destination::stereo("test device"),
             },
         )))
         .await
@@ -332,6 +334,8 @@ async fn sonos_and_bluetooth_play_simultaneously_in_one_sync_group() {
                 volume: 100,
                 dsp_quality: on_air_core::dsp::DspQuality::Economy,
                 sync: state.sync.feed_for(&bt_identity, 44_100),
+                channel_mode: on_air_core::dsp::channel::ChannelMode::Auto,
+                destination: on_air_core::dsp::channel::Destination::stereo("test device"),
             },
         )),
         Some(bt_identity),

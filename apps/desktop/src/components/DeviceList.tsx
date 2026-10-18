@@ -1,11 +1,12 @@
 import type {
   ActiveOutputView,
   AirPlayMode,
+  ChannelMode,
   OutputInfo,
   OutputSyncStatus,
   SyncGroupView,
 } from "@on-air/api-types";
-import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
+import { CHANNEL_MODE_LABELS, outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
 import {
   inputLabels,
   SYNC_DRIFT_DESCRIPTION,
@@ -24,6 +25,30 @@ const ROW_CLASS =
   "device-row grid w-full cursor-pointer grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-line-soft px-2.5 py-2 text-left hover:border-line-strong focus-visible:outline-2 focus-visible:outline-amber disabled:cursor-not-allowed disabled:opacity-50";
 const TAG_CLASS =
   "flex items-center gap-1.5 font-mono text-xs tracking-[0.14em] text-steel-dim uppercase";
+const MODE_TAG_CLASS =
+  "inline-flex shrink-0 cursor-pointer items-center rounded-md border px-2 py-1 font-mono text-xs tracking-[0.14em] hover:border-amber focus-visible:outline-2 focus-visible:outline-amber disabled:cursor-not-allowed disabled:opacity-50";
+
+/** Clicking the badge cycles auto → stereo → mono → auto. */
+const NEXT_CHANNEL_MODE: Record<ChannelMode, ChannelMode> = {
+  auto: "stereo",
+  stereo: "mono",
+  mono: "auto",
+};
+
+/** One sentence per mode: what it does to the left/right channels. */
+const CHANNEL_MODE_HINTS: Record<ChannelMode, string> = {
+  auto: "Auto fits the device: the core picks the channel layout.",
+  stereo: "Stereo never downmixes: left and right play as recorded.",
+  mono: "Mono mixes left and right into one channel.",
+};
+
+function channelModeTitle(output: OutputInfo, mode: ChannelMode): string {
+  const next = NEXT_CHANNEL_MODE[mode];
+  // Known-mono destinations get a hint; the attempt still goes to the core.
+  const monoNote =
+    output.channels === 1 ? " This device plays mono only, so Stereo will be refused." : "";
+  return `${CHANNEL_MODE_HINTS[mode]} Click to switch to ${CHANNEL_MODE_LABELS[next]}.${monoNote}`;
+}
 
 function Lamp({ on }: { on: boolean }) {
   return (
@@ -317,6 +342,7 @@ export interface DeviceListProps {
   onStartGroup(groupId: number): Promise<void>;
   onStopGroup(groupId: number): Promise<void>;
   onDissolveGroup(groupId: number): Promise<void>;
+  onSetChannelMode(output: OutputInfo, mode: ChannelMode): void;
   onBluetoothSettings(): void;
   onAirplayInfo(): void;
   onRefresh(): void;
@@ -341,6 +367,7 @@ export function DeviceList({
   onStartGroup,
   onStopGroup,
   onDissolveGroup,
+  onSetChannelMode,
   onBluetoothSettings,
   onAirplayInfo,
   onRefresh,
@@ -435,11 +462,12 @@ export function DeviceList({
             const syncStatus =
               sync?.find((s) => s.transport === output.transport && s.device_id === output.id) ??
               null;
+            const mode = output.channel_mode ?? "auto";
             return (
-              <li key={key}>
+              <li key={key} className="flex items-stretch gap-1.5">
                 <button
                   type="button"
-                  className={`${ROW_CLASS} ${on ? "device-row-on" : ""}`}
+                  className={`${ROW_CLASS} min-w-0 flex-1 ${on ? "device-row-on" : ""}`}
                   data-testid={`output-${key}`}
                   aria-pressed={on}
                   aria-busy={connecting}
@@ -477,6 +505,19 @@ export function DeviceList({
                     onSetGroup={(groupId) => onSetSyncGroup(output, groupId)}
                   />
                 )}
+                <button
+                  type="button"
+                  data-testid={`channel-mode-${key}`}
+                  className={`${MODE_TAG_CLASS} ${
+                    mode === "auto" ? "border-line-soft text-steel-dim" : "border-amber text-amber"
+                  }`}
+                  title={channelModeTitle(output, mode)}
+                  aria-label={channelModeTitle(output, mode)}
+                  disabled={disabled || connectingOutput !== null}
+                  onClick={() => onSetChannelMode(output, NEXT_CHANNEL_MODE[mode])}
+                >
+                  {CHANNEL_MODE_LABELS[mode]}
+                </button>
               </li>
             );
           })}

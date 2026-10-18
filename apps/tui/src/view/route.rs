@@ -2,7 +2,7 @@
 
 use super::hit::{HitMap, Target};
 use super::layout::{centered, locked_style, pane_block, row_rect, selection_style, truncate};
-use crate::api::SyncState;
+use crate::api::{ChannelMode, SyncState};
 use crate::labels::input_labels;
 use crate::model::{DestEntry, DestRow, DestState, Model, Pane};
 use ratatui::layout::Rect;
@@ -62,7 +62,8 @@ pub(super) fn source_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &m
 }
 
 /// The right-aligned tags of a Destination row: `⚇ pair` first, then its
-/// sync standing, manual trim and sync group, then its state.
+/// sync standing, manual trim and sync group, then the channel mode
+/// (roadmap A4; `auto` stays dimmed as the default), then its state.
 fn dest_tags(entry: &DestEntry) -> Vec<(String, Style)> {
     let mut tags = Vec::new();
     if entry.pair_badge {
@@ -89,6 +90,12 @@ fn dest_tags(entry: &DestEntry) -> Vec<(String, Style)> {
     if let Some(group) = &entry.group {
         tags.push((truncate(&format!("together: {group}"), 20), Style::new()));
     }
+    let channel = match entry.channel_mode {
+        ChannelMode::Auto => ("ch auto", Style::new().add_modifier(Modifier::DIM)),
+        ChannelMode::Stereo => ("ch stereo", Style::new()),
+        ChannelMode::Mono => ("ch mono", Style::new()),
+    };
+    tags.push((channel.0.to_string(), channel.1));
     let state = match entry.state {
         DestState::Live => Some(("live", Style::new().fg(Color::Green))),
         DestState::Connecting => Some(("◌ connecting…", Style::new().fg(Color::Yellow))),

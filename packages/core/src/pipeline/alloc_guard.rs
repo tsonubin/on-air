@@ -31,6 +31,14 @@ use super::*;
 use crate::alloc_counting::thread_allocations;
 use crate::dsp::DspQuality;
 
+/// The capture pipeline's own justified channel request (roadmap A6): the
+/// guard measures exactly the construction the pipeline drives, plan and
+/// all.
+fn pipeline_plan() -> crate::dsp::channel::ChannelPlan {
+    crate::dsp::channel::SinkConstruction::ProcessingThread
+        .auto(crate::dsp::channel::Destination::stereo("allocation guard"))
+}
+
 /// Frames per processed chunk: the pipeline's chunk size (the resampler
 /// takes its default fixed input size at every profile).
 const CHUNK_FRAMES: usize = 1024;
@@ -173,7 +181,7 @@ fn the_processing_thread_allocates_nothing_per_chunk_without_a_receiver() {
 fn the_resampler_allocates_nothing_per_chunk() {
     for quality in DspQuality::ALL {
         let mut resampler =
-            crate::dsp::resample::PcmResampler::new(44_100, 48_000, PIPELINE_CHANNELS, quality);
+            crate::dsp::resample::PcmResampler::new(44_100, 48_000, &pipeline_plan(), quality);
         let frames = resampler.input_frames_next();
         assert_eq!(frames, CHUNK_FRAMES, "fixed input chunk at {quality:?}");
         let input = vec![0.3f32; frames * PIPELINE_CHANNELS];
@@ -257,7 +265,8 @@ fn the_rate_bridge_allocates_nothing_per_chunk() {
         pcm
     };
     for quality in DspQuality::ALL {
-        let mut bridge = crate::dsp::bridge::RateBridge::new(44_100, 48_000, 2, quality);
+        let mut bridge =
+            crate::dsp::bridge::RateBridge::new(44_100, 48_000, &pipeline_plan(), quality);
         let mut converted = Vec::new();
         let mut encoded = Vec::new();
         for _ in 0..16 {

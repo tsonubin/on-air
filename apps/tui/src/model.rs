@@ -3,8 +3,8 @@
 //! error.
 
 use crate::api::{
-    ActiveOutputView, BluetoothDeviceInfo, CdStatus, DspQuality, OutputInfo, OutputPhase,
-    OutputSyncStatus, SampleRateResponse, StatusResponse, SyncGroupView, SyncState,
+    ActiveOutputView, BluetoothDeviceInfo, CdStatus, ChannelMode, DspQuality, OutputInfo,
+    OutputPhase, OutputSyncStatus, SampleRateResponse, StatusResponse, SyncGroupView, SyncState,
 };
 use crate::client::Connection;
 use crate::update::Cmd;
@@ -179,6 +179,8 @@ pub struct DestEntry {
     pub sync: Option<SyncBadge>,
     /// The name of the sync group it plays with, when it is in one.
     pub group: Option<String>,
+    /// The output's saved channel mode (roadmap A4); `Auto` when unset.
+    pub channel_mode: ChannelMode,
 }
 
 /// A row of the Destination pane: a transport header, a device or the
@@ -395,6 +397,7 @@ impl Model {
                     placeholder: false,
                     sync: self.sync_badge(transport, &output.id),
                     group: self.sync_group_name(transport, &output.id),
+                    channel_mode: output.channel_mode.unwrap_or_default(),
                 }));
             }
             if transport == "bluetooth" {
@@ -411,6 +414,7 @@ impl Model {
                         placeholder: false,
                         sync: self.sync_badge(transport, &device.id),
                         group: self.sync_group_name(transport, &device.id),
+                        channel_mode: ChannelMode::Auto,
                     }));
                 }
                 self.push_placeholders(transport, &mut rows);
@@ -506,6 +510,7 @@ impl Model {
                 placeholder: true,
                 sync: None,
                 group: None,
+                channel_mode: ChannelMode::Auto,
             }));
         }
     }
@@ -583,6 +588,8 @@ mod tests {
             member_count: 1,
             needs_pair: false,
             paired: true,
+            channel_mode: None,
+            channels: None,
         }
     }
 
@@ -632,6 +639,15 @@ mod tests {
             name: "s1".into(),
             step,
         })
+    }
+
+    #[test]
+    fn dest_entries_carry_the_saved_channel_mode() {
+        let mut m = Model::new();
+        m.snapshot.outputs = vec![output("s1", "sonos")];
+        assert_eq!(entries(&m, "sonos")[0].channel_mode, ChannelMode::Auto);
+        m.snapshot.outputs[0].channel_mode = Some(ChannelMode::Mono);
+        assert_eq!(entries(&m, "sonos")[0].channel_mode, ChannelMode::Mono);
     }
 
     #[test]

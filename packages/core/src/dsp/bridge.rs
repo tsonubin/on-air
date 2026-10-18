@@ -1,3 +1,4 @@
+use super::channel::ChannelPlan;
 use super::resample::{RateControl, SteerableResampler, StreamingResampler};
 use super::{DspQuality, PIPELINE_CHANNELS};
 
@@ -10,11 +11,14 @@ use super::{DspQuality, PIPELINE_CHANNELS};
 /// variable-ratio resampler steered through the returned [`RateControl`],
 /// used by sync-group members.
 ///
-/// `quality` selects the resampler interpolation profile at construction.
-/// The `*_into` conversions keep their scratch inside the bridge and hand
-/// output to a caller-owned buffer: they allocate nothing per chunk in
-/// steady state (the C7 allocation guard proves it), so callers must reuse
-/// their output buffer across chunks.
+/// `plan` justifies the channel fit: a stereo destination keeps both
+/// channels, and a request of 1 happens only for a genuinely mono
+/// destination or the user's explicit mono mode (roadmap A4/A6; see
+/// [`super::channel`]). `quality` selects the resampler interpolation
+/// profile at construction. The `*_into` conversions keep their scratch
+/// inside the bridge and hand output to a caller-owned buffer: they allocate
+/// nothing per chunk in steady state (the C7 allocation guard proves it), so
+/// callers must reuse their output buffer across chunks.
 pub struct RateBridge {
     core: RateCore,
     channels: usize,
@@ -42,18 +46,18 @@ impl RateBridge {
     pub fn new(
         input_rate_hz: u32,
         output_rate_hz: u32,
-        channels: usize,
+        plan: &ChannelPlan,
         quality: DspQuality,
     ) -> Self {
         RateBridge {
             core: RateCore::Fixed(StreamingResampler::new(
                 input_rate_hz,
                 output_rate_hz,
-                PIPELINE_CHANNELS,
+                &plan.pipeline_side(),
                 quality,
             )),
-            channels: channels.max(1),
-            dither: TpdfDither::for_stream(input_rate_hz, output_rate_hz, channels),
+            channels: plan.channels().max(1),
+            dither: TpdfDither::for_stream(input_rate_hz, output_rate_hz, plan.channels()),
             decoded: Vec::new(),
             resampled: Vec::new(),
             mapped: Vec::new(),
@@ -65,7 +69,7 @@ impl RateBridge {
     pub fn new_steered(
         input_rate_hz: u32,
         output_rate_hz: u32,
-        channels: usize,
+        plan: &ChannelPlan,
         quality: DspQuality,
     ) -> (Self, RateControl) {
         let control = RateControl::default();
@@ -74,14 +78,14 @@ impl RateBridge {
                 resampler: SteerableResampler::new(
                     input_rate_hz,
                     output_rate_hz,
-                    PIPELINE_CHANNELS,
+                    &plan.pipeline_side(),
                     quality,
                 ),
                 control: control.clone(),
                 applied_ppm: 0.0,
             },
-            channels: channels.max(1),
-            dither: TpdfDither::for_stream(input_rate_hz, output_rate_hz, channels),
+            channels: plan.channels().max(1),
+            dither: TpdfDither::for_stream(input_rate_hz, output_rate_hz, plan.channels()),
             decoded: Vec::new(),
             resampled: Vec::new(),
             mapped: Vec::new(),
@@ -279,9 +283,12 @@ pub fn f32_to_l16_le(samples: &[f32], dither: &mut TpdfDither) -> Vec<u8> {
 }
 
 /// Fits interleaved pipeline stereo to a destination with `channels`
-/// channels: one channel gets the average of left and right, two pass
-/// through, and any further channels get silence. Written to `out`, which
-/// is cleared first and must not alias `samples`.
+/// channels: one channel gets the average of left and right (a true
+/// downmix — the stream becomes genuinely mono), two pass through, and any
+/// further channels get silence. Silence on channels 3+ is the explicit,
+/// tested policy for wide destinations: the pipeline has no content for
+/// them (roadmap A4/A6; `tests/channel_construction.rs` pins it). Written
+/// to `out`, which is cleared first and must not alias `samples`.
 pub fn map_stereo_into(samples: &[f32], channels: usize, out: &mut Vec<f32>) {
     let channels = channels.max(1);
     out.clear();
@@ -311,9 +318,16 @@ pub fn map_stereo(samples: &[f32], channels: usize) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dsp::channel::{ChannelMode, Destination, SinkConstruction};
 
     /// One quantization step, in float units.
     const LSB: f32 = 1.0 / L16_SCALE;
+
+    fn plan_for(destination: Destination, mode: ChannelMode) -> ChannelPlan {
+        SinkConstruction::CpalPcm
+            .plan(mode, destination)
+            .expect("stereo and mono destinations fit every mode but stereo-on-mono")
+    }
 
     #[test]
     fn map_stereo_fits_the_destination_layout() {
@@ -338,14 +352,15 @@ mod tests {
 
     #[test]
     fn same_rate_bridge_keeps_left_and_right() {
+        let plan = plan_for(Destination::stereo("Speakers"), ChannelMode::Auto);
         let mut dither = TpdfDither::new(1);
-        let mut bridge = RateBridge::new(44_100, 44_100, 2, DspQuality::Economy);
+        let mut bridge = RateBridge::new(44_100, 44_100, &plan, DspQuality::Economy);
         let out = bridge.process_l16(&f32_to_l16_le(&[0.25, -0.25], &mut dither));
         assert_eq!(out.len(), 2);
         assert!((out[0] - 0.25).abs() < 0.01 && (out[1] + 0.25).abs() < 0.01);
 
         // The in-place path agrees.
-        let mut bridge = RateBridge::new(44_100, 44_100, 2, DspQuality::Economy);
+        let mut bridge = RateBridge::new(44_100, 44_100, &plan, DspQuality::Economy);
         let mut out = Vec::new();
         bridge.process_l16_into(&l16(&[0.25, -0.25]), &mut out);
         assert_eq!(out.len(), 2);
@@ -354,18 +369,31 @@ mod tests {
 
     #[test]
     fn mono_destination_hears_both_sides() {
+        let plan = plan_for(Destination::mono("Mono Speaker"), ChannelMode::Auto);
         let mut dither = TpdfDither::new(1);
-        let mut bridge = RateBridge::new(44_100, 44_100, 1, DspQuality::Economy);
+        let mut bridge = RateBridge::new(44_100, 44_100, &plan, DspQuality::Economy);
         let out = bridge.process_l16(&f32_to_l16_le(&[0.5, 0.0], &mut dither));
         assert_eq!(out.len(), 1);
         assert!((out[0] - 0.25).abs() < 0.01);
 
         // The in-place path agrees.
-        let mut bridge = RateBridge::new(44_100, 44_100, 1, DspQuality::Economy);
+        let mut bridge = RateBridge::new(44_100, 44_100, &plan, DspQuality::Economy);
         let mut out = Vec::new();
         bridge.process_l16_into(&l16(&[0.5, 0.0]), &mut out);
         assert_eq!(out.len(), 1);
         assert!((out[0] - 0.25).abs() < 0.01);
+    }
+
+    #[test]
+    fn mono_mode_downmixes_a_stereo_destination_to_a_genuine_mono_stream() {
+        let plan = plan_for(Destination::stereo("Speakers"), ChannelMode::Mono);
+        assert_eq!(plan.channels(), 1);
+        let mut dither = TpdfDither::new(1);
+        let mut bridge = RateBridge::new(44_100, 44_100, &plan, DspQuality::Economy);
+        let out = bridge.process_l16(&f32_to_l16_le(&[0.5, -0.5, 0.25, 0.75], &mut dither));
+        // One sample per frame — a true downmix, not a duplicated mono pair.
+        assert_eq!(out.len(), 2);
+        assert!((out[0] - 0.0).abs() < 0.01 && (out[1] - 0.5).abs() < 0.01);
     }
 
     #[test]

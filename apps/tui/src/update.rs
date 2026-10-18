@@ -1,7 +1,7 @@
 //! The pure half of the UI: `update(model, msg) -> commands`. No I/O lives
 //! here, so every key, event and reply can be tested without a core.
 
-use crate::api::{CdAction, DspQuality, SampleRateResponse, WsEvent};
+use crate::api::{CdAction, ChannelMode, DspQuality, SampleRateResponse, WsEvent};
 use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
@@ -107,6 +107,12 @@ pub enum Cmd {
         device_id: String,
     },
     DeactivateOutput,
+    /// One output's channel mode (roadmap A4): auto, stereo or mono.
+    SetChannelMode {
+        transport: String,
+        device_id: String,
+        mode: ChannelMode,
+    },
     SetVolume(u8),
     SetEq([f32; 5]),
     /// Re-read both sides' rates after one changed.
@@ -158,6 +164,7 @@ pub fn level_db(linear: f32) -> f32 {
 pub const LABEL_SOURCE: &str = "Switching source";
 pub const LABEL_OUTPUT: &str = "Switching output";
 pub const LABEL_STOP: &str = "Stopping";
+pub const LABEL_CHANNEL_MODE: &str = "Changing channel mode";
 pub const LABEL_PAIR: &str = "Pairing";
 pub const LABEL_CONNECT: &str = "Connecting";
 pub const LABEL_MONITOR: &str = "Changing monitor";
@@ -1127,6 +1134,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             vec![]
         }
         Action::Select => select(model),
+        Action::CycleChannel => cycle_channel_mode(model),
         Action::AdjustUp => adjust(model, 1, false),
         Action::AdjustDown => adjust(model, -1, false),
         Action::FineUp => adjust(model, 1, true),
@@ -1604,6 +1612,33 @@ fn select(model: &mut Model) -> Vec<Cmd> {
         }
         Pane::Mixer => vec![],
     }
+}
+
+/// `c` on the Destinations pane: auto → stereo → mono → auto for the output
+/// under the cursor. The core refuses `stereo` on a mono device with an
+/// explanation of what to do; it lands in `model.error` and the row keeps
+/// its saved mode (roadmap A4).
+fn cycle_channel_mode(model: &mut Model) -> Vec<Cmd> {
+    if model.pane != Pane::Outputs {
+        return vec![];
+    }
+    let Some(entry) = model.selected_dest() else {
+        return vec![];
+    };
+    let mode = match entry.channel_mode {
+        ChannelMode::Auto => ChannelMode::Stereo,
+        ChannelMode::Stereo => ChannelMode::Mono,
+        ChannelMode::Mono => ChannelMode::Auto,
+    };
+    pending(
+        model,
+        LABEL_CHANNEL_MODE,
+        vec![Cmd::SetChannelMode {
+            transport: entry.transport.to_string(),
+            device_id: entry.id,
+            mode,
+        }],
+    )
 }
 
 fn adjust(model: &mut Model, direction: i32, fine: bool) -> Vec<Cmd> {

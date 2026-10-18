@@ -1,12 +1,12 @@
 //! Playback adapters behind the A2DP sink lifecycle. Endpoint kinds come from
 //! platform discovery, never from the speaker's display name.
 use crate::dsp::bridge::RateBridge;
+use crate::dsp::channel::{ChannelPlan, Destination, SinkConstruction};
 use crate::dsp::rates::{self, BLUETOOTH_RATES_HZ};
 use crate::dsp::resample::RateControl;
-use crate::dsp::DspQuality;
 use crate::pipeline::push_frames;
+use crate::sender::bluetooth::BluetoothPlaybackConfig;
 use crate::sender::{OutputFormat, SenderError};
-use crate::timeline::FRAME_BYTES;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, StreamConfig, I24, U24};
 use parking_lot::Mutex;
@@ -61,18 +61,19 @@ impl Drop for OpenedPcmSink {
 }
 
 /// Reopenable playback configuration: a fresh stream/queue/bridge per start.
+/// `open` builds the sink's channel fit from the config's channel mode and
+/// destination report (roadmap A4/A6), and refuses a stereo request for a
+/// mono device rather than silently losing a channel.
 pub trait PcmOutput: Send + Sync {
-    /// Open the endpoint. `steered` selects the drift-corrected
-    /// variable-ratio conversion used by sync-group members; free-running
-    /// playback keeps the cheap fixed-ratio path. `quality` selects the
-    /// interpolation profile of that conversion.
+    /// Open the endpoint. `config.sync.is_some()` selects the drift-
+    /// corrected variable-ratio conversion used by sync-group members;
+    /// free-running playback keeps the cheap fixed-ratio path, and
+    /// `config.dsp_quality` selects the interpolation profile of that
+    /// conversion.
     fn open(
         &self,
         endpoint: &BluetoothEndpoint,
-        pipeline_hz: u32,
-        preferred_hz: u32,
-        steered: bool,
-        quality: DspQuality,
+        config: &BluetoothPlaybackConfig,
     ) -> Result<OpenedPcmSink, SenderError>;
 }
 
@@ -118,15 +119,12 @@ impl PcmOutput for Arc<RecordingPcmSink> {
     fn open(
         &self,
         _: &BluetoothEndpoint,
-        _: u32,
-        preferred_hz: u32,
-        _: bool,
-        _: DspQuality,
+        config: &BluetoothPlaybackConfig,
     ) -> Result<OpenedPcmSink, SenderError> {
         Ok(OpenedPcmSink {
             sink: self.clone(),
             format: OutputFormat {
-                sample_rate_hz: rates::snap_rate(preferred_hz, BLUETOOTH_RATES_HZ),
+                sample_rate_hz: rates::snap_rate(config.output_hz, BLUETOOTH_RATES_HZ),
                 supported_hz: BLUETOOTH_RATES_HZ.to_vec(),
             },
         })
@@ -138,31 +136,20 @@ impl PcmOutput for SystemPcmOutput {
     fn open(
         &self,
         endpoint: &BluetoothEndpoint,
-        pipeline_hz: u32,
-        preferred_hz: u32,
-        steered: bool,
-        quality: DspQuality,
+        config: &BluetoothPlaybackConfig,
     ) -> Result<OpenedPcmSink, SenderError> {
         match endpoint {
             BluetoothEndpoint::Pulse(name) => {
-                let sample_rate_hz = rates::snap_rate(preferred_hz, BLUETOOTH_RATES_HZ);
+                let sample_rate_hz = rates::snap_rate(config.output_hz, BLUETOOTH_RATES_HZ);
                 Ok(OpenedPcmSink {
-                    sink: Arc::new(PacatPcmSink::new(
-                        name,
-                        pipeline_hz,
-                        sample_rate_hz,
-                        steered,
-                        quality,
-                    )?),
+                    sink: Arc::new(PacatPcmSink::new(name, config, sample_rate_hz)?),
                     format: OutputFormat {
                         sample_rate_hz,
                         supported_hz: BLUETOOTH_RATES_HZ.to_vec(),
                     },
                 })
             }
-            BluetoothEndpoint::Native(name) => {
-                CpalPcmSink::open(name, pipeline_hz, preferred_hz, steered, quality)
-            }
+            BluetoothEndpoint::Native(name) => CpalPcmSink::open(name, config),
         }
     }
 }
@@ -181,13 +168,7 @@ struct CpalPcmSink {
 }
 
 impl CpalPcmSink {
-    fn open(
-        name: &str,
-        pipeline_hz: u32,
-        preferred_hz: u32,
-        steered: bool,
-        quality: DspQuality,
-    ) -> Result<OpenedPcmSink, SenderError> {
+    fn open(name: &str, playback: &BluetoothPlaybackConfig) -> Result<OpenedPcmSink, SenderError> {
         let device = cpal::default_host()
             .output_devices()
             .map_err(|e| SenderError::internal(format!("could not list audio outputs: {e}")))?
@@ -218,7 +199,7 @@ impl CpalPcmSink {
                 "Bluetooth output has no supported A2DP sample rate",
             ));
         }
-        let sample_rate_hz = rates::snap_rate(preferred_hz, &supported_hz);
+        let sample_rate_hz = rates::snap_rate(playback.output_hz, &supported_hz);
         let supported = configs
             .into_iter()
             .filter(|config| {
@@ -237,21 +218,39 @@ impl CpalPcmSink {
             .with_sample_rate(sample_rate_hz);
         let sample_format = supported.sample_format();
         let config = supported.config();
-        let channels = usize::from(config.channels);
+        // The OS device dictates this stream's layout; the plan is resolved
+        // against its honest report, so `stereo` on a mono endpoint is
+        // rejected here with an explanation instead of losing a channel.
+        let plan = SinkConstruction::CpalPcm
+            .plan(
+                playback.channel_mode,
+                Destination::reported(name, config.channels),
+            )
+            .map_err(|error| SenderError::ChannelMode(error.message()))?;
         let queue_capacity = (sample_rate_hz as usize)
-            .saturating_mul(channels)
+            .saturating_mul(plan.channels())
             .saturating_mul(2)
             .max(1024);
         let (producer, consumer) = HeapRb::<f32>::new(queue_capacity).split();
         let volume = Arc::new(AtomicU8::new(100));
         let delivered = Arc::new(AtomicU64::new(0));
-        let (bridge, rate_control) = if steered {
-            let (bridge, control) =
-                RateBridge::new_steered(pipeline_hz, sample_rate_hz, channels, quality);
+        let stream_channels = plan.channels();
+        let (bridge, rate_control) = if playback.sync.is_some() {
+            let (bridge, control) = RateBridge::new_steered(
+                playback.pipeline_hz,
+                sample_rate_hz,
+                &plan,
+                playback.dsp_quality,
+            );
             (bridge, Some(control))
         } else {
             (
-                RateBridge::new(pipeline_hz, sample_rate_hz, channels, quality),
+                RateBridge::new(
+                    playback.pipeline_hz,
+                    sample_rate_hz,
+                    &plan,
+                    playback.dsp_quality,
+                ),
                 None,
             )
         };
@@ -262,6 +261,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::I16 => build_output_stream::<i16>(
                 &device,
@@ -269,6 +269,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::I24 => build_output_stream::<I24>(
                 &device,
@@ -276,6 +277,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::I32 => build_output_stream::<i32>(
                 &device,
@@ -283,6 +285,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::I64 => build_output_stream::<i64>(
                 &device,
@@ -290,6 +293,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::U8 => build_output_stream::<u8>(
                 &device,
@@ -297,6 +301,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::U16 => build_output_stream::<u16>(
                 &device,
@@ -304,6 +309,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::U24 => build_output_stream::<U24>(
                 &device,
@@ -311,6 +317,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::U32 => build_output_stream::<u32>(
                 &device,
@@ -318,6 +325,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::U64 => build_output_stream::<u64>(
                 &device,
@@ -325,6 +333,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::F32 => build_output_stream::<f32>(
                 &device,
@@ -332,6 +341,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             SampleFormat::F64 => build_output_stream::<f64>(
                 &device,
@@ -339,6 +349,7 @@ impl CpalPcmSink {
                 consumer,
                 volume.clone(),
                 delivered.clone(),
+                stream_channels,
             )?,
             other => {
                 return Err(SenderError::internal(format!(
@@ -399,30 +410,45 @@ impl PcmSink for CpalPcmSink {
 }
 
 /// Fills one output callback buffer from the queue, scaled by `gain`. Only
-/// whole `channels`-sample frames are taken; the rest of the buffer is
-/// silence, so an underrun can never shift left into the right slot.
-/// Frames actually taken are added to `delivered` for drift measurement.
+/// whole `stream_channels`-sample frames are taken; the rest of the buffer
+/// is silence, so an underrun can never shift left into the right slot. A
+/// mono stream (the user's explicit mono downmix) is spread across every
+/// device channel at this hardware boundary: the pipeline stream itself is
+/// genuinely mono, the device buffer the OS demands is not. Frames actually
+/// taken are added to `delivered` for drift measurement.
 fn fill_output<T>(
     data: &mut [T],
     consumer: &mut ringbuf::HeapCons<f32>,
-    channels: usize,
+    stream_channels: usize,
+    device_channels: usize,
     gain: f32,
     delivered: &AtomicU64,
 ) where
     T: Sample + FromSample<f32>,
 {
-    let available = consumer.occupied_len().min(data.len());
-    let take = available - available % channels.max(1);
-    if take > 0 {
-        delivered.fetch_add((take / channels.max(1)) as u64, Ordering::Relaxed);
+    let stream_channels = stream_channels.max(1);
+    let device_channels = device_channels.max(1);
+    let frames = data.len() / device_channels;
+    let available = consumer.occupied_len();
+    let whole_frames = (available / stream_channels).min(frames);
+    if whole_frames > 0 {
+        delivered.fetch_add(whole_frames as u64, Ordering::Relaxed);
     }
-    for (i, slot) in data.iter_mut().enumerate() {
-        let sample = if i < take {
-            consumer.try_pop().unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        *slot = T::from_sample(sample * gain);
+    for frame in 0..frames {
+        let mut last = 0.0f32;
+        for slot in 0..device_channels {
+            let sample = if frame >= whole_frames {
+                0.0
+            } else if slot < stream_channels {
+                last = consumer.try_pop().unwrap_or(0.0);
+                last
+            } else if stream_channels == 1 {
+                last
+            } else {
+                0.0
+            };
+            data[frame * device_channels + slot] = T::from_sample(sample * gain);
+        }
     }
 }
 
@@ -432,6 +458,7 @@ fn build_output_stream<T>(
     mut consumer: ringbuf::HeapCons<f32>,
     volume: Arc<AtomicU8>,
     delivered: Arc<AtomicU64>,
+    stream_channels: usize,
 ) -> Result<cpal::Stream, SenderError>
 where
     T: Sample + SizedSample + FromSample<f32>,
@@ -443,7 +470,7 @@ where
             move |data: &mut [T], _| {
                 // Apply gain at playback, including samples queued before a mute request.
                 let gain = f32::from(volume.load(Ordering::Acquire)) / 100.0;
-                fill_output(data, &mut consumer, channels, gain, &delivered);
+                fill_output(data, &mut consumer, stream_channels, channels, gain, &delivered);
             },
             |e| eprintln!("bluetooth audio output error: {e}"),
             None,
@@ -466,35 +493,52 @@ struct PacatPcmSink {
     consumed: Arc<AtomicU64>,
 }
 
+/// The `pacat` invocation for one playback. `--channels` comes from the
+/// justified channel plan, never a caller-spelled number: a user's mono
+/// mode becomes a genuine mono stream (never a duplicated pair), and `auto`
+/// keeps the historical stereo wire exactly (roadmap A4/A6).
+fn pacat_args(device: &str, output_hz: u32, plan: &ChannelPlan) -> Vec<String> {
+    vec![
+        "--playback".into(),
+        "--raw".into(),
+        "--format=s16le".into(),
+        format!("--rate={output_hz}"),
+        format!("--channels={}", plan.channels().max(1)),
+        "--latency-msec=50".into(),
+        format!("--device={device}"),
+    ]
+}
+
 impl PacatPcmSink {
     fn new(
         device: &str,
-        pipeline_hz: u32,
+        playback: &BluetoothPlaybackConfig,
         output_hz: u32,
-        steered: bool,
-        quality: DspQuality,
     ) -> Result<Self, SenderError> {
+        let plan = SinkConstruction::PulsePcm
+            .plan(playback.channel_mode, playback.destination.clone())
+            .map_err(|error| SenderError::ChannelMode(error.message()))?;
         let mut child = std::process::Command::new("pacat")
-            .args([
-                "--playback",
-                "--raw",
-                "--format=s16le",
-                &format!("--rate={output_hz}"),
-                "--channels=2",
-                "--latency-msec=50",
-                &format!("--device={device}"),
-            ])
+            .args(pacat_args(device, output_hz, &plan))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
             .map_err(|e| SenderError::internal(format!("could not start pacat: {e}")))?;
         let stdin = child.stdin.take().expect("piped pacat stdin");
-        let (bridge, rate_control) = if steered {
-            let (bridge, control) = RateBridge::new_steered(pipeline_hz, output_hz, 2, quality);
+        let (bridge, rate_control) = if playback.sync.is_some() {
+            let (bridge, control) = RateBridge::new_steered(
+                playback.pipeline_hz,
+                output_hz,
+                &plan,
+                playback.dsp_quality,
+            );
             (bridge, Some(control))
         } else {
-            (RateBridge::new(pipeline_hz, output_hz, 2, quality), None)
+            (
+                RateBridge::new(playback.pipeline_hz, output_hz, &plan, playback.dsp_quality),
+                None,
+            )
         };
         Ok(Self {
             bridge: Mutex::new(bridge),
@@ -511,17 +555,21 @@ impl PacatPcmSink {
 impl PcmSink for PacatPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
         let mut bytes = self.bytes.lock();
-        self.bridge
-            .lock()
-            .process_l16_to_l16_into(pcm, &mut bytes);
+        let channels = {
+            let mut bridge = self.bridge.lock();
+            bridge.process_l16_to_l16_into(pcm, &mut bytes);
+            bridge.channels()
+        };
         scale_l16(&mut bytes, self.volume.load(Ordering::Acquire));
         use std::io::Write;
         self.stdin
             .lock()
             .write_all(&bytes)
             .map_err(|e| SenderError::internal(format!("pacat playback failed: {e}")))?;
+        // Frames, not samples or bytes: a genuinely mono stream carries two
+        // bytes per frame, the historical stereo wire four.
         self.consumed
-            .fetch_add((bytes.len() / FRAME_BYTES) as u64, Ordering::Relaxed);
+            .fetch_add((bytes.len() / (channels.max(1) * 2)) as u64, Ordering::Relaxed);
         Ok(())
     }
     fn set_volume(&self, volume: u8) -> Result<(), SenderError> {
@@ -576,6 +624,8 @@ fn scale_l16(pcm: &mut [u8], volume: u8) {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::dsp::channel::{ChannelMode, ChannelPlan};
+    use crate::dsp::DspQuality;
     use std::io::Write;
     use std::sync::mpsc;
     use std::time::Duration;
@@ -587,13 +637,22 @@ mod tests {
         out
     }
 
+    fn stereo_plan() -> ChannelPlan {
+        SinkConstruction::CpalPcm.auto(Destination::stereo("test device"))
+    }
+
     #[test]
     fn a_full_output_queue_drops_whole_frames() {
         use ringbuf::traits::Observer;
         let (producer, consumer) = HeapRb::<f32>::new(5).split();
         let sink = CpalPcmSink {
             producer: Mutex::new(producer),
-            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2, DspQuality::Economy)),
+            bridge: Mutex::new(RateBridge::new(
+                44_100,
+                44_100,
+                &stereo_plan(),
+                DspQuality::Economy,
+            )),
             converted: Mutex::new(Vec::new()),
             volume: Arc::new(AtomicU8::new(100)),
             stream: Mutex::new(None),
@@ -612,16 +671,40 @@ mod tests {
         // A frame still being written: its left sample has landed, its right has not.
         producer.push_slice(&[0.1, -0.1, 0.2]);
         let mut data = [9.0f32; 4];
-        fill_output(&mut data, &mut consumer, 2, 1.0, &delivered);
+        fill_output(&mut data, &mut consumer, 2, 2, 1.0, &delivered);
         assert_eq!(data, [0.1, -0.1, 0.0, 0.0]);
         producer.push_slice(&[-0.2]);
-        fill_output(&mut data, &mut consumer, 2, 1.0, &delivered);
+        fill_output(&mut data, &mut consumer, 2, 2, 1.0, &delivered);
         assert_eq!(data, [0.2, -0.2, 0.0, 0.0], "left and right swapped");
         assert_eq!(
             delivered.load(Ordering::Relaxed),
             2,
             "played frames are counted"
         );
+    }
+
+    #[test]
+    fn a_mono_stream_is_spread_across_the_device_channels_at_the_hardware_boundary() {
+        use ringbuf::traits::Producer;
+        let (mut producer, mut consumer) = HeapRb::<f32>::new(16).split();
+        // The stream crossing the pipeline is genuinely mono (one sample per
+        // frame); the stereo device buffer the OS demands gets the downmix
+        // on both channels here and nowhere else.
+        producer.push_slice(&[0.5, -0.5]);
+        let mut data = [9.0f32; 4];
+        let delivered = AtomicU64::new(0);
+        fill_output(&mut data, &mut consumer, 1, 2, 1.0, &delivered);
+        assert_eq!(data, [0.5, 0.5, -0.5, -0.5]);
+    }
+
+    #[test]
+    fn pacat_follows_the_channel_plan() {
+        let mono = SinkConstruction::PulsePcm
+            .plan(ChannelMode::Mono, Destination::stereo("headset"))
+            .unwrap();
+        assert!(pacat_args("sink", 44_100, &mono).contains(&"--channels=1".to_string()));
+        let auto = SinkConstruction::PulsePcm.auto(Destination::stereo("headset"));
+        assert!(pacat_args("sink", 44_100, &auto).contains(&"--channels=2".to_string()));
     }
 
     #[test]
@@ -635,7 +718,12 @@ mod tests {
             .unwrap();
         let stdin = child.stdin.take().unwrap();
         let sink = Arc::new(PacatPcmSink {
-            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2, DspQuality::Economy)),
+            bridge: Mutex::new(RateBridge::new(
+                44_100,
+                44_100,
+                &stereo_plan(),
+                DspQuality::Economy,
+            )),
             bytes: Mutex::new(Vec::new()),
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),

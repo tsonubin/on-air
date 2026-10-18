@@ -137,6 +137,7 @@ impl From<SenderError> for ApiError {
         match error.root() {
             SenderError::NoActiveOutput => ApiError::no_active_output(),
             SenderError::DeviceNotFound(_) => ApiError::not_found(message),
+            SenderError::ChannelMode(_) => ApiError::validation(message),
             SenderError::NotReady(_) => match error {
                 SenderError::StopFailed(_) => ApiError::conflict(message),
                 _ => ApiError::not_ready(message),

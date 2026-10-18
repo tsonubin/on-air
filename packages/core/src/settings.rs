@@ -1,5 +1,6 @@
 use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates, DspQuality};
 use crate::session::ActiveOutput;
+use on_air_api::ChannelMode;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -59,6 +60,17 @@ pub struct SavedSyncGroup {
     pub members: Vec<SavedSyncGroupMember>,
 }
 
+/// One output's saved channel mode (`settings.json`, `channel_modes`): how
+/// that output's pipeline stereo signal is fitted to its destination
+/// (roadmap A4). Entries are per output, keyed like the settings file's
+/// other per-output lists; an absent entry means [`ChannelMode::Auto`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedChannelMode {
+    pub transport: String,
+    pub device_id: String,
+    pub mode: ChannelMode,
+}
+
 /// A stored DSP profile the wire enum no longer knows reads as "unset":
 /// the enum's equivalent of the [`SavedSettings::normalized`] membership
 /// check on `capture_buffer_ms`, so a settings file written by a version
@@ -98,6 +110,7 @@ pub struct SavedSettings {
     pub first_run_tuning: Option<FirstRunTuning>,
     pub sync_trims: Vec<SavedSyncTrim>,
     pub sync_groups: Vec<SavedSyncGroup>,
+    pub channel_modes: Vec<SavedChannelMode>,
 }
 
 impl Default for SavedSettings {
@@ -116,6 +129,7 @@ impl Default for SavedSettings {
             first_run_tuning: None,
             sync_groups: Vec::new(),
             sync_trims: Vec::new(),
+            channel_modes: Vec::new(),
         }
     }
 }
@@ -158,6 +172,18 @@ impl SavedSettings {
             });
             !group.name.is_empty()
         });
+        // Per-output channel modes: one entry per output at most, never for
+        // an unnamed output, and `auto` is stored as "absent".
+        self.channel_modes.retain(|saved| {
+            !saved.transport.trim().is_empty()
+                && !saved.device_id.trim().is_empty()
+                && saved.mode != ChannelMode::Auto
+        });
+        let mut seen = std::collections::HashSet::new();
+        self.channel_modes.reverse();
+        self.channel_modes
+            .retain(|saved| seen.insert((saved.transport.clone(), saved.device_id.clone())));
+        self.channel_modes.reverse();
         self
     }
 }
@@ -332,6 +358,11 @@ mod tests {
                     device_name: "Living Room".into(),
                 }],
             }],
+            channel_modes: vec![SavedChannelMode {
+                transport: "sonos".into(),
+                device_id: "uuid:living-room".into(),
+                mode: ChannelMode::Mono,
+            }],
         };
         write_file(&path, &expected).unwrap();
         assert_eq!(load_file(&path).unwrap(), expected);
@@ -386,7 +417,14 @@ mod tests {
                 "service_enabled":true,
                 "capture_buffer_ms":7,
                 "dsp_quality":"ultra",
-                "recommended_dsp_quality":"ultra"
+                "recommended_dsp_quality":"ultra",
+                "channel_modes":[
+                    {"transport":"sonos","device_id":"uuid:a","mode":"stereo"},
+                    {"transport":"","device_id":"uuid:b","mode":"mono"},
+                    {"transport":"local","device_id":"","mode":"mono"},
+                    {"transport":"local","device_id":"alsa#speakers","mode":"stereo"},
+                    {"transport":"local","device_id":"alsa#speakers","mode":"mono"}
+                ]
             }"#,
         )
         .unwrap();
@@ -402,6 +440,23 @@ mod tests {
         // effect — rather than failing the whole file.
         assert_eq!(loaded.dsp_quality, None);
         assert_eq!(loaded.recommended_dsp_quality, None);
+        // One entry per output, none for unnamed outputs, `auto` means
+        // absent, and the newest duplicate wins.
+        assert_eq!(
+            loaded.channel_modes,
+            vec![
+                SavedChannelMode {
+                    transport: "sonos".into(),
+                    device_id: "uuid:a".into(),
+                    mode: ChannelMode::Stereo,
+                },
+                SavedChannelMode {
+                    transport: "local".into(),
+                    device_id: "alsa#speakers".into(),
+                    mode: ChannelMode::Mono,
+                },
+            ]
+        );
         let _ = fs::remove_file(path);
     }
 

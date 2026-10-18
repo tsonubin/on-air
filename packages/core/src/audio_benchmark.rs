@@ -1,6 +1,7 @@
 //! A small, isolated run of the real DSP pipeline. No samples are sent to a
 //! live output, and settings change only through the separate buffer action.
 use crate::dsp::bridge::RateBridge;
+use crate::dsp::channel::{Destination, SinkConstruction};
 use crate::dsp::{DspQuality, PIPELINE_CHANNELS};
 use crate::pipeline::{new_ring_buffer, spawn_processing_task};
 use on_air_api::AudioBenchmark;
@@ -93,7 +94,12 @@ fn profile_costs_ms(input_hz: u32, output_hz: u32, pcm: &[u8]) -> [f64; 3] {
     let mut costs = [0.0f64; 3];
     let mut converted = Vec::new();
     for (index, quality) in DspQuality::ALL.iter().enumerate() {
-        let mut bridge = RateBridge::new(input_hz, output_hz, PIPELINE_CHANNELS, *quality);
+        let mut bridge = RateBridge::new(
+            input_hz,
+            output_hz,
+            &SinkConstruction::Benchmark.auto(Destination::stereo("benchmark")),
+            *quality,
+        );
         bridge.process_l16_into(pcm, &mut converted);
         for _ in 0..COST_PROBES {
             let started = Instant::now();
@@ -132,7 +138,12 @@ pub fn run(
         let samples: Vec<_> = (0..CHUNK_FRAMES)
             .flat_map(|i| [(i as f32 * 0.05).sin() * 0.3; PIPELINE_CHANNELS])
             .collect();
-        let mut bridge = RateBridge::new(input_hz, output_hz, 2, quality);
+        let mut bridge = RateBridge::new(
+            input_hz,
+            output_hz,
+            &SinkConstruction::Benchmark.auto(Destination::stereo("benchmark")),
+            quality,
+        );
         let mut converted = Vec::new();
         let quantum = Duration::from_secs_f64(CHUNK_FRAMES as f64 / f64::from(input_hz));
         let started = Instant::now();

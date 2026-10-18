@@ -1,3 +1,4 @@
+use super::channel::ChannelPlan;
 use crate::dsp::DspQuality;
 use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
@@ -90,9 +91,12 @@ impl RateControl {
     }
 }
 
-/// Resamples fixed-size chunks of interleaved PCM with `channels` samples
-/// per frame. `quality` selects the interpolation profile at construction
-/// ([`DspQuality::Economy`] is the historical cubic Farrow path).
+/// Resamples fixed-size chunks of interleaved PCM with `plan.channels()`
+/// samples per frame. `quality` selects the interpolation profile at
+/// construction ([`DspQuality::Economy`] is the historical cubic Farrow
+/// path). The plan is the same justified channel request every sender-side
+/// construction uses ([`super::channel`]), so no construction can quietly
+/// ask for a mono layout on a stereo path.
 ///
 /// [`PcmResampler::process_into`] allocates nothing per call in steady
 /// state (the C7 allocation guard proves it): the output buffer is owned
@@ -107,10 +111,10 @@ impl PcmResampler {
     pub fn new(
         input_rate_hz: u32,
         output_rate_hz: u32,
-        channels: usize,
+        plan: &ChannelPlan,
         quality: DspQuality,
     ) -> Self {
-        let channels = channels.max(1);
+        let channels = plan.channels().max(1);
         let ratio = output_rate_hz as f64 / input_rate_hz as f64;
         let inner = build_async(ratio, 1.1, channels, quality);
         let output_data = vec![0.0; inner.output_frames_max() * channels];
@@ -184,13 +188,13 @@ impl StreamingResampler {
     pub fn new(
         input_rate_hz: u32,
         output_rate_hz: u32,
-        channels: usize,
+        plan: &ChannelPlan,
         quality: DspQuality,
     ) -> Self {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels, quality))
+            Some(PcmResampler::new(input_rate_hz, output_rate_hz, plan, quality))
         };
         StreamingResampler {
             input_rate_hz,
@@ -265,10 +269,10 @@ impl SteerableResampler {
     pub fn new(
         input_rate_hz: u32,
         output_rate_hz: u32,
-        channels: usize,
+        plan: &ChannelPlan,
         quality: DspQuality,
     ) -> Self {
-        let channels = channels.max(1);
+        let channels = plan.channels().max(1);
         let ratio = f64::from(output_rate_hz) / f64::from(input_rate_hz);
         let inner = build_async(ratio, 1.0 + MAX_CORRECTION_PPM / 1e6, channels, quality);
         let output_data = vec![0.0; inner.output_frames_max() * channels];

@@ -18,6 +18,7 @@ use crate::session::OutputSession;
 use crate::settings::{SavedSettings, SettingsPersistence};
 use crate::sync::{OutputKey, SyncController};
 use crate::timeline::PcmChunk;
+use on_air_api::ChannelMode;
 use parking_lot::Mutex as StdMutex;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -178,6 +179,9 @@ pub struct CoreState {
     pub(crate) background: Arc<StdMutex<BackgroundTasks>>,
     /// Calls made on mock senders, for tests.
     pub mock_log: Arc<tokio::sync::Mutex<Vec<String>>>,
+    /// "This computer" outputs the mock core reports instead of probing
+    /// Pulse; empty by default (roadmap A4 tests seed a mono speaker).
+    pub mock_local_outputs: Arc<StdMutex<Vec<crate::sender::local::LocalOutput>>>,
     pub(crate) pcm_sink: Arc<RecordingPcmSink>,
 }
 
@@ -338,6 +342,7 @@ impl CoreState {
             config: CoreConfig::default(),
             background: Arc::new(StdMutex::new(BackgroundTasks::default())),
             mock_log: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            mock_local_outputs: Arc::new(StdMutex::new(Vec::new())),
             pcm_sink: Arc::new(RecordingPcmSink::default()),
         }
     }
@@ -400,6 +405,16 @@ impl CoreState {
         );
         state.sonos.lock().await.upsert(sonos, Instant::now());
         state
+    }
+
+    /// Hardware-free mode: senders are fakes, inputs come from the mock
+    /// list, and "This computer" outputs come from
+    /// [`Self::mock_local_outputs`] instead of probing Pulse.
+    pub fn set_mock_local_outputs(
+        &self,
+        outputs: Vec<crate::sender::local::LocalOutput>,
+    ) {
+        *self.mock_local_outputs.lock() = outputs;
     }
 
     /// Hardware-free mode: senders are fakes, inputs come from the mock
@@ -616,6 +631,41 @@ impl CoreState {
     pub(crate) fn remember_volume(&self, volume: u8) {
         self.output_volume.store(volume, Ordering::Release);
         self.update_saved_settings(|saved| saved.volume = volume);
+    }
+
+    /// One output's saved channel mode (roadmap A4). Absent settings mean
+    /// [`ChannelMode::Auto`], the historical fit.
+    pub fn channel_mode(&self, transport: &str, device_id: &str) -> ChannelMode {
+        self.saved_settings
+            .lock()
+            .channel_modes
+            .iter()
+            .find(|saved| saved.transport == transport && saved.device_id == device_id)
+            .map(|saved| saved.mode)
+            .unwrap_or_default()
+    }
+
+    /// Persist one output's channel mode (`channel_modes` in settings.json).
+    /// `auto` is stored as "absent": it is the default, and dropping the
+    /// entry keeps old cores reading the file unchanged.
+    pub(crate) fn remember_channel_mode(
+        &self,
+        transport: &str,
+        device_id: &str,
+        mode: ChannelMode,
+    ) {
+        self.update_saved_settings(|saved| {
+            saved
+                .channel_modes
+                .retain(|entry| !(entry.transport == transport && entry.device_id == device_id));
+            if mode != ChannelMode::Auto {
+                saved.channel_modes.push(crate::settings::SavedChannelMode {
+                    transport: transport.to_string(),
+                    device_id: device_id.to_string(),
+                    mode,
+                });
+            }
+        });
     }
 
     pub(crate) fn remember_capture_buffer(&self, buffer_ms: u32) {

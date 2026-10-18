@@ -7,6 +7,7 @@
 //! machinery guarantees before a calibrated speaker ever hears it.
 
 use bytes::Bytes;
+use on_air_core::dsp::channel::{Destination, SinkConstruction};
 use on_air_core::dsp::resample::SteerableResampler;
 use on_air_core::dsp::DspQuality;
 use on_air_core::sender::{AudioSender, SenderError, StartPlan};
@@ -159,7 +160,12 @@ fn drift_steering_moves_the_ratio_in_the_right_direction_and_converges() {
 
     // The correction lands on a real variable-ratio resampler and changes
     // what it produces.
-    let mut steered = SteerableResampler::new(nominal_hz, nominal_hz, 2, DspQuality::Balanced);
+    let mut steered = SteerableResampler::new(
+        nominal_hz,
+        nominal_hz,
+        &SinkConstruction::ProcessingThread.auto(Destination::stereo("sync timeline test")),
+        DspQuality::Balanced,
+    );
     let nominal_ratio = steered.ratio();
     steered.set_rate_correction_ppm(fast_ppm);
     let fast_ratio = steered.ratio();

@@ -25,14 +25,14 @@ describe("sheetProps", () => {
       { $type: "presentationBackground", color: "#171719" },
       { $type: "tint", color: "#ff453a" },
     ]);
-    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 352 }]);
-    expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 300 }]);
+    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 494 }]);
+    expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 340 }]);
     expect(sheetProps({ kind: "output", count: 2, trim: true }).snapPoints).toEqual([
-      { height: 502 },
+      { height: 644 },
     ]);
     expect(
       sheetProps({ kind: "output", count: 2, groups: { speakers: 2, groups: 1 } }).snapPoints,
-    ).toEqual([{ height: 776 }]);
+    ).toEqual(["full"]);
     expect(
       sheetProps({ kind: "output", count: 2, groups: { speakers: 4, groups: 3 } }).snapPoints,
     ).toEqual(["full"]);
@@ -105,6 +105,17 @@ test("error copy follows the envelope code, then the status", () => {
     /Could not reach the desktop/,
   );
   expect(friendlyError(envelope(409, "stream_busy"))).toMatch(/already playing/);
+  // A rejected request is the one envelope whose message is written for the
+  // listener: the core's own explanation is shown as it sent it.
+  expect(
+    friendlyError(
+      new HttpError(
+        "/api/outputs/channel-mode",
+        400,
+        JSON.stringify({ error: "Mono Speaker plays mono only.", code: "invalid_request" }),
+      ),
+    ),
+  ).toBe("Mono Speaker plays mono only.");
 });
 
 test("inputs are labelled and every distinct device stays selectable", () => {

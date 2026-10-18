@@ -1,3 +1,4 @@
+use on_air_core::dsp::channel::{ChannelMode, ChannelPlan, Destination, SinkConstruction};
 use on_air_core::dsp::resample::{PcmResampler, StreamingResampler};
 use on_air_core::dsp::DspQuality;
 
@@ -14,10 +15,23 @@ fn streaming(r: &mut StreamingResampler, input: &[f32]) -> Vec<f32> {
     out
 }
 
+/// A one-channel plan, as only an explicit mono mode (or a genuinely mono
+/// destination) can justify one (roadmap A4/A6).
+fn mono_plan() -> ChannelPlan {
+    SinkConstruction::ProcessingThread
+        .plan(ChannelMode::Mono, Destination::stereo("resample test"))
+        .unwrap()
+}
+
+/// The pipeline's own stereo layout.
+fn stereo_plan() -> ChannelPlan {
+    SinkConstruction::ProcessingThread.auto(Destination::stereo("resample test"))
+}
+
 #[test]
 fn upsamples_44100_to_48000_with_correct_ratio() {
     for quality in DspQuality::ALL {
-        let mut r = PcmResampler::new(44100, 48000, 1, quality);
+        let mut r = PcmResampler::new(44100, 48000, &mono_plan(), quality);
         let n = r.input_frames_next();
         let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.01).sin()).collect();
         let out = pcm(&mut r, &input);
@@ -34,7 +48,7 @@ fn upsamples_44100_to_48000_with_correct_ratio() {
 #[test]
 fn identity_ratio_reproduces_the_signal_after_warm_up() {
     for quality in DspQuality::ALL {
-        let mut r = PcmResampler::new(44100, 44100, 1, quality);
+        let mut r = PcmResampler::new(44100, 44100, &mono_plan(), quality);
         let n = r.input_frames_next();
         // The same chunk every call: the input stream is periodic with
         // period `n`, so the steady-state output is the input delayed by
@@ -68,7 +82,7 @@ fn identity_ratio_reproduces_the_signal_after_warm_up() {
 
 #[test]
 fn identity_ratio_is_near_lossless() {
-    let mut r = PcmResampler::new(44100, 44100, 1, DspQuality::Economy);
+    let mut r = PcmResampler::new(44100, 44100, &mono_plan(), DspQuality::Economy);
     let n = r.input_frames_next();
     let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
     let out = pcm(&mut r, &input);
@@ -93,7 +107,7 @@ fn identity_ratio_is_near_lossless() {
 
 #[test]
 fn streaming_passthrough_keeps_samples_when_rates_match() {
-    let mut r = StreamingResampler::new(48_000, 48_000, 1, DspQuality::Economy);
+    let mut r = StreamingResampler::new(48_000, 48_000, &mono_plan(), DspQuality::Economy);
     let input = vec![0.1, -0.2, 0.3];
     assert_eq!(streaming(&mut r, &input), input);
 }
@@ -101,7 +115,7 @@ fn streaming_passthrough_keeps_samples_when_rates_match() {
 #[test]
 fn streaming_resampler_accepts_uneven_chunks_44100_to_48000() {
     for quality in DspQuality::ALL {
-        let mut r = StreamingResampler::new(44_100, 48_000, 1, quality);
+        let mut r = StreamingResampler::new(44_100, 48_000, &mono_plan(), quality);
         let mut output = Vec::new();
         // Inner resampler wants 1024-frame chunks; leftover frames stay buffered.
         let fed = 200 * 12;
@@ -127,7 +141,7 @@ const PI: f32 = std::f32::consts::PI;
 #[test]
 fn stereo_resample_keeps_channels_apart() {
     for quality in DspQuality::ALL {
-        let mut r = PcmResampler::new(44_100, 48_000, 2, quality);
+        let mut r = PcmResampler::new(44_100, 48_000, &stereo_plan(), quality);
         let frames = r.input_frames_next();
         let tone = |n: usize| (2.0 * PI * 1000.0 * n as f32 / 44_100.0).sin() * 0.5;
         let mut out = Vec::new();
@@ -156,7 +170,7 @@ fn stereo_resample_keeps_channels_apart() {
 #[test]
 #[should_panic(expected = "input_frames_next")]
 fn stereo_chunk_must_hold_both_channels() {
-    let mut r = PcmResampler::new(44_100, 48_000, 2, DspQuality::Economy);
+    let mut r = PcmResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::Economy);
     let mono_sized = vec![0.0; r.input_frames_next()];
     pcm(&mut r, &mono_sized);
 }
@@ -164,7 +178,7 @@ fn stereo_chunk_must_hold_both_channels() {
 #[test]
 fn streaming_stereo_accepts_any_whole_frame_count() {
     for quality in DspQuality::ALL {
-        let mut r = StreamingResampler::new(44_100, 48_000, 2, quality);
+        let mut r = StreamingResampler::new(44_100, 48_000, &stereo_plan(), quality);
         let mut out = Vec::new();
         for _ in 0..8 {
             out.extend(streaming(&mut r, &[0.25, -0.25].repeat(333)));
@@ -176,7 +190,7 @@ fn streaming_stereo_accepts_any_whole_frame_count() {
 
 #[test]
 fn same_rate_streaming_stereo_is_lossless() {
-    let mut r = StreamingResampler::new(48_000, 48_000, 2, DspQuality::High);
+    let mut r = StreamingResampler::new(48_000, 48_000, &stereo_plan(), DspQuality::High);
     assert_eq!(
         streaming(&mut r, &[0.1, -0.1, 0.2, -0.2]),
         vec![0.1, -0.1, 0.2, -0.2]
@@ -185,9 +199,9 @@ fn same_rate_streaming_stereo_is_lossless() {
 
 #[test]
 fn each_quality_selects_a_different_resampler() {
-    let economy = PcmResampler::new(44_100, 48_000, 2, DspQuality::Economy);
-    let balanced = PcmResampler::new(44_100, 48_000, 2, DspQuality::Balanced);
-    let high = PcmResampler::new(44_100, 48_000, 2, DspQuality::High);
+    let economy = PcmResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::Economy);
+    let balanced = PcmResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::Balanced);
+    let high = PcmResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::High);
     // Economy is the cubic Farrow polynomial interpolator: no sinc
     // anti-aliasing filter — exactly the resampler every path used before
     // quality profiles existed. The tests above pin its behaviour while
@@ -205,7 +219,7 @@ fn each_quality_selects_a_different_resampler() {
 #[test]
 fn the_quality_profiles_resample_a_near_nyquist_tone_differently() {
     fn resample(quality: DspQuality) -> Vec<f32> {
-        let mut r = PcmResampler::new(44_100, 48_000, 1, quality);
+        let mut r = PcmResampler::new(44_100, 48_000, &mono_plan(), quality);
         let n = r.input_frames_next();
         let tone = |i: usize| (2.0 * PI * 17_000.0 * i as f32 / 44_100.0).sin() * 0.5;
         let mut out = Vec::new();
@@ -242,9 +256,9 @@ fn the_quality_profiles_resample_a_near_nyquist_tone_differently() {
 #[test]
 fn the_steerable_resampler_follows_the_same_profile_ladder() {
     use on_air_core::dsp::resample::SteerableResampler;
-    let economy = SteerableResampler::new(44_100, 48_000, 2, DspQuality::Economy);
-    let balanced = SteerableResampler::new(44_100, 48_000, 2, DspQuality::Balanced);
-    let high = SteerableResampler::new(44_100, 48_000, 2, DspQuality::High);
+    let economy = SteerableResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::Economy);
+    let balanced = SteerableResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::Balanced);
+    let high = SteerableResampler::new(44_100, 48_000, &stereo_plan(), DspQuality::High);
     assert_eq!(economy.cutoff(), None);
     let balanced_cutoff = balanced.cutoff().expect("balanced is a sinc resampler");
     let high_cutoff = high.cutoff().expect("high is a sinc resampler");
@@ -262,7 +276,7 @@ fn report_per_profile_resampler_costs() {
     let tone = |i: usize| (2.0 * PI * 1000.0 * i as f32 / 44_100.0).sin() * 0.5;
     let input: Vec<f32> = (0..frames).map(tone).collect();
     for quality in DspQuality::ALL {
-        let mut r = PcmResampler::new(44_100, 48_000, 2, quality);
+        let mut r = PcmResampler::new(44_100, 48_000, &stereo_plan(), quality);
         let n = r.input_frames_next();
         let mut out = Vec::new();
         let started = Instant::now();

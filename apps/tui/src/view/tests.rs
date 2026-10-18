@@ -1,8 +1,8 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, AudioQualityResponse, BluetoothDeviceInfo, CdStatus, DspQuality,
-    OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
-    SyncGroupMember, SyncGroupView, SyncState,
+    ActiveOutput, ActiveOutputView, AudioQualityResponse, BluetoothDeviceInfo, CdStatus,
+    ChannelMode, DspQuality, OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse,
+    SampleRateSide, StatusResponse, SyncGroupMember, SyncGroupView, SyncState,
 };
 use crate::client::Connection;
 use crate::keys::KEYS;
@@ -22,6 +22,8 @@ fn output(id: &str, name: &str, transport: &str, needs_pair: bool, paired: bool)
         member_count: 1,
         needs_pair,
         paired,
+        channel_mode: None,
+        channels: None,
     }
 }
 
@@ -296,6 +298,7 @@ fn dest_tags() {
     };
     tag("Mock Sonos", "⚇ pair");
     tag("Mock Sonos", "live");
+    tag("Mock Sonos", "ch auto");
     tag("Pin HomePod", "pin");
     tag("Broken HomePod", "✗ failed");
     tag("Connected Speaker", "connected");
@@ -322,6 +325,19 @@ fn dest_tags() {
     assert!(row.contains("⚇ pair"), "{row}");
     // The tag sits at the right edge of the Destination block.
     assert!(row.trim_end().ends_with("✗ failed│"), "{row}");
+}
+
+/// Roadmap A4: each Destination row shows its saved channel mode, with
+/// `auto` dimmed as the default the user has not overridden.
+#[test]
+fn dest_rows_show_the_saved_channel_mode() {
+    let mut m = tagged_model();
+    m.snapshot.outputs[0].channel_mode = Some(ChannelMode::Mono);
+    m.snapshot.outputs[1].channel_mode = Some(ChannelMode::Stereo);
+    let b = render(&m, 100, 30);
+    assert!(row_text(&b, "Mock Sonos").contains("ch mono"));
+    assert!(row_text(&b, "Pin HomePod").contains("ch stereo"));
+    assert!(row_text(&b, "Broken HomePod").contains("ch auto"));
 }
 
 #[test]

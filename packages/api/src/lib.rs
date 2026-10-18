@@ -280,6 +280,29 @@ pub struct ActivateInputRequest {
 // Outputs
 // ---------------------------------------------------------------------------
 
+/// How one output's pipeline stereo signal is fitted to its destination.
+/// Saved per output; the default, `auto`, is the historical behaviour and
+/// never changes what a listener hears.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChannelMode {
+    /// Fit the destination's reported channel count (the historical fit:
+    /// mono gets a `(L + R) / 2` downmix, two channels pass through, wider
+    /// destinations keep the extra channels silent).
+    #[default]
+    Auto,
+    /// Always stereo. Rejected with an explanation on a mono destination,
+    /// never silently collapsed.
+    Stereo,
+    /// A true `(L + R) / 2` downmix: the stream becomes genuinely mono.
+    Mono,
+}
+
+impl ChannelMode {
+    /// All modes, in the order the clients cycle them.
+    pub const ALL: [ChannelMode; 3] = [ChannelMode::Auto, ChannelMode::Stereo, ChannelMode::Mono];
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputInfo {
     pub id: String,
@@ -291,6 +314,13 @@ pub struct OutputInfo {
     pub member_count: u8,
     pub needs_pair: bool,
     pub paired: bool,
+    /// The saved channel mode of this output; absent means [`ChannelMode::Auto`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_mode: Option<ChannelMode>,
+    /// What the destination reports for its channel count, when the core
+    /// can probe it. Absent means "unknown"; the sink re-checks at open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channels: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,6 +379,16 @@ impl ActiveOutputView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ActiveOutputResponse {
     pub active: Option<ActiveOutputView>,
+}
+
+/// `PUT /api/outputs/channel-mode`: one output's channel mode. Rejected
+/// with an explanation when the mode cannot fit the destination (stereo on
+/// a mono device).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetChannelModeRequest {
+    pub transport: String,
+    pub device_id: String,
+    pub mode: ChannelMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

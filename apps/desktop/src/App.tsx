@@ -84,6 +84,7 @@ function App() {
               onStartGroup={(groupId) => syncGroups.startGroup(groupId)}
               onStopGroup={(groupId) => syncGroups.stopGroup(groupId)}
               onDissolveGroup={(groupId) => syncGroups.dissolveGroup(groupId)}
+              onSetChannelMode={(output, mode) => void selection.setChannelMode(output, mode)}
               onBluetoothSettings={selection.openBluetoothSettings}
               onAirplayInfo={selection.showAirplayHelp}
               onRefresh={() => void selection.refreshDevices()}
