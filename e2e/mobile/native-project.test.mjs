@@ -21,6 +21,7 @@ const androidActivity = read(
 );
 const iosPodfile = read("apps/mobile/ios/Podfile");
 const iosAppDelegate = read("apps/mobile/ios/OnAirMobile/AppDelegate.swift");
+const iosSceneDelegate = read("apps/mobile/ios/OnAirMobile/SceneDelegate.swift");
 const iosInfo = read("apps/mobile/ios/OnAirMobile/Info.plist");
 const iosProject = read("apps/mobile/ios/OnAirMobile.xcodeproj/project.pbxproj");
 
@@ -96,6 +97,23 @@ test("iOS native project autolinks Expo and declares LAN discovery access", () =
     marketingCatalog.images.some(
       (image) => image.idiom === "universal" && image.filename === "AppIcon.png",
     ),
+  );
+});
+
+test("iOS adopts the scene life cycle the iOS 27 SDK requires", () => {
+  // The iOS 27 SDK asserts at launch unless the app adopts UIScene. Expo's scene
+  // delegate creates the window and starts React Native from the app delegate's factory.
+  assert.match(
+    iosAppDelegate,
+    /class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider/,
+  );
+  assert.doesNotMatch(iosAppDelegate, /startReactNative/);
+  assert.match(iosSceneDelegate, /class SceneDelegate: ExpoAppSceneDelegate/);
+  assert.match(iosProject, /SceneDelegate\.swift in Sources/);
+  assert.match(iosInfo, /<key>UIApplicationSceneManifest<\/key>/);
+  assert.match(
+    iosInfo,
+    /<key>UISceneDelegateClassName<\/key>\s*<string>\$\(PRODUCT_MODULE_NAME\)\.SceneDelegate<\/string>/,
   );
 });
 
