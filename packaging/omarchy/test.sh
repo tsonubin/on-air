@@ -86,7 +86,7 @@ echo "ok $dir/install.sh packaging/aur/on-air"
 # install.sh must build this checkout in place, not the last release tag.
 stage=$(mktemp -d)
 trap '[ -n "$stage" ] && rm -rf -- "$stage"' EXIT
-sh "$dir/install.sh" --prepare-only "$stage" >/dev/null || fail "install.sh --prepare-only failed"
+sh "$dir/install.sh" --checkout --prepare-only "$stage" >/dev/null || fail "install.sh --checkout --prepare-only failed"
 [ -f "$stage/PKGBUILD" ] || fail "install.sh staged no PKGBUILD"
 grep -q '^source=()$' "$stage/PKGBUILD" || fail "staged PKGBUILD still downloads a source"
 grep -q '^export CARGO_TARGET_DIR=target/omarchy$' "$stage/PKGBUILD" || fail "staged PKGBUILD does not use target/omarchy"
@@ -97,6 +97,29 @@ linked=$(ls -d "$stage"/src/on-air-*)
 [ -L "$linked" ] && [ "$(cd "$linked" && pwd -P)" = "$(pwd -P)" ] || fail "staged source is not a link to this checkout"
 sh "$dir/install.sh" --bogus >/dev/null 2>&1 && fail "install.sh accepted an unknown option"
 echo "ok $dir/install.sh builds the checkout"
+# The default install: the release's on-air-bin recipe with the binary
+# checksums from its SHA256SUMS, staged from a fake release over file://.
+fake=$(mktemp -d)
+trap '[ -n "$stage" ] && rm -rf -- "$stage"; rm -rf -- "$fake"' EXIT
+mkdir -p "$fake/raw/v9.0.0/packaging/aur" "$fake/releases/download/v9.0.0"
+# -L: on-air-bin/on-air.install is a symlink into ../on-air; the installer
+# fetches on-air's copy, so both recipes go into the fake raw tree.
+cp -rL packaging/aur/on-air packaging/aur/on-air-bin "$fake/raw/v9.0.0/packaging/aur/"
+for f in on-air-core-serve-linux-x86_64 on-air-tui-linux-x86_64 on-air-core-serve-linux-aarch64 on-air-tui-linux-aarch64; do
+  echo "$(printf %s "$f" | sha256sum | cut -d' ' -f1)  $f"
+done > "$fake/releases/download/v9.0.0/SHA256SUMS"
+ON_AIR_RAW_URL="file://$fake/raw" ON_AIR_RELEASE_URL="file://$fake/releases" \
+  sh "$dir/install.sh" --version 9.0.0 --prepare-only "$fake/bin" >/dev/null || fail "install.sh prebuilt staging failed"
+core_sum=$(printf %s on-air-core-serve-linux-x86_64 | sha256sum | cut -d' ' -f1)
+grep -q "^sha256sums_x86_64=('$core_sum' '" "$fake/bin/PKGBUILD" || fail "install.sh did not pin the release checksums"
+grep -q "SKIP" "$fake/bin/PKGBUILD" && fail "install.sh left a SKIP checksum"
+bash -n "$fake/bin/PKGBUILD" || fail "staged on-air-bin PKGBUILD syntax"
+[ -f "$fake/bin/on-air.install" ] || fail "install.sh did not stage on-air-bin's on-air.install"
+sed -i '/on-air-tui-linux-aarch64/d' "$fake/releases/download/v9.0.0/SHA256SUMS"
+ON_AIR_RAW_URL="file://$fake/raw" ON_AIR_RELEASE_URL="file://$fake/releases" \
+  sh "$dir/install.sh" --version 9.0.0 --prepare-only "$fake/bad" >/dev/null 2>&1 &&
+  fail "install.sh accepted a release missing a binary checksum"
+echo "ok $dir/install.sh installs a release prebuilt"
 python3 "$dir/test-install.py" || fail "install.sh installation flow"
 echo "ok $dir/install.sh authentication and failure handling"
 
@@ -114,6 +137,36 @@ for recipe in on-air on-air-bin on-air-desktop-bin; do
   grep -q "pkgver = $version$" "packaging/aur/$recipe/.SRCINFO" || fail "$recipe .SRCINFO pkgver is not $version"
   grep -q 'licenses/' "$pkgbuild" || fail "$pkgbuild does not install the license"
 done
+# Each directory is a whole AUR repository: a 0BSD license for the recipe,
+# a .gitignore that keeps every recipe file, and no source named like one
+# of those files (makepkg would use the local file instead of downloading).
+python3 - <<'PYCHECK' || fail "AUR recipe directories do not follow the submission guidelines"
+import pathlib, sys
+errors = []
+for recipe in ("on-air", "on-air-bin", "on-air-desktop-bin"):
+    d = pathlib.Path("packaging/aur") / recipe
+    lic = d / "LICENSE"
+    if not lic.is_file() or "Permission to use, copy, modify, and/or distribute" not in lic.read_text():
+        errors.append(f"{recipe}: LICENSE is not the 0BSD recipe license")
+    ignore = d / ".gitignore"
+    kept = set()
+    if ignore.is_file():
+        kept = {l[1:] for l in ignore.read_text().splitlines() if l.startswith("!")}
+    else:
+        errors.append(f"{recipe}: no .gitignore")
+    files = {p.name for p in d.iterdir() if p.is_file()}
+    for name in sorted(files - kept):
+        errors.append(f"{recipe}: .gitignore does not keep {name}")
+    for line in (d / ".SRCINFO").read_text().splitlines():
+        key, _, value = line.strip().partition(" = ")
+        if key == "source" or key.startswith("source_"):
+            name = value.split("::", 1)[0] if "::" in value else value.rsplit("/", 1)[-1]
+            if name in files:
+                errors.append(f"{recipe}: source {name} is shadowed by the local file")
+for e in errors:
+    print(e, file=sys.stderr)
+sys.exit(1 if errors else 0)
+PYCHECK
 # One post-install hook: packaging/aur/on-air/on-air.install, which
 # on-air-bin links to.
 for recipe in on-air on-air-bin; do
