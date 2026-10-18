@@ -77,7 +77,7 @@ function TrimEditor({
       testID="trim-editor"
     >
       <Text textStyle={{ fontWeight: "600" }}>{`Latency trim · ${output.name}`}</Text>
-      <Text style={{ color: colors.secondaryLabel }}>{SYNC_TRIM_DESCRIPTION}</Text>
+      <Text textStyle={{ color: colors.secondaryLabel }}>{SYNC_TRIM_DESCRIPTION}</Text>
       <Row alignment="center" spacing={theme.spacing.sm}>
         <Button
           label="−10"
@@ -208,7 +208,7 @@ export function OutputSheet({
                   <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
                   <Text>{`${stereoPair ? "Stereo pair · " : ""}${TRANSPORT_LABELS[output.transport]}`}</Text>
                   {syncRow && (
-                    <Text style={{ color: colors.tertiaryLabel, fontSize: 13 }}>
+                    <Text textStyle={{ color: colors.tertiaryLabel, fontSize: 13 }}>
                       {syncSummary(syncRow)}
                     </Text>
                   )}

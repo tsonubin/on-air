@@ -95,7 +95,7 @@ export default function AudioFormatScreen() {
           <Text>DSP quality</Text>
           <Spacer />
           <Picker
-            selectedValue={audioQuality?.quality}
+            selectedValue={audioQuality?.quality ?? "balanced"}
             appearance="menu"
             enabled={view.controlsEnabled && audioQuality !== null && !audioPerformance.busy}
             onValueChange={(value) => void applyQuality(value as DspQuality)}
@@ -112,9 +112,9 @@ export default function AudioFormatScreen() {
             ))}
           </Picker>
         </Row>
-        <Text>
-          {DSP_QUALITY_DESCRIPTION} {DSP_QUALITY_COSTS[audioQuality?.quality ?? "balanced"]}
-        </Text>
+        <Text>{`${DSP_QUALITY_DESCRIPTION} ${
+          DSP_QUALITY_COSTS[audioQuality?.quality ?? "balanced"]
+        }`}</Text>
         <Button
           label={audioPerformance.busy ? "Working…" : "Run audio check"}
           disabled={!view.controlsEnabled || captureBufferMs === undefined || audioPerformance.busy}
