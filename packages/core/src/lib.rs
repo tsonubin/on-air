@@ -15,6 +15,7 @@ pub mod firewall;
 pub mod http;
 pub mod keep_awake;
 pub mod mdns;
+pub mod mpris;
 pub mod net;
 pub mod pairing;
 pub mod patchbay;
@@ -206,6 +207,12 @@ pub async fn serve_with_state_until(
         }
         background.push(crate::cd::autoplay::spawn_watch(state.clone()));
         background.push(crate::firewall::spawn_watch(state.clone()));
+        // The MPRIS bridge is in-process and gated on demand: it holds a
+        // bus connection only while there is a disc or an active output to
+        // show, so it costs nothing while on-air has nothing to play. See
+        // `crate::mpris`.
+        #[cfg(target_os = "linux")]
+        background.push(crate::mpris::spawn(state.clone()));
     }
     state.spawn_saved_session_restore();
     let patchbay_state = state.clone();

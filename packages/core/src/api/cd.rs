@@ -19,40 +19,14 @@ pub async fn control_cd(
     State(state): State<CoreState>,
     JsonBody(req): JsonBody<CdControlRequest>,
 ) -> Result<Json<CdStatus>, ApiError> {
-    if req.action == CdAction::Eject {
-        autoplay::eject(&state).await;
-        return Ok(Json(state.cd.status()));
-    }
-    if !state.cd.status().present {
-        return Err(ApiError::not_ready("no audio compact disc"));
-    }
-    match req.action {
-        CdAction::Play => {
-            autoplay::ensure_capture(&state).await;
-            state.cd.play();
-        }
-        CdAction::Pause => state.cd.pause(),
-        CdAction::Next => {
-            let _ = state.cd.next();
-        }
-        CdAction::Prev => {
-            let _ = state.cd.prev();
-        }
-        CdAction::Seek => {
-            let Some(position_ms) = req.position_ms else {
-                return Err(ApiError::validation("seek needs position_ms"));
-            };
-            state.cd.seek_ms(position_ms);
-        }
-        CdAction::Goto => {
-            let Some(track) = req.track else {
-                return Err(ApiError::validation("goto needs track"));
-            };
-            state.cd.goto_track(track);
-        }
-        CdAction::Eject => unreachable!("handled above"),
-    }
-    Ok(Json(state.cd.status()))
+    let status = crate::cd::control(&state, &req)
+        .await
+        .map_err(|error| match error {
+            crate::cd::ControlError::NoDisc => ApiError::not_ready(error.to_string()),
+            crate::cd::ControlError::SeekNeedsPosition
+            | crate::cd::ControlError::GotoNeedsTrack => ApiError::validation(error.to_string()),
+        })?;
+    Ok(Json(status))
 }
 
 #[derive(Deserialize)]

@@ -150,7 +150,11 @@ struct CdInner {
     /// the generation it was issued for, so a stale capture handle's cleanup
     /// cannot discard a producer attached after it.
     producer_generation: AtomicU64,
-    events: Mutex<Option<broadcast::Sender<WsEvent>>>,
+    /// Where `CdStateChanged` events fan out. The WebSocket hub and the
+    /// MPRIS bridge each add their own channel: an observer subscribes to
+    /// its channel instead of the hub's broadcast, whose receiver count
+    /// the level meter keys off.
+    events: Mutex<Vec<broadcast::Sender<WsEvent>>>,
     fingerprint: Mutex<String>,
 }
 
@@ -173,7 +177,7 @@ impl CdDeck {
             sector_in_track: Mutex::new(0),
             producer: Mutex::new(None),
             producer_generation: AtomicU64::new(0),
-            events: Mutex::new(None),
+            events: Mutex::new(Vec::new()),
             fingerprint: Mutex::new(String::new()),
         });
         let weak = Arc::downgrade(&inner);
@@ -184,8 +188,12 @@ impl CdDeck {
         CdDeck { inner }
     }
 
-    pub fn set_event_sink(&self, tx: broadcast::Sender<WsEvent>) {
-        *self.inner.events.lock() = Some(tx);
+    /// Fan `CdStateChanged` events out to `tx` as well as every sink added
+    /// before. The WebSocket hub adds its bus at startup; the MPRIS bridge
+    /// adds its own channel so it can watch the deck without a receiver on
+    /// the hub's broadcast (the level meter keys off that receiver count).
+    pub fn add_event_sink(&self, tx: broadcast::Sender<WsEvent>) {
+        self.inner.events.lock().push(tx);
     }
 
     pub fn status(&self) -> CdStatus {
@@ -421,11 +429,12 @@ impl CdInner {
     }
 
     fn emit(&self) {
-        let Some(tx) = self.events.lock().clone() else {
+        let events = self.events.lock();
+        if events.is_empty() {
             return;
-        };
+        }
         let status = self.status();
-        let _ = tx.send(WsEvent::CdStateChanged {
+        let event = WsEvent::CdStateChanged {
             present: status.present,
             playing: status.playing,
             track: status.track,
@@ -434,7 +443,10 @@ impl CdInner {
             album: status.album,
             position_ms: status.position_ms,
             duration_ms: status.duration_ms,
-        });
+        };
+        for tx in events.iter() {
+            let _ = tx.send(event.clone());
+        }
     }
 }
 
@@ -516,6 +528,62 @@ pub fn probe_audio_cd() -> Option<Arc<dyn CdMedium>> {
 
 pub fn eject_drive() -> Result<(), String> {
     sys::eject()
+}
+
+/// Why a `POST /api/cd/control` request cannot run. The HTTP handler and
+/// the MPRIS bridge share [`control`] and each map these onto their own
+/// error type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ControlError {
+    #[error("no audio compact disc")]
+    NoDisc,
+    #[error("seek needs position_ms")]
+    SeekNeedsPosition,
+    #[error("goto needs track")]
+    GotoNeedsTrack,
+}
+
+/// The body of `POST /api/cd/control` applied to the deck: one code path
+/// for the HTTP endpoint, the MPRIS bridge and anything else that drives
+/// the transport.
+pub async fn control(
+    state: &crate::state::CoreState,
+    req: &on_air_api::CdControlRequest,
+) -> Result<CdStatus, ControlError> {
+    if req.action == on_air_api::CdAction::Eject {
+        autoplay::eject(state).await;
+        return Ok(state.cd.status());
+    }
+    if !state.cd.status().present {
+        return Err(ControlError::NoDisc);
+    }
+    match req.action {
+        on_air_api::CdAction::Play => {
+            autoplay::ensure_capture(state).await;
+            state.cd.play();
+        }
+        on_air_api::CdAction::Pause => state.cd.pause(),
+        on_air_api::CdAction::Next => {
+            let _ = state.cd.next();
+        }
+        on_air_api::CdAction::Prev => {
+            let _ = state.cd.prev();
+        }
+        on_air_api::CdAction::Seek => {
+            let Some(position_ms) = req.position_ms else {
+                return Err(ControlError::SeekNeedsPosition);
+            };
+            state.cd.seek_ms(position_ms);
+        }
+        on_air_api::CdAction::Goto => {
+            let Some(track) = req.track else {
+                return Err(ControlError::GotoNeedsTrack);
+            };
+            state.cd.goto_track(track);
+        }
+        on_air_api::CdAction::Eject => unreachable!("handled above"),
+    }
+    Ok(state.cd.status())
 }
 
 #[cfg(test)]

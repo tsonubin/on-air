@@ -26,7 +26,7 @@ use std::sync::atomic::{
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 
 pub use crate::session::ActiveOutput;
 
@@ -129,6 +129,12 @@ pub struct CoreState {
     saved_settings: Arc<StdMutex<SavedSettings>>,
     settings_persistence: Option<SettingsPersistence>,
     settings_revision: Arc<AtomicU64>,
+    /// Bumped whenever remembered state actually changes (the service
+    /// flag, the volume, the saved input or output...). Observers that
+    /// re-read everything anyway — the MPRIS bridge — wait on this instead
+    /// of subscribing to [`CoreState::ws_tx`], whose receiver count the
+    /// level meter keys off.
+    change_signal: watch::Sender<u64>,
     restoring_settings: Arc<AtomicBool>,
 
     // Pairing.
@@ -243,8 +249,9 @@ impl CoreState {
                 trim.trim_ms,
             );
         }
+        let (change_signal, _) = watch::channel(0u64);
         let cd = CdDeck::new();
-        cd.set_event_sink(ws_tx.clone());
+        cd.add_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
         let dsp_quality = Arc::new(StdMutex::new(saved_settings.dsp_quality));
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
@@ -288,6 +295,7 @@ impl CoreState {
             saved_settings: Arc::new(StdMutex::new(saved_settings)),
             settings_persistence,
             settings_revision: Arc::new(AtomicU64::new(0)),
+            change_signal,
             restoring_settings: Arc::new(AtomicBool::new(false)),
             require_auth: false,
             pairing: Arc::new(StdMutex::new(PairingState::new())),
@@ -389,8 +397,10 @@ impl CoreState {
         child.legacy_output = Some(self.output.clone());
         let (audio_tx, _) = broadcast::channel(AUDIO_BROADCAST_CAPACITY);
         let (ws_tx, _) = broadcast::channel(64);
+        let (change_signal, _) = watch::channel(0u64);
         child.audio_tx = audio_tx;
         child.ws_tx = ws_tx;
+        child.change_signal = change_signal;
         child.patchbay = Arc::new(crate::patchbay::Patchbay::new(None, self.mock));
         child.settings_persistence = None;
         child.saved_settings = Arc::new(StdMutex::new(SavedSettings::default()));
@@ -429,6 +439,12 @@ impl CoreState {
     /// The live-input session.
     pub fn input(&self) -> &InputSession {
         &self.input
+    }
+
+    /// Follow the change notice: each tick means remembered state changed
+    /// and a full re-read is worthwhile.
+    pub fn subscribe_changes(&self) -> watch::Receiver<u64> {
+        self.change_signal.subscribe()
     }
 
     /// Identity of the output that owns exclusivity (starting, live or
@@ -548,6 +564,7 @@ impl CoreState {
             return;
         }
         self.settings_revision.fetch_add(1, Ordering::AcqRel);
+        self.change_signal.send_modify(|stamp| *stamp += 1);
         if let Some(persistence) = self.settings_persistence.as_ref() {
             persistence.queue(saved.clone());
         }
