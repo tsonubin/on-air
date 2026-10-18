@@ -22,7 +22,7 @@ fi
 mkdir -p "$(dirname "$destination")"
 stage=$(mktemp -d "$(dirname "$destination")/.on-air.XXXXXX")
 trap 'rm -rf -- "$stage"' EXIT HUP INT TERM
-for file in manifest.json Widget.qml CoreClient.qml PatchbayView.qml NodeColumn.qml CableLayer.qml Rope.js; do
+for file in manifest.json Widget.qml CoreClient.qml PatchbayView.qml NodeColumn.qml CableLayer.qml Rope.js MediaWidget.qml; do
   cp "$source_dir/$file" "$stage/$file"
 done
 if command -v omarchy >/dev/null 2>&1; then

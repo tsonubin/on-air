@@ -30,6 +30,7 @@ class PluginInstall(unittest.TestCase):
             destination = root / "config/omarchy/plugins/on-air.patchbay"
             self.assertEqual(json.loads((destination / "manifest.json").read_text())["id"], "on-air.patchbay")
             self.assertTrue((destination / "Widget.qml").is_file())
+            self.assertTrue((destination / "MediaWidget.qml").is_file())
             self.assertFalse(any(p.is_symlink() for p in destination.rglob("*")))
             edit = destination / "local-note"
             edit.write_text("keep my changes")
@@ -46,6 +47,18 @@ class PluginInstall(unittest.TestCase):
             self.assertIn("plugin enable on-air.patchbay", log.read_text())
             self.assertIn("bar move on-air.patchbay --after omarchy.clock", log.read_text())
             self.assertNotEqual(run("--unknown").returncode, 0)
+
+    def test_installer_ships_every_panel_source(self):
+        """A new QML source that the installer does not copy would ship a
+        plugin that fails at load time; fail loudly instead."""
+        script = Path(__file__).with_name("install-plugin.sh").read_text()
+        match = re.search(r"^for file in ([^;]+); do$", script, re.M)
+        self.assertIsNotNone(match, "install-plugin.sh has no shipped file list")
+        shipped = set(match.group(1).split())
+        panel = Path(__file__).resolve().parents[2] / "apps/quickshell"
+        sources = {p.name for p in panel.iterdir() if p.suffix in (".qml", ".js")}
+        self.assertEqual(sources - shipped, {"Preview.qml"},
+                         "every panel source must ship except the dev-only Preview.qml")
 
 
 OMARCHY_SHELL = Path("/usr/share/omarchy/shell")

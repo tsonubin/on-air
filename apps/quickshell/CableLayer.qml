@@ -17,6 +17,8 @@ Canvas {
     property bool activeMotion: false
     property real previousTime: 0
     property rect cableBounds: Qt.rect(0, 0, width, height)
+    // Generous enough to click the visible curve without aiming.
+    property real hitTolerance: 9
 
     function bounds() {
         return {
@@ -96,9 +98,13 @@ Canvas {
     }
     function linkAt(point) {
         var ids = Object.keys(ropes);
-        for (var i = ids.length - 1; i >= 0; --i)
-            if (Rope.hit(ropes[ids[i]], point, 7))
-                return ropes[ids[i]].link;
+        for (var i = ids.length - 1; i >= 0; --i) {
+            var rope = ropes[ids[i]];
+            if (rope.hidden)
+                continue;
+            if (Rope.hit(rope, point, hitTolerance))
+                return rope.link;
+        }
         return null;
     }
     onLinksChanged: Qt.callLater(sync)

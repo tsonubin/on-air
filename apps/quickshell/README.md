@@ -35,16 +35,18 @@ that flag was supplied. The existing TUI remains available.
   separate from its routing socket. The single footer slider controls the
   selected device, or the default output when there is no selection.
 - Drag a socket to a row on the opposite side to connect audio. Dragging
-  works in either direction. The cable becomes solid after the core
-  confirms the local route; unavailable routes are dashed and show an error.
+  works in either direction and is the only way to connect; with no cables
+  the status line spells the gesture out. The cable becomes solid after
+  the core confirms the local route; unavailable routes are dashed and
+  show an error.
 - Drag one row body onto another on the same side to create an input mix
   or an output group. Drop onto an existing group to add members. Groups
   start collapsed; the disclosure arrow reveals their members.
-- Right-click a row for keyboard-accessible connection targets, default,
-  mute, disconnect and group removal. Right-click a cable to disconnect it.
+- Right-click a cable anywhere along its curve to delete it at once — no
+  menu, no confirmation. Right-click a row for the default, mute,
+  disconnect routes and group removal.
 - Arrow keys move the selection, Enter selects a default, Space or M mutes,
-  Delete disconnects, and Menu or Shift+F10 opens the selected row's menu.
-  Escape cancels a drag or closes the panel.
+  and Delete disconnects. Escape cancels a drag or closes the panel.
 
 To route application audio through the **Desktop** source, select
 **On-Air desktop** as the system output. Applications already pinned to a
@@ -70,6 +72,16 @@ its settings, and reconnect when devices return. Closing or reloading the
 shell leaves playback running. Pausing the core stops links and senders;
 resuming restores the saved graph. Feedback through monitors is rejected.
 
+## Media and toasts
+
+`MediaWidget.qml` is a standalone bar module showing the CD transport
+state and the active output; the Omarchy snippet in
+`packaging/omarchy/snippets/shell-bar.json` loads it beside the status
+widget, and it folds away when nothing is playing. Route changes, pauses
+and new pairing PINs raise quiet desktop notifications through
+`notify-send`. [docs/omarchy.md](../../docs/omarchy.md#media) covers both,
+including what a future MPRIS bridge must expose.
+
 ## Motion and theme
 
 The cable is a small Verlet rope with fixed endpoints, gravity, damping
@@ -91,7 +103,9 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software \
 ```
 
 The Qt test starts the real mock core, loads the actual panel, exercises
-body dragging, cable dragging, volume and keyboard mute, saves a screenshot,
-and checks that closing the UI leaves the route alive. Pass `--font` with a
-local Nerd Font to render icons exactly as Omarchy does. For an interactive
-Qt preview, start a core and open `Preview.qml` with Qt's `qml` tool.
+body dragging, cable dragging, right-click cable deletion, volume and
+keyboard mute, the toast coalescing and the media widget against the mock
+CD deck, saves a screenshot, and checks that closing the UI leaves the
+route alive. Pass `--font` with a local Nerd Font to render icons exactly
+as Omarchy does. For an interactive Qt preview, start a core and open
+`Preview.qml` with Qt's `qml` tool.

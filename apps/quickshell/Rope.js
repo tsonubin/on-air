@@ -79,9 +79,29 @@ function settle(rope, bounds) {
     rope.awake = false;
 }
 
+// Flattened polyline of the drawn path, sampled from the same quadratics
+// CableLayer paints: curves through the midpoints between control points.
+function curve(rope) {
+    var ps = rope.points, out = [{x: ps[0].x, y: ps[0].y}];
+    for (var i = 1; i < ps.length - 1; ++i) {
+        var c = ps[i], start = out[out.length - 1];
+        var end = {x: (c.x + ps[i + 1].x) / 2, y: (c.y + ps[i + 1].y) / 2};
+        for (var s = 1; s <= 6; ++s) {
+            var t = s / 6, u = 1 - t;
+            out.push({
+                x: u * u * start.x + 2 * u * t * c.x + t * t * end.x,
+                y: u * u * start.y + 2 * u * t * c.y + t * t * end.y
+            });
+        }
+    }
+    out.push({x: ps[ps.length - 1].x, y: ps[ps.length - 1].y});
+    return out;
+}
+
 function hit(rope, point, radius) {
-    for (var i = 0; i < rope.points.length - 1; ++i) {
-        var a = rope.points[i], b = rope.points[i + 1], dx = b.x - a.x, dy = b.y - a.y;
+    var ps = curve(rope);
+    for (var i = 0; i < ps.length - 1; ++i) {
+        var a = ps[i], b = ps[i + 1], dx = b.x - a.x, dy = b.y - a.y;
         var t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / Math.max(0.001, dx * dx + dy * dy)));
         if (distance(point, {x: a.x + dx * t, y: a.y + dy * t}) <= radius) return true;
     }

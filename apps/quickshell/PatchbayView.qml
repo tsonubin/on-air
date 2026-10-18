@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQml.Models
 
 Item {
     id: root
@@ -25,7 +24,6 @@ Item {
     property var expanded: ({})
     property string bodyDropId: ""
     property string bodyDragId: ""
-    property string keyboardSource: ""
     property var pendingLink: null
     property var pendingVolume: null
     property var pendingMutes: ({})
@@ -33,11 +31,10 @@ Item {
     property bool interactionActive: false
     property bool ready: false
     property bool panelActive: true
-    property string notice: ""
     readonly property var inputRows: rows("input")
     readonly property var outputRows: rows("output")
     readonly property int rowCount: Math.max(2, Math.min(5, Math.max(inputRows.length, outputRows.length)))
-    readonly property string message: clientError || snapshot.error || notice || (!snapshot.enabled ? "Audio paused · click to resume" : "")
+    readonly property string message: clientError || snapshot.error || (!snapshot.enabled ? "Audio paused · click to resume" : "") || ((snapshot.links || []).length === 0 && !pendingLink && displayedNodes.length > 0 ? "No cables · drag from a socket to the other side to connect" : "")
     readonly property var selectedNode: node(selectedId) || (snapshot.nodes || []).find(function (n) {
         return n.side === "output" && n.is_default;
     }) || (snapshot.nodes || []).find(function (n) {
@@ -143,7 +140,6 @@ Item {
     }
     function choose(id) {
         selectedId = id;
-        notice = "";
         command({
             op: "set_default",
             id: id
@@ -223,7 +219,6 @@ Item {
         bodyDropId = "";
         bodyDragId = "";
         cables.finish(null);
-        keyboardSource = "";
         endInteraction();
     }
     function requestDone() {
@@ -266,7 +261,7 @@ Item {
     onWidthChanged: refreshCables()
     Keys.onPressed: function (event) {
         if (event.key === Qt.Key_Escape) {
-            if (cables.dragRope || keyboardSource)
+            if (cables.dragRope || bodyDragId)
                 cancelDrag();
             else
                 closeRequested();
@@ -294,8 +289,6 @@ Item {
             toggleMute(current.id);
         else if (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)
             disconnectSelected();
-        else if (event.key === Qt.Key_Menu || (event.key === Qt.Key_F10 && event.modifiers & Qt.ShiftModifier))
-            showMenu(current, portFor(current.id) || Qt.point(0, 0));
         else {
             event.accepted = false;
             return;
@@ -352,19 +345,28 @@ Item {
         cableBounds: Qt.rect(inputs.x + inputs.width - root.unit(9), inputs.y, outputs.x + root.unit(9) - (inputs.x + inputs.width - root.unit(9)), inputs.height)
     }
     MouseArea {
-        x: inputs.x + inputs.width
-        y: inputs.y
-        width: outputs.x - x
-        height: inputs.height
+        // Covers the whole drawn cable, sockets included, so any visible
+        // stretch of rope can be right-clicked. A click that misses every
+        // rope falls through to the row menu when a row is under it.
+        x: inputs.x + inputs.width - root.unit(18)
+        y: inputs.y - root.unit(12)
+        width: outputs.x + root.unit(18) - x
+        height: inputs.height + root.unit(24)
         acceptedButtons: Qt.RightButton
         onClicked: function (mouse) {
-            var link = cables.linkAt(Qt.point(x + mouse.x, y + mouse.y));
+            var point = Qt.point(x + mouse.x, y + mouse.y);
+            var link = cables.linkAt(point);
             if (link) {
-                wireMenu.link = link;
-                wireMenu.x = x + mouse.x;
-                wireMenu.y = y + mouse.y;
-                wireMenu.popup();
+                root.command({
+                    op: "disconnect",
+                    source: link.source,
+                    target: link.target
+                });
+                return;
             }
+            var id = root.nodeAt(point, "input") || root.nodeAt(point, "output");
+            if (id)
+                root.showMenu(root.node(id), point);
         }
     }
     Text {
@@ -382,7 +384,7 @@ Item {
         height: root.message ? root.unit(30) : 0
         visible: root.message.length > 0
         text: root.message
-        color: root.snapshot.enabled ? root.urgent : root.muted
+        color: root.clientError || root.snapshot.error ? root.urgent : root.muted
         font.family: root.fontFamily
         font.pixelSize: root.fontPixels - 1
         elide: Text.ElideRight
@@ -506,34 +508,6 @@ Item {
             onTriggered: if (actions.currentNode)
                 root.choose(actions.currentNode.id)
         }
-        Menu {
-            id: connectMenu
-            title: "Connect to"
-            Instantiator {
-                model: actions.currentNode ? (root.snapshot.nodes || []).filter(function (n) {
-                    return n.side !== actions.currentNode.side;
-                }) : []
-                delegate: MenuItem {
-                    required property var modelData
-                    text: modelData.name
-                    onTriggered: {
-                        var a = actions.currentNode, b = modelData;
-                        if (a)
-                            root.command({
-                                op: "connect",
-                                source: a.side === "input" ? a.id : b.id,
-                                target: a.side === "output" ? a.id : b.id
-                            });
-                    }
-                }
-                onObjectAdded: function (index, object) {
-                    connectMenu.insertItem(index, object);
-                }
-                onObjectRemoved: function (index, object) {
-                    connectMenu.removeItem(object);
-                }
-            }
-        }
         MenuItem {
             text: root.isMuted(actions.currentNode) ? "Unmute" : "Mute"
             onTriggered: if (actions.currentNode)
@@ -552,22 +526,6 @@ Item {
                 op: "remove_group",
                 id: actions.currentNode.id
             })
-        }
-    }
-    Menu {
-        id: wireMenu
-        font.family: root.fontFamily
-        font.pixelSize: root.fontPixels
-        palette: actions.palette
-        property var link: null
-        MenuItem {
-            text: "Disconnect"
-            onTriggered: if (wireMenu.link)
-                root.command({
-                    op: "disconnect",
-                    source: wireMenu.link.source,
-                    target: wireMenu.link.target
-                })
         }
     }
 }

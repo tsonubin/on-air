@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import qs.Ui as Ui
 import qs.Commons
 import qs.Commons as Commons
@@ -16,6 +17,22 @@ Ui.Panel {
         port: Number(root.setting("port", 47990))
         onUpdated: if (!busy && queue.length === 0)
             board.requestDone()
+        onToast: function (title, body, urgency) {
+            // Freedesktop notifications: Omarchy's shell daemon shows these
+            // as toasts (mako on Omarchy 3). Quiet when notify-send is
+            // absent; nothing else depends on it.
+            Quickshell.execDetached(["notify-send", "-a", "on-air", "-u", urgency, title, body]);
+        }
+    }
+    readonly property string mediaLine: {
+        var parts = [];
+        var cd = client.cd;
+        if (cd && cd.present)
+            parts.push((cd.playing ? "󰐊 " : "󰏤 ") + (cd.title ? cd.title : "CD " + cd.track + "/" + cd.track_count));
+        var output = client.activeOutput;
+        if (output)
+            parts.push("→ " + output.device_name);
+        return parts.join(" · ");
     }
     Ui.BarIconButton {
         id: button
@@ -23,7 +40,7 @@ Ui.Panel {
         bar: root.bar
         text: "󰝚"
         slotSize: Style.bar.statusSlot
-        tooltipText: client.error || "on-air"
+        tooltipText: client.error || (root.mediaLine ? "on-air · " + root.mediaLine : "on-air patchbay · click to open")
         onPressed: function (mouseButton) {
             if (mouseButton === Qt.LeftButton || mouseButton === Qt.MiddleButton)
                 root.toggle();

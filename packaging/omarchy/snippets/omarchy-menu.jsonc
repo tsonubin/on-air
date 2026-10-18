@@ -1,8 +1,13 @@
 // on-air rows for the Omarchy 4 menu (Super+Space).
 // Paste into ~/.config/omarchy/extensions/omarchy-menu.jsonc, inside the
 // top-level object. Dotted ids place rows: "on-air" is a root entry and
-// "on-air.open" sits inside it.
+// "on-air.open" sits inside it. The Now playing and Pairing PIN rows surface
+// the core's state as toasts through notify-send (libnotify), the same
+// mechanism the bar widget raises its notifications with.
 "on-air": {"icon":"󰝚","label":"on-air"},
 "on-air.open": {"icon":"󰝚","label":"Open","action":"omarchy-launch-or-focus-tui on-air"},
+"on-air.panel": {"icon":"󰊵","label":"Patchbay panel","action":"omarchy-shell -q on-air.patchbay toggle"},
+"on-air.now": {"icon":"󰎈","label":"Now playing","action":"notify-send -a on-air 'on-air' \"$(on-air status | sed -n -e 's/^cd: /CD · /p' -e 's/^output: /→ /p')\""},
+"on-air.pin": {"icon":"󰒊","label":"Pairing PIN","action":"notify-send -a on-air 'on-air pairing' \"$(on-air status | sed -n 's/^pin: /Pairing PIN · /p')\""},
 "on-air.monitor": {"icon":"󰐥","label":"Monitor on/off","action":"on-air monitor toggle"},
 "on-air.restart": {"icon":"󰜉","label":"Restart core","action":"on-air service restart"},

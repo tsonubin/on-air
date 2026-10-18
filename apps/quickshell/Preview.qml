@@ -12,12 +12,18 @@ Window {
     title: "on-air patchbay preview"
     property int apiPort: 47990
     property string previewFontFamily: "monospace"
+    // Toasts the core client emitted, for the offscreen test harness.
+    property var toastLog: []
     CoreClient {
         id: client
+        objectName: "coreClient"
         port: window.apiPort
         panelOpen: true
         onUpdated: if (!busy && queue.length === 0)
             board.requestDone()
+        onToast: function (title, body, urgency) {
+            window.toastLog = window.toastLog.concat([body]);
+        }
     }
     PatchbayView {
         id: board

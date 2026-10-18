@@ -1,2 +1,6 @@
-{ "id": "on-air", "type": "command", "exec": "on-air bar", "interval": 5,
-  "tooltip": "on-air", "onClick": "omarchy-launch-or-focus-tui on-air" }
+[
+  { "id": "on-air", "type": "command", "exec": "on-air bar", "interval": 5,
+    "tooltip": "on-air", "onClick": "omarchy-launch-or-focus-tui on-air" },
+  { "id": "on-air-media", "type": "qml",
+    "source": "~/.config/omarchy/plugins/on-air.patchbay/MediaWidget.qml" }
+]

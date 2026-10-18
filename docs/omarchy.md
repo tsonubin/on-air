@@ -61,10 +61,14 @@ it can be moved with Omarchy's normal bar gestures. Updates use `--replace`
 and preserve the previous copy outside the plugin search path.
 
 Click a row for a system default, drag row bodies together to make a combo,
-or drag ports across the gap to connect audio. Groups start collapsed and
-the one footer slider follows the selection. Right-click for connection
-targets, mute and disconnect; Escape closes. The panel inherits the active
-Omarchy palette, font, border, scaling and reduced-motion preference.
+or drag a cable from a socket to the opposite column to connect audio — the
+only way to connect. A right-click anywhere on a visible cable removes it
+at once. Groups start collapsed and the one footer slider follows the
+selection. Right-click a row for the system default, mute and group
+removal; Escape cancels a drag or closes. With no cables the status line
+spells the gesture out: drag from a socket to the other side to connect.
+The panel inherits the active Omarchy palette, font, border, scaling and
+reduced-motion preference.
 
 The **Desktop** source receives apps sent to **On-Air desktop**. Discovered
 AirPlay/Sonos speakers are also selectable directly as system outputs.
@@ -122,6 +126,9 @@ the rest inside it.
 ```jsonc
 "on-air": {"icon":"󰝚","label":"on-air"},
 "on-air.open": {"icon":"󰝚","label":"Open","action":"omarchy-launch-or-focus-tui on-air"},
+"on-air.panel": {"icon":"󰊵","label":"Patchbay panel","action":"omarchy-shell -q on-air.patchbay toggle"},
+"on-air.now": {"icon":"󰎈","label":"Now playing","action":"notify-send -a on-air 'on-air' \"$(on-air status | sed -n -e 's/^cd: /CD · /p' -e 's/^output: /→ /p')\""},
+"on-air.pin": {"icon":"󰒊","label":"Pairing PIN","action":"notify-send -a on-air 'on-air pairing' \"$(on-air status | sed -n 's/^pin: /Pairing PIN · /p')\""},
 "on-air.monitor": {"icon":"󰐥","label":"Monitor on/off","action":"on-air monitor toggle"},
 "on-air.restart": {"icon":"󰜉","label":"Restart core","action":"on-air service restart"},
 ```
@@ -133,15 +140,18 @@ speaker's name when one is playing, and a `class` of `live`, `idle`, `off`
 or `down` for styling.
 
 Omarchy 4, in `~/.config/omarchy/shell.json` under `bar.layout.right` (or
-whichever section you like):
+whichever section you like) — the first entry is the status line, the
+second the media widget described under [Media](#media):
 
 ```json
 { "id": "on-air", "type": "command", "exec": "on-air bar", "interval": 5,
-  "tooltip": "on-air", "onClick": "omarchy-launch-or-focus-tui on-air" }
+  "tooltip": "on-air", "onClick": "omarchy-launch-or-focus-tui on-air" },
+{ "id": "on-air-media", "type": "qml",
+  "source": "~/.config/omarchy/plugins/on-air.patchbay/MediaWidget.qml" }
 ```
 
 Omarchy 3, in `~/.config/waybar/config.jsonc`, then list `custom/on-air`
-in `modules-right`:
+and `mpris` in `modules-right`:
 
 ```jsonc
 "custom/on-air": {
@@ -150,7 +160,86 @@ in `modules-right`:
   "interval": 5,
   "on-click": "omarchy-launch-or-focus-tui on-air"
 },
+"mpris": {
+  "format": "󰝚 {player} · {title}",
+  "format-paused": "󰝚 {player} · {title} (paused)",
+  "player-icons": { "on-air": "󰝚" },
+  "on-click": "omarchy-launch-or-focus-tui on-air"
+},
 ```
+
+## Media
+
+The media widget reflects what on-air is playing: the CD transport state
+from `GET /api/cd` and the active output from `GET /api/outputs/active`.
+It ships with the Quickshell plugin (`MediaWidget.qml`) and the bar snippet
+above loads it as a custom QML module, so install the plugin first. It
+shows the transport glyph, the track number and title and the output name;
+left click plays or pauses the disc, middle click and scroll step tracks,
+right click opens on-air. With no disc and no active output it collapses to
+nothing — a laptop with no optical drive shows no phantom player — and it
+also stays hidden while the core is unreachable.
+
+On Omarchy 3 there is no Quickshell, so the media surface is Waybar's
+built-in `mpris` module (see the snippet above) plus the active output in
+the `custom/on-air` tooltip. The menu rows `Now playing` and `Pairing PIN`
+(`omarchy-menu.jsonc`) surface the same state as toasts.
+
+The core does not speak MPRIS today: it is a headless service with an HTTP
+control plane, and a D-Bus player is a separate daemon-sized addition.
+Until that bridge exists, `omarchy.media` (Omarchy's own media widget) and
+Waybar's `mpris` module cannot see on-air; the widget above is the bridge's
+widget side, written against the HTTP API. A future MPRIS bridge in
+`on-air-core` must expose exactly this, so the consumers pick it up with no
+further wiring:
+
+- A session-bus service owning the well-known name
+  `org.mpris.MediaPlayer2.on-air`, object path `/org/mpris/MediaPlayer2`.
+- `org.mpris.MediaPlayer2`: `Identity` `"on-air"`, `DesktopEntry`
+  `"on-air"`, `CanRaise` true (raises the TUI), `CanQuit` false,
+  `HasTrackList` false, `SupportedUriSchemes` and `SupportedMimeTypes`
+  empty.
+- `org.mpris.MediaPlayer2.Player`:
+  - `PlaybackStatus`: `"Playing"` while the service is enabled and a
+    source is live, `"Paused"` while the service is paused
+    (`PUT /api/service`), `"Stopped"` otherwise.
+  - `Metadata` from `GET /api/cd`: `xesam:title`, `xesam:album`,
+    `xesam:trackNumber`, `mpris:length` (microseconds) and a
+    `mpris:trackid` per track; `mpris:artUrl` only if cover art appears.
+  - `Position` (microseconds) and the `Seeked` signal following the deck.
+  - `Volume` in 0..1 mapped to the active output volume
+    (`/api/outputs/active/volume`).
+  - `Rate` 1 with `MinimumRate`/`MaximumRate` 1.
+  - `CanGoNext`, `CanGoPrevious`, `CanPlay`, `CanPause` and `CanSeek`
+    true only while a disc is present; `CanControl` true.
+  - `Play`, `Pause`, `PlayPause`, `Stop`, `Next`, `Previous`, `Seek` and
+    `SetPosition` translated to `POST /api/cd/control`.
+
+With `Identity` `"on-air"`, `omarchy.media` shows the scrolling track and
+its play/pause works, and Waybar's `mpris` module matches the
+`player-icons` entry already shipped in `waybar.jsonc`.
+
+## Toasts
+
+Notifications announce the few events worth interrupting for: an output
+route connected, disconnected or failed, the audio pausing and resuming,
+and a new pairing PIN being shown. The bar widget raises them with
+`notify-send`, the freedesktop notification mechanism the menu snippet
+uses too: Omarchy 4's shell daemon renders the toasts, mako does on
+Omarchy 3. Install `libnotify` (for `notify-send`) to see them; without it
+everything else keeps working and the toasts simply do not appear.
+
+Toasts are quiet. State changes within half a second collapse into one
+notification per kind — `Living Room, Kitchen connected`, not two popups —
+and every notification is low urgency except a failed route. Announcements
+diff the core's snapshots, so a route flapping through a pause does not
+re-announce every connection when the audio resumes; the first state
+observed after the shell starts is a quiet baseline.
+
+The pairing PIN toast (`Pairing PIN · 123 456`) fires when the core
+rotates the PIN, so the number on screen is the number to type on the
+phone. The `Pairing PIN` menu row shows the current one on demand, and
+`Now playing` shows the disc and output the same way.
 
 ## Idle and sleep
 

@@ -1,8 +1,18 @@
-// on-air module for Waybar (Omarchy 3). Add to ~/.config/waybar/config.jsonc
-// and list "custom/on-air" in "modules-right".
+// on-air modules for Waybar (Omarchy 3). Add to ~/.config/waybar/config.jsonc
+// and list "custom/on-air" and "mpris" in "modules-right".
 "custom/on-air": {
   "exec": "on-air bar",
   "return-type": "json",
   "interval": 5,
+  "on-click": "omarchy-launch-or-focus-tui on-air"
+},
+// Media surface: Waybar's built-in mpris module. It shows on-air the day the
+// core ships the D-Bus MPRIS bridge (docs/omarchy.md "Media"); until then it
+// tracks other MPRIS players and the custom/on-air tooltip above carries the
+// active output. Clicking it opens on-air either way.
+"mpris": {
+  "format": "󰝚 {player} · {title}",
+  "format-paused": "󰝚 {player} · {title} (paused)",
+  "player-icons": { "on-air": "󰝚" },
   "on-click": "omarchy-launch-or-focus-tui on-air"
 },

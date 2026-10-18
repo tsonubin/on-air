@@ -43,6 +43,22 @@ test("a click near a curved segment finds its route without hitting distant poin
   assert.equal(physics.hit(rope, { x: 50, y: 0 }, 7), false);
 });
 
+test("hit-testing follows the drawn curve from socket to socket", () => {
+  const rope = physics.create({ x: 10, y: 20 }, { x: 90, y: 20 });
+  physics.settle(rope, bounds);
+  const curve = physics.curve(rope);
+  for (const point of curve) {
+    assert.equal(physics.hit(rope, point, 9), true, `missed the curve at ${point.x},${point.y}`);
+  }
+  // Comfortably clickable above the deepest sag, too far higher up.
+  const deep = curve.reduce((a, b) => (b.y > a.y ? b : a));
+  assert.equal(physics.hit(rope, { x: deep.x, y: deep.y - 8 }, 9), true);
+  assert.equal(physics.hit(rope, { x: deep.x, y: deep.y - 25 }, 9), false);
+  // The last stretch before each socket is clickable, not just the middle.
+  assert.equal(physics.hit(rope, { x: 15, y: 24 }, 9), true);
+  assert.equal(physics.hit(rope, { x: 85, y: 24 }, 9), true);
+});
+
 test("reduced-motion settling retains gravity with no running animation", () => {
   const rope = physics.create({ x: 10, y: 20 }, { x: 90, y: 20 });
   physics.settle(rope, bounds);
