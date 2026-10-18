@@ -2,11 +2,13 @@ pub mod discovery;
 pub mod soap;
 
 use crate::sender::{AudioSender, SenderError};
+use crate::session::ActiveOutput;
+use crate::sync::SyncController;
 use discovery::SonosDevice;
 use soap::SonosControlClient;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SET_URI_SETTLE_DELAY: Duration = Duration::from_millis(250);
 const STREAM_RECOVERY_INITIAL_DELAY: Duration = Duration::from_secs(2);
@@ -19,6 +21,7 @@ pub struct SonosSender {
     stream_url: String,
     stream_clients: Option<Arc<AtomicUsize>>,
     stream_progress: Option<Arc<AtomicU64>>,
+    sync: Option<(Arc<SyncController>, ActiveOutput)>,
     recovery_task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -30,6 +33,7 @@ impl SonosSender {
             stream_url,
             stream_clients: None,
             stream_progress: None,
+            sync: None,
             recovery_task: None,
         }
     }
@@ -43,6 +47,17 @@ impl SonosSender {
     ) -> Self {
         self.stream_clients = Some(stream_clients);
         self.stream_progress = Some(stream_progress);
+        self
+    }
+
+    /// Give the stall recovery this output's sync context (roadmap B9). A
+    /// restart of a sync-group member must re-enter its group — hold to the
+    /// group's presentation epoch and report `syncing` until the drift servo
+    /// re-locks — instead of re-issuing `Play` at whatever wall-clock
+    /// instant the stall happened to be noticed at. A sender without this
+    /// context free-runs and keeps the historical fire-now recovery.
+    pub fn with_sync(mut self, controller: Arc<SyncController>, output: ActiveOutput) -> Self {
+        self.sync = Some((controller, output));
         self
     }
 
@@ -63,6 +78,7 @@ impl SonosSender {
         let client = self.client.clone();
         let device = self.device.clone();
         let stream_url = self.stream_url.clone();
+        let sync = self.sync.clone();
         self.recovery_task = Some(tokio::spawn(async move {
             let mut delay = STREAM_RECOVERY_INITIAL_DELAY;
             let mut last_progress = stream_progress.load(Ordering::Relaxed);
@@ -84,6 +100,19 @@ impl SonosSender {
                     }
                 } else {
                     stalled_checks = 0;
+                }
+                // A sync-group member re-enters its group instead of
+                // restarting at this task's wall clock (roadmap B9): the
+                // re-entry plan drops the stale drift report (the sync
+                // status reports `syncing` from here) and holds the restart
+                // to the group's presentation epoch — the same hold
+                // `AudioSender::start_at` performs. Free-running outputs
+                // have no epoch and keep the fire-now restart.
+                let plan = sync.as_ref().and_then(|(controller, output)| {
+                    controller.plan_resync(output, Instant::now())
+                });
+                if let Some(plan) = plan {
+                    plan.wait().await;
                 }
                 let _ = begin_playback(&client, &device, &stream_url).await;
                 // A successful SOAP response does not prove that Sonos

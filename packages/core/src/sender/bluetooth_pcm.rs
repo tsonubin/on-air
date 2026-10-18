@@ -3,6 +3,7 @@
 use crate::dsp::bridge::RateBridge;
 use crate::dsp::rates::{self, BLUETOOTH_RATES_HZ};
 use crate::dsp::resample::RateControl;
+use crate::dsp::DspQuality;
 use crate::pipeline::push_frames;
 use crate::sender::{OutputFormat, SenderError};
 use crate::timeline::FRAME_BYTES;
@@ -63,13 +64,15 @@ impl Drop for OpenedPcmSink {
 pub trait PcmOutput: Send + Sync {
     /// Open the endpoint. `steered` selects the drift-corrected
     /// variable-ratio conversion used by sync-group members; free-running
-    /// playback keeps the cheap fixed-ratio path.
+    /// playback keeps the cheap fixed-ratio path. `quality` selects the
+    /// interpolation profile of that conversion.
     fn open(
         &self,
         endpoint: &BluetoothEndpoint,
         pipeline_hz: u32,
         preferred_hz: u32,
         steered: bool,
+        quality: DspQuality,
     ) -> Result<OpenedPcmSink, SenderError>;
 }
 
@@ -118,6 +121,7 @@ impl PcmOutput for Arc<RecordingPcmSink> {
         _: u32,
         preferred_hz: u32,
         _: bool,
+        _: DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
         Ok(OpenedPcmSink {
             sink: self.clone(),
@@ -137,12 +141,19 @@ impl PcmOutput for SystemPcmOutput {
         pipeline_hz: u32,
         preferred_hz: u32,
         steered: bool,
+        quality: DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
         match endpoint {
             BluetoothEndpoint::Pulse(name) => {
                 let sample_rate_hz = rates::snap_rate(preferred_hz, BLUETOOTH_RATES_HZ);
                 Ok(OpenedPcmSink {
-                    sink: Arc::new(PacatPcmSink::new(name, pipeline_hz, sample_rate_hz, steered)?),
+                    sink: Arc::new(PacatPcmSink::new(
+                        name,
+                        pipeline_hz,
+                        sample_rate_hz,
+                        steered,
+                        quality,
+                    )?),
                     format: OutputFormat {
                         sample_rate_hz,
                         supported_hz: BLUETOOTH_RATES_HZ.to_vec(),
@@ -150,7 +161,7 @@ impl PcmOutput for SystemPcmOutput {
                 })
             }
             BluetoothEndpoint::Native(name) => {
-                CpalPcmSink::open(name, pipeline_hz, preferred_hz, steered)
+                CpalPcmSink::open(name, pipeline_hz, preferred_hz, steered, quality)
             }
         }
     }
@@ -172,6 +183,7 @@ impl CpalPcmSink {
         pipeline_hz: u32,
         preferred_hz: u32,
         steered: bool,
+        quality: DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
         let device = cpal::default_host()
             .output_devices()
@@ -231,51 +243,100 @@ impl CpalPcmSink {
         let volume = Arc::new(AtomicU8::new(100));
         let delivered = Arc::new(AtomicU64::new(0));
         let (bridge, rate_control) = if steered {
-            let (bridge, control) = RateBridge::new_steered(pipeline_hz, sample_rate_hz, channels);
+            let (bridge, control) =
+                RateBridge::new_steered(pipeline_hz, sample_rate_hz, channels, quality);
             (bridge, Some(control))
         } else {
             (
-                RateBridge::new(pipeline_hz, sample_rate_hz, channels),
+                RateBridge::new(pipeline_hz, sample_rate_hz, channels, quality),
                 None,
             )
         };
         let stream = match sample_format {
-            SampleFormat::I8 => {
-                build_output_stream::<i8>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I16 => {
-                build_output_stream::<i16>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I24 => {
-                build_output_stream::<I24>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I32 => {
-                build_output_stream::<i32>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I64 => {
-                build_output_stream::<i64>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U8 => {
-                build_output_stream::<u8>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U16 => {
-                build_output_stream::<u16>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U24 => {
-                build_output_stream::<U24>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U32 => {
-                build_output_stream::<u32>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U64 => {
-                build_output_stream::<u64>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::F32 => {
-                build_output_stream::<f32>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::F64 => {
-                build_output_stream::<f64>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
+            SampleFormat::I8 => build_output_stream::<i8>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I16 => build_output_stream::<i16>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I24 => build_output_stream::<I24>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I32 => build_output_stream::<i32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I64 => build_output_stream::<i64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U8 => build_output_stream::<u8>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U16 => build_output_stream::<u16>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U24 => build_output_stream::<U24>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U32 => build_output_stream::<u32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U64 => build_output_stream::<u64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::F32 => build_output_stream::<f32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::F64 => build_output_stream::<f64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
             other => {
                 return Err(SenderError::internal(format!(
                     "unsupported output sample format: {other:?}"
@@ -402,6 +463,7 @@ impl PacatPcmSink {
         pipeline_hz: u32,
         output_hz: u32,
         steered: bool,
+        quality: DspQuality,
     ) -> Result<Self, SenderError> {
         let mut child = std::process::Command::new("pacat")
             .args([
@@ -420,10 +482,10 @@ impl PacatPcmSink {
             .map_err(|e| SenderError::internal(format!("could not start pacat: {e}")))?;
         let stdin = child.stdin.take().expect("piped pacat stdin");
         let (bridge, rate_control) = if steered {
-            let (bridge, control) = RateBridge::new_steered(pipeline_hz, output_hz, 2);
+            let (bridge, control) = RateBridge::new_steered(pipeline_hz, output_hz, 2, quality);
             (bridge, Some(control))
         } else {
-            (RateBridge::new(pipeline_hz, output_hz, 2), None)
+            (RateBridge::new(pipeline_hz, output_hz, 2, quality), None)
         };
         Ok(Self {
             bridge: Mutex::new(bridge),
@@ -507,7 +569,7 @@ mod tests {
         let (producer, consumer) = HeapRb::<f32>::new(5).split();
         let sink = CpalPcmSink {
             producer: Mutex::new(producer),
-            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2)),
+            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2, DspQuality::Economy)),
             volume: Arc::new(AtomicU8::new(100)),
             stream: Mutex::new(None),
             rate_control: None,
@@ -531,7 +593,11 @@ mod tests {
         producer.push_slice(&[-0.2]);
         fill_output(&mut data, &mut consumer, 2, 1.0, &delivered);
         assert_eq!(data, [0.2, -0.2, 0.0, 0.0], "left and right swapped");
-        assert_eq!(delivered.load(Ordering::Relaxed), 2, "played frames are counted");
+        assert_eq!(
+            delivered.load(Ordering::Relaxed),
+            2,
+            "played frames are counted"
+        );
     }
 
     #[test]
@@ -545,7 +611,7 @@ mod tests {
             .unwrap();
         let stdin = child.stdin.take().unwrap();
         let sink = Arc::new(PacatPcmSink {
-            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2)),
+            bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2, DspQuality::Economy)),
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             volume: AtomicU8::new(100),

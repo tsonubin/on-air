@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use on_air_core::dsp::DspQuality;
 use on_air_core::sender::bluetooth::{
     BluetoothAdapter, BluetoothDevice, BluetoothEndpoint, BluetoothPlaybackConfig, BluetoothSender,
     OpenedPcmSink, PcmOutput, PcmSink, RecordingPcmSink, SystemPcmOutput,
@@ -35,6 +36,7 @@ fn config(volume: u8) -> BluetoothPlaybackConfig {
         pipeline_hz: 44_100,
         output_hz: 44_100,
         volume,
+        quality: DspQuality::Economy,
         sync: None,
     }
 }
@@ -125,6 +127,7 @@ impl PcmOutput for Output {
         pipeline_hz: u32,
         preferred_hz: u32,
         _steered: bool,
+        _quality: DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
         assert_eq!(
             endpoint,
@@ -486,6 +489,7 @@ fn native_bluetooth_name_does_not_select_pacat() {
         44_100,
         44_100,
         false,
+        DspQuality::Economy,
     );
     let error = match result {
         Ok(_) => panic!("nonexistent endpoint opened"),
@@ -513,8 +517,11 @@ impl PcmOutput for GatedOutput {
         pipeline: u32,
         preferred: u32,
         steered: bool,
+        quality: DspQuality,
     ) -> Result<OpenedPcmSink, SenderError> {
-        let opened = self.output.open(endpoint, pipeline, preferred, steered)?;
+        let opened = self
+            .output
+            .open(endpoint, pipeline, preferred, steered, quality)?;
         self.entered.notify_one();
         let mut released = self.released.lock().unwrap();
         while !*released {

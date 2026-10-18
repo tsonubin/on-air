@@ -1,4 +1,5 @@
 use on_air_core::dsp::bridge::l16_le_to_f32;
+use on_air_core::dsp::DspQuality;
 use on_air_core::pipeline::{new_ring_buffer, push_frames, spawn_processing_task};
 use parking_lot::Mutex;
 use ringbuf::traits::Producer;
@@ -13,7 +14,15 @@ async fn processes_synthetic_frames_into_broadcast_pcm() {
     let (ws_tx, _) = broadcast::channel::<on_air_core::api::ws::WsEvent>(8);
     let eq_gains_db = Arc::new(Mutex::new([0.0; 5]));
 
-    let handle = spawn_processing_task(consumer, 44100, 44100, eq_gains_db, audio_tx, ws_tx);
+    let handle = spawn_processing_task(
+        consumer,
+        44100,
+        44100,
+        eq_gains_db,
+        audio_tx,
+        ws_tx,
+        DspQuality::Economy,
+    );
 
     // push more than one resampler chunk's worth of a known sine wave
     let samples: Vec<f32> = (0..1024 * 2)
@@ -69,7 +78,15 @@ async fn through_the_pipeline(
     let (audio_tx, mut audio_rx) = broadcast::channel(64);
     let (ws_tx, _) = broadcast::channel::<on_air_core::api::ws::WsEvent>(8);
     let gains = Arc::new(Mutex::new(gains_db));
-    let handle = spawn_processing_task(consumer, input_hz, output_hz, gains, audio_tx, ws_tx);
+    let handle = spawn_processing_task(
+        consumer,
+        input_hz,
+        output_hz,
+        gains,
+        audio_tx,
+        ws_tx,
+        DspQuality::Economy,
+    );
 
     let mut pushed = 0;
     while pushed < frames.len() {
@@ -125,4 +142,89 @@ async fn resampled_stereo_frames_keep_their_sides() {
             "{frame:?}"
         );
     }
+}
+
+/// The next `LevelMeter` event on the channel, or panic on timeout.
+async fn next_meter(
+    ws_rx: &mut tokio::sync::broadcast::Receiver<on_air_core::api::ws::WsEvent>,
+) -> (on_air_api::MeterLevel, on_air_api::MeterLevel) {
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(2), ws_rx.recv())
+            .await
+            .expect("a meter event before timing out")
+            .expect("the processing thread is still publishing");
+        if let on_air_core::api::ws::WsEvent::LevelMeter { left, right } = event {
+            return (left, right);
+        }
+    }
+}
+
+/// A2 invariant: the meter's two channels are independent. A tone on one
+/// side must not appear on the other, and a mono (duplicated) capture must
+/// read the same on both. This runs the real processing thread, not the
+/// meter maths in isolation.
+#[tokio::test]
+async fn the_meter_keeps_left_and_right_independent() {
+    let (mut producer, consumer) = new_ring_buffer(1024 * 8);
+    let (audio_tx, _audio_rx) = broadcast::channel(8);
+    let (ws_tx, mut ws_rx) = broadcast::channel::<on_air_core::api::ws::WsEvent>(64);
+    let handle = spawn_processing_task(
+        consumer,
+        44_100,
+        44_100,
+        Arc::new(Mutex::new([0.0; 5])),
+        audio_tx,
+        ws_tx,
+        DspQuality::Economy,
+    );
+    let tone = |n: usize| (2.0 * std::f32::consts::PI * 1000.0 * n as f32 / 44_100.0).sin() * 0.5;
+    let push = |producer: &mut _, frames: &[f32]| {
+        let mut pushed = 0;
+        while pushed < frames.len() {
+            pushed += push_frames(producer, &frames[pushed..], 2);
+        }
+    };
+
+    // One chunk per phase, one meter event per chunk, consumed in order:
+    // each assertion therefore reads exactly its own phase.
+    // Left only.
+    let frames: Vec<f32> = (0..1024).flat_map(|n| [tone(n), 0.0]).collect();
+    push(&mut producer, &frames);
+    let (left, right) = next_meter(&mut ws_rx).await;
+    assert!(
+        left.peak > 0.3 && left.rms > 0.2,
+        "the left tone is visible on the left meter: {left:?}"
+    );
+    assert_eq!(
+        (right.rms, right.peak),
+        (0.0, 0.0),
+        "the left tone leaked into the right meter"
+    );
+
+    // Right only.
+    let frames: Vec<f32> = (0..1024).flat_map(|n| [0.0, tone(n)]).collect();
+    push(&mut producer, &frames);
+    let (left, right) = next_meter(&mut ws_rx).await;
+    assert!(
+        right.peak > 0.3 && right.rms > 0.2,
+        "the right tone is visible on the right meter: {right:?}"
+    );
+    assert_eq!(
+        (left.rms, left.peak),
+        (0.0, 0.0),
+        "the right tone leaked into the left meter"
+    );
+
+    // A mono capture duplicates into both sides: identical readings.
+    let frames: Vec<f32> = (0..1024).flat_map(|n| [tone(n), tone(n)]).collect();
+    push(&mut producer, &frames);
+    let (left, right) = next_meter(&mut ws_rx).await;
+    assert_eq!(
+        left, right,
+        "a duplicated mono capture reads the same twice"
+    );
+
+    tokio::task::spawn_blocking(move || handle.stop())
+        .await
+        .unwrap();
 }

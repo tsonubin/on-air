@@ -1,4 +1,4 @@
-use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates};
+use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates, DspQuality};
 use crate::session::ActiveOutput;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,27 @@ pub struct SavedSyncTrim {
     pub trim_ms: i32,
 }
 
+/// A stored DSP profile the wire enum no longer knows resets to the safe
+/// default instead of failing the whole file: the enum's equivalent of the
+/// [`SavedSettings::normalized`] membership check on `capture_buffer_ms`.
+fn de_quality<'de, D>(deserializer: D) -> Result<DspQuality, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(raw).unwrap_or_default())
+}
+
+/// Like [`de_quality`], but an unknown recommendation means "no
+/// recommendation", not "recommend the default".
+fn de_recommended_quality<'de, D>(deserializer: D) -> Result<Option<DspQuality>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(raw).ok().flatten())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedSettings {
@@ -31,6 +52,13 @@ pub struct SavedSettings {
     pub output_sample_rate_hz: u32,
     pub service_enabled: bool,
     pub capture_buffer_ms: u32,
+    /// The user's DSP quality profile (`economy`/`balanced`/`high`).
+    #[serde(deserialize_with = "de_quality")]
+    pub dsp_quality: DspQuality,
+    /// The last `POST /api/audio/benchmark`'s verdict; `None` until a
+    /// benchmark has run.
+    #[serde(deserialize_with = "de_recommended_quality")]
+    pub recommended_dsp_quality: Option<DspQuality>,
     pub sync_trims: Vec<SavedSyncTrim>,
 }
 
@@ -45,6 +73,8 @@ impl Default for SavedSettings {
             output_sample_rate_hz: crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ,
             service_enabled: true,
             capture_buffer_ms: 0,
+            dsp_quality: DspQuality::default(),
+            recommended_dsp_quality: None,
             sync_trims: Vec::new(),
         }
     }
@@ -75,9 +105,10 @@ impl SavedSettings {
             self.output_sample_rate_hz = crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ;
         }
         self.sync_trims.retain_mut(|trim| {
-            trim.trim_ms = trim
-                .trim_ms
-                .clamp(-crate::sync::latency::TRIM_LIMIT_MS, crate::sync::latency::TRIM_LIMIT_MS);
+            trim.trim_ms = trim.trim_ms.clamp(
+                -crate::sync::latency::TRIM_LIMIT_MS,
+                crate::sync::latency::TRIM_LIMIT_MS,
+            );
             !trim.transport.trim().is_empty() && !trim.device_id.trim().is_empty()
         });
         self
@@ -233,6 +264,8 @@ mod tests {
             output_sample_rate_hz: 44_100,
             service_enabled: false,
             capture_buffer_ms: 0,
+            dsp_quality: DspQuality::High,
+            recommended_dsp_quality: Some(DspQuality::Balanced),
             sync_trims: vec![SavedSyncTrim {
                 transport: "sonos".into(),
                 device_id: "uuid:living-room".into(),
@@ -256,7 +289,10 @@ mod tests {
                 "eq_gains_db":[99.0,-99.0,0.0,1.0,2.0],
                 "input_sample_rate_hz":22050,
                 "output_sample_rate_hz":12345,
-                "service_enabled":true
+                "service_enabled":true,
+                "capture_buffer_ms":7,
+                "dsp_quality":"ultra",
+                "recommended_dsp_quality":"ultra"
             }"#,
         )
         .unwrap();
@@ -267,6 +303,9 @@ mod tests {
         assert_eq!(loaded.eq_gains_db, [12.0, -12.0, 0.0, 1.0, 2.0]);
         assert_eq!(loaded.input_sample_rate_hz, 44_100);
         assert_eq!(loaded.output_sample_rate_hz, 44_100);
+        assert_eq!(loaded.capture_buffer_ms, 0);
+        assert_eq!(loaded.dsp_quality, DspQuality::default());
+        assert_eq!(loaded.recommended_dsp_quality, None);
         let _ = fs::remove_file(path);
     }
 

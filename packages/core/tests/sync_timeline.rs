@@ -8,6 +8,7 @@
 
 use bytes::Bytes;
 use on_air_core::dsp::resample::SteerableResampler;
+use on_air_core::dsp::DspQuality;
 use on_air_core::sender::{AudioSender, SenderError, StartPlan};
 use on_air_core::session::OutputSession;
 use on_air_core::sync::{DriftController, OutputKey, SyncController};
@@ -34,6 +35,7 @@ async fn frame_indices_are_contiguous_and_ordered() {
         Arc::new(Mutex::new([0.0; 5])),
         audio_tx,
         ws_tx,
+        on_air_core::dsp::DspQuality::Economy,
     );
 
     let frame = [0.1f32, -0.1f32];
@@ -157,7 +159,7 @@ fn drift_steering_moves_the_ratio_in_the_right_direction_and_converges() {
 
     // The correction lands on a real variable-ratio resampler and changes
     // what it produces.
-    let mut steered = SteerableResampler::new(nominal_hz, nominal_hz, 2);
+    let mut steered = SteerableResampler::new(nominal_hz, nominal_hz, 2, DspQuality::Balanced);
     let nominal_ratio = steered.ratio();
     steered.set_rate_correction_ppm(fast_ppm);
     let fast_ratio = steered.ratio();
@@ -290,10 +292,7 @@ async fn two_outputs_in_a_sync_group_start_at_the_same_epoch() {
         tokio::spawn(async move {
             session
                 .activate_scheduled(
-                    Box::new(EpochSender {
-                        name: "A",
-                        log,
-                    }),
+                    Box::new(EpochSender { name: "A", log }),
                     Some(kitchen.clone()),
                     None,
                     plan,
@@ -306,10 +305,7 @@ async fn two_outputs_in_a_sync_group_start_at_the_same_epoch() {
         tokio::spawn(async move {
             session
                 .activate_scheduled(
-                    Box::new(EpochSender {
-                        name: "B",
-                        log,
-                    }),
+                    Box::new(EpochSender { name: "B", log }),
                     Some(patio.clone()),
                     None,
                     plan,

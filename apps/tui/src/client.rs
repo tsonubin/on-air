@@ -682,6 +682,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::MeterLevel;
 
     #[test]
     fn a_trailing_slash_is_trimmed_from_the_base() {
@@ -708,14 +709,21 @@ mod tests {
 
     #[test]
     fn level_meter_frame_decodes() {
-        let event =
-            serde_json::from_str::<WsEvent>(r#"{"type":"LevelMeter","rms":0.25,"peak":0.5}"#)
-                .unwrap();
+        let event = serde_json::from_str::<WsEvent>(
+            r#"{"type":"LevelMeter","left":{"rms":0.25,"peak":0.5},"right":{"rms":0.1,"peak":0.2}}"#,
+        )
+        .unwrap();
         assert_eq!(
             event,
             WsEvent::LevelMeter {
-                rms: 0.25,
-                peak: 0.5
+                left: MeterLevel {
+                    rms: 0.25,
+                    peak: 0.5
+                },
+                right: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
             }
         );
     }

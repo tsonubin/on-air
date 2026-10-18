@@ -158,11 +158,69 @@ pub struct AudioBenchmark {
     pub worst_case_ms: f64,
     pub recommended_buffer_ms: u32,
     pub within_buffer_budget: bool,
+    /// The DSP quality profile the measured timings can afford. Not an
+    /// estimate of what the machine "should" do — the same measured worst
+    /// case the buffer rule uses, budgeted with the same safety factor.
+    pub recommended_quality: DspQuality,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetCaptureBufferRequest {
     pub buffer_ms: u32,
+}
+
+/// DSP quality profile: selects the resampler on every conversion path.
+///
+/// - `economy`: the cubic Farrow polynomial interpolator. Cheapest; this
+///   is what every on-air resampler used before quality profiles existed.
+///   ~0.03 ms per 1024-frame stereo chunk (44.1→48 kHz, release, dev host).
+/// - `balanced`: windowed sinc interpolation, sinc length 128. ~0.5 ms per
+///   chunk on the same run — roughly 20× economy, an order of magnitude
+///   that matters on the old hardware on-air targets.
+/// - `high`: windowed sinc interpolation, sinc length 256. ~0.8 ms per
+///   chunk — about 1.5× balanced for the longer filter.
+///
+/// Those are one machine's measurements (`dsp_resample.rs`'s
+/// `report_per_profile_resampler_costs`), not promises: the audio check
+/// measures each profile on the machine that will run it and
+/// [`AudioBenchmark::recommended_quality`] is decided from that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DspQuality {
+    Economy,
+    Balanced,
+    High,
+}
+
+impl DspQuality {
+    /// Every selectable profile, cheapest first.
+    pub const ALL: [DspQuality; 3] = [DspQuality::Economy, DspQuality::Balanced, DspQuality::High];
+}
+
+impl Default for DspQuality {
+    /// Economy: a machine that never runs the audio check pays no more CPU
+    /// than it did before quality profiles existed.
+    fn default() -> Self {
+        DspQuality::Economy
+    }
+}
+
+/// `GET /api/audio/quality`: the chosen profile, the last benchmark's
+/// recommendation, and every profile a client may offer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioQualityResponse {
+    /// Current profile, persisted in saved settings.
+    pub quality: DspQuality,
+    /// The last `POST /api/audio/benchmark`'s verdict; equals `quality`
+    /// until a benchmark has run.
+    pub recommended: DspQuality,
+    /// All selectable profiles.
+    pub profiles: Vec<DspQuality>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetAudioQualityRequest {
+    pub quality: DspQuality,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -519,6 +577,14 @@ pub struct CdControlRequest {
 // WebSocket events
 // ---------------------------------------------------------------------------
 
+/// One channel's RMS and peak level over one processed chunk. `rms` and
+/// `peak` are in full-scale units (`1.0` = digital full scale).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MeterLevel {
+    pub rms: f32,
+    pub peak: f32,
+}
+
 /// Events on `/api/ws`, tagged by `type`. A `type` a client has never seen
 /// parses as [`WsEvent::Unknown`] and is ignored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -538,9 +604,12 @@ pub enum WsEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// One meter reading per channel of the processed stereo stream. A mono
+    /// capture is duplicated into both sides upstream, so both channels
+    /// then read the same.
     LevelMeter {
-        rms: f32,
-        peak: f32,
+        left: MeterLevel,
+        right: MeterLevel,
     },
     DeviceJoined {
         transport: String,
@@ -603,6 +672,42 @@ mod tests {
         assert_eq!(ev, WsEvent::Unknown);
         let ev: WsEvent = serde_json::from_str(r#"{"type":"Heartbeat"}"#).unwrap();
         assert_eq!(ev, WsEvent::Heartbeat);
+    }
+
+    #[test]
+    fn level_meter_carries_one_meter_level_per_channel() {
+        let json = serde_json::to_value(WsEvent::LevelMeter {
+            left: MeterLevel {
+                rms: 0.25,
+                peak: 0.5,
+            },
+            right: MeterLevel {
+                rms: 0.0,
+                peak: 0.0,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "LevelMeter",
+                "left": {"rms": 0.25, "peak": 0.5},
+                "right": {"rms": 0.0, "peak": 0.0},
+            })
+        );
+    }
+
+    #[test]
+    fn dsp_quality_serializes_as_snake_case() {
+        for (quality, wire) in [
+            (DspQuality::Economy, "economy"),
+            (DspQuality::Balanced, "balanced"),
+            (DspQuality::High, "high"),
+        ] {
+            let json = serde_json::to_value(quality).unwrap();
+            assert_eq!(json, wire);
+            assert_eq!(serde_json::from_value::<DspQuality>(json).unwrap(), quality);
+        }
     }
 
     #[test]

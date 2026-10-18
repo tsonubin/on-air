@@ -211,7 +211,8 @@ async fn build_sonos(state: &CoreState, device_id: &str) -> Result<Built, Activa
     Ok(Built {
         sender: Box::new(
             SonosSender::new(device, crate::sender::sonos::soap::http_client(), url)
-                .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone()),
+                .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone())
+                .with_sync(state.sync.clone(), identity.clone()),
         ),
         identity,
         stream_nonce: Some(nonce),
@@ -293,6 +294,7 @@ async fn build_local(state: &CoreState, device_id: &str) -> Result<Built, Activa
         pipeline_hz,
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        quality: state.dsp_quality(),
         sync: state.sync.feed_for(&identity, pipeline_hz),
     };
     Ok(Built {
@@ -336,6 +338,7 @@ async fn build_bluetooth(state: &CoreState, device_id: &str) -> Result<Built, Ac
         pipeline_hz,
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        quality: state.dsp_quality(),
         sync: state.sync.feed_for(&identity, pipeline_hz),
     };
     Ok(Built {

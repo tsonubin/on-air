@@ -1,3 +1,4 @@
+use crate::dsp::DspQuality;
 use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{
     Adjustable, Async, FixedAsync, PolynomialDegree, Resampler, SincInterpolationParameters,
@@ -12,6 +13,59 @@ const CHUNK_SIZE: usize = 1024;
 /// ratio (±2%); a consumer outside that band is stalled or bursting, not
 /// drifting. Also the bound rubato enforces at construction.
 const MAX_CORRECTION_PPM: f64 = 20_000.0;
+
+/// Sinc length of the `balanced` profile: the default of the drift servo's
+/// steerable resampler. Measured cost per 1024-frame stereo chunk
+/// (44.1→48 kHz, release, dev host; see `report_per_profile_resampler_costs`
+/// in `tests/dsp_resample.rs`): ~0.5 ms, about 20× the cubic Farrow below —
+/// an order of magnitude, not a rounding error, which is why the audio
+/// check measures the ladder on the machine that will run it.
+const BALANCED_SINC_LEN: usize = 128;
+/// Sinc length of the `high` profile: ~0.8 ms per chunk on the same run,
+/// about 1.5× `balanced`, for a filter table twice the size (worse cache
+/// behaviour on old hardware).
+const HIGH_SINC_LEN: usize = 256;
+
+/// Build the rubato async resampler for one quality profile at a fixed
+/// input chunk size. [`DspQuality::Economy`] is the cubic Farrow polynomial
+/// interpolator — byte-for-byte the resampler every path used before
+/// quality profiles existed. [`DspQuality::Balanced`] and
+/// [`DspQuality::High`] are windowed sinc interpolation (see the
+/// [`DspQuality`] docs for the per-profile cost).
+fn build_async(
+    ratio: f64,
+    max_relative_ratio: f64,
+    channels: usize,
+    quality: DspQuality,
+) -> Async<f32> {
+    match quality {
+        DspQuality::Economy => Async::<f32>::new_poly(
+            ratio,
+            max_relative_ratio,
+            PolynomialDegree::Cubic,
+            CHUNK_SIZE,
+            channels,
+            FixedAsync::Input,
+        ),
+        DspQuality::Balanced | DspQuality::High => {
+            let sinc_len = match quality {
+                DspQuality::High => HIGH_SINC_LEN,
+                _ => BALANCED_SINC_LEN,
+            };
+            let parameters =
+                SincInterpolationParameters::new(sinc_len, WindowFunction::BlackmanHarris2);
+            Async::<f32>::new_sinc(
+                ratio,
+                max_relative_ratio,
+                &parameters,
+                CHUNK_SIZE,
+                channels,
+                FixedAsync::Input,
+            )
+        }
+    }
+    .expect("valid resample ratio")
+}
 
 /// Steering handle shared between a drift observer and the resampler it
 /// steers. Steered rate stages read it once per chunk (one relaxed atomic
@@ -36,7 +90,8 @@ impl RateControl {
 }
 
 /// Resamples fixed-size chunks of interleaved PCM with `channels` samples
-/// per frame.
+/// per frame. `quality` selects the interpolation profile at construction
+/// ([`DspQuality::Economy`] is the historical cubic Farrow path).
 pub struct PcmResampler {
     inner: Async<f32>,
     channels: usize,
@@ -44,18 +99,15 @@ pub struct PcmResampler {
 }
 
 impl PcmResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
+    pub fn new(
+        input_rate_hz: u32,
+        output_rate_hz: u32,
+        channels: usize,
+        quality: DspQuality,
+    ) -> Self {
         let channels = channels.max(1);
         let ratio = output_rate_hz as f64 / input_rate_hz as f64;
-        let inner = Async::<f32>::new_poly(
-            ratio,
-            1.1,
-            PolynomialDegree::Cubic,
-            CHUNK_SIZE,
-            channels,
-            FixedAsync::Input,
-        )
-        .expect("valid resample ratio");
+        let inner = build_async(ratio, 1.1, channels, quality);
         let output_data = vec![0.0; inner.output_frames_max() * channels];
         PcmResampler {
             inner,
@@ -66,6 +118,14 @@ impl PcmResampler {
 
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// rubato's own introspection: `None` for the polynomial (Farrow)
+    /// interpolator, `Some(relative_cutoff)` for a windowed-sinc one. A
+    /// longer sinc derives a cutoff closer to Nyquist, so the `high`
+    /// profile's cutoff sits above the `balanced` one's.
+    pub fn cutoff(&self) -> Option<f32> {
+        self.inner.cutoff()
     }
 
     /// Frames (not samples) the next `process` call needs.
@@ -114,11 +174,21 @@ pub struct StreamingResampler {
 }
 
 impl StreamingResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
+    pub fn new(
+        input_rate_hz: u32,
+        output_rate_hz: u32,
+        channels: usize,
+        quality: DspQuality,
+    ) -> Self {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels))
+            Some(PcmResampler::new(
+                input_rate_hz,
+                output_rate_hz,
+                channels,
+                quality,
+            ))
         };
         StreamingResampler {
             input_rate_hz,
@@ -169,10 +239,11 @@ impl StreamingResampler {
 /// proportionally stretched stream. The non-synchronized path keeps the
 /// fixed-ratio resamplers above.
 ///
-/// Cost per chunk: a windowed sinc interpolation (sinc length 128, 128×
-/// oversampled filter table, cubic interpolation between table points) plus
-/// one ratio update only when the correction changed. This runs only for
-/// sync-group members, never on the free-running path.
+/// Cost per chunk: one interpolation per output frame at the profile's
+/// filter length (economy: 4-point cubic Farrow; balanced: 128-tap windowed
+/// sinc; high: 256-tap) over a 128× oversampled table for the sinc
+/// profiles, plus one ratio update only when the correction changed. This
+/// runs only for sync-group members, never on the free-running path.
 pub struct SteerableResampler {
     inner: Async<f32>,
     channels: usize,
@@ -185,19 +256,15 @@ pub struct SteerableResampler {
 }
 
 impl SteerableResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
+    pub fn new(
+        input_rate_hz: u32,
+        output_rate_hz: u32,
+        channels: usize,
+        quality: DspQuality,
+    ) -> Self {
         let channels = channels.max(1);
         let ratio = f64::from(output_rate_hz) / f64::from(input_rate_hz);
-        let parameters = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2);
-        let inner = Async::<f32>::new_sinc(
-            ratio,
-            1.0 + MAX_CORRECTION_PPM / 1e6,
-            &parameters,
-            CHUNK_SIZE,
-            channels,
-            FixedAsync::Input,
-        )
-        .expect("valid resample ratio");
+        let inner = build_async(ratio, 1.0 + MAX_CORRECTION_PPM / 1e6, channels, quality);
         let output_data = vec![0.0; inner.output_frames_max() * channels];
         SteerableResampler {
             inner,
@@ -213,6 +280,13 @@ impl SteerableResampler {
 
     pub fn channels(&self) -> usize {
         self.channels
+    }
+
+    /// rubato's own introspection: `None` for the polynomial (Farrow)
+    /// interpolator, `Some(relative_cutoff)` for a windowed-sinc one. See
+    /// [`PcmResampler::cutoff`].
+    pub fn cutoff(&self) -> Option<f32> {
+        self.inner.cutoff()
     }
 
     pub fn input_rate_hz(&self) -> u32 {
@@ -257,9 +331,12 @@ impl SteerableResampler {
             if self.pending.len() - consumed < need {
                 break;
             }
-            let in_adapter =
-                InterleavedSlice::new(&self.pending[consumed..consumed + need], self.channels, frames)
-                    .expect("valid input adapter shape");
+            let in_adapter = InterleavedSlice::new(
+                &self.pending[consumed..consumed + need],
+                self.channels,
+                frames,
+            )
+            .expect("valid input adapter shape");
             let out_capacity = self.inner.output_frames_max();
             let mut out_adapter =
                 InterleavedSlice::new_mut(&mut self.output_data, self.channels, out_capacity)

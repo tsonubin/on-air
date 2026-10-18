@@ -1,7 +1,7 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, CdStatus, OutputInfo, OutputPhase, SampleRateResponse,
-    SampleRateSide, StatusResponse,
+    ActiveOutput, ActiveOutputView, CdStatus, MeterLevel, OutputInfo, OutputPhase,
+    SampleRateResponse, SampleRateSide, StatusResponse,
 };
 use crate::model::DestState;
 
@@ -1022,6 +1022,7 @@ fn audio_check_recommends_without_applying_and_manual_selection_requires_a() {
         worst_case_ms: 25.0,
         recommended_buffer_ms: 100,
         within_buffer_budget: true,
+        recommended_quality: crate::api::DspQuality::Balanced,
     };
     assert!(update(&mut m, Msg::Benchmark(Ok(report))).is_empty());
     assert_eq!(m.buffer_choice_ms, 100);
@@ -1184,8 +1185,14 @@ fn cd_and_monitor_events_unchanged() {
         update(
             &mut m,
             ev(WsEvent::LevelMeter {
-                rms: 0.1,
-                peak: 0.2
+                left: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
+                right: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
             })
         ),
         vec![]
@@ -1353,7 +1360,10 @@ fn live_model() -> Model {
 fn level(m: &mut Model, rms: f32, peak: f32) {
     update(
         m,
-        Msg::Ws(Incoming::Event(WsEvent::LevelMeter { rms, peak })),
+        Msg::Ws(Incoming::Event(WsEvent::LevelMeter {
+            left: MeterLevel { rms, peak },
+            right: MeterLevel { rms, peak },
+        })),
     );
 }
 

@@ -65,6 +65,10 @@ pub fn build_router(state: CoreState) -> Router {
             post(api::audio_performance::benchmark),
         )
         .route("/api/audio/buffer", put(api::audio_performance::set_buffer))
+        .route(
+            "/api/audio/quality",
+            get(api::audio_performance::get_quality).put(api::audio_performance::set_quality),
+        )
         .route("/stream/{nonce}/audio.wav", get(api::stream::stream_audio))
         .route("/api/cd", get(api::cd::get_cd))
         .route("/api/cd/control", post(api::cd::control_cd))

@@ -115,6 +115,30 @@ export interface AudioBenchmark {
   worst_case_ms: number;
   recommended_buffer_ms: number;
   within_buffer_budget: boolean;
+  /** The DSP quality profile the measured timings can afford. */
+  recommended_quality: DspQuality;
+}
+
+/**
+ * DSP quality profile: selects the resampler on every conversion path.
+ * `economy` is the cheap cubic Farrow polynomial interpolator; `balanced`
+ * and `high` are windowed sinc interpolation (sinc length 128 / 256).
+ */
+export type DspQuality = "economy" | "balanced" | "high";
+
+/** `GET /api/audio/quality`. */
+export interface AudioQualityResponse {
+  /** Current profile, persisted in saved settings. */
+  quality: DspQuality;
+  /** The last benchmark's verdict; equals `quality` until one has run. */
+  recommended: DspQuality;
+  /** All selectable profiles. */
+  profiles: DspQuality[];
+}
+
+/** `PUT /api/audio/quality`; returns 204. */
+export interface SetAudioQualityRequest {
+  quality: DspQuality;
 }
 
 export interface PinResponse {
@@ -377,12 +401,22 @@ export interface CdSimulateRequest {
 // WebSocket events (`api/ws.rs`, `#[serde(tag = "type")]`)
 // ---------------------------------------------------------------------------
 
+/** One channel's RMS and peak level over one processed chunk (full-scale units). */
+export interface MeterLevel {
+  rms: number;
+  peak: number;
+}
+
 export type WsEvent =
   /** Sent every 10 s as a text frame so browsers and React Native see liveness. Ignore it. */
   | { type: "Heartbeat" }
   | { type: "OutputStateChanged"; transport: Transport; device_name: string; active: boolean }
   | { type: "InputStateChanged"; name: string | null; active: boolean; error?: string }
-  | { type: "LevelMeter"; rms: number; peak: number }
+  /**
+   * One meter reading per channel of the processed stereo stream. A mono
+   * capture is duplicated into both sides, so both channels then read the same.
+   */
+  | { type: "LevelMeter"; left: MeterLevel; right: MeterLevel }
   | { type: "DeviceJoined"; transport: Transport; id: string; name: string }
   | { type: "DeviceLeft"; transport: Transport; id: string }
   | { type: "ServiceStateChanged"; enabled: boolean }
