@@ -5,15 +5,18 @@ import type {
   DspQuality,
   EqGains,
   OutputInfo,
+  OutputSyncStatus,
   SampleRateResponse,
   SetSyncTrimRequest,
   StatusResponse,
+  SyncGroupMemberRequest,
+  SyncGroupView,
   SyncResponse,
 } from "@on-air/api-types";
 import type { EventHandlers, SubscribeOptions } from "@on-air/control-client";
 import { subscribeEvents } from "@on-air/control-client";
 import { FakeSocket, homepod, idleCd, sampleRate, sonos } from "@on-air/control-client/testing";
-import { vi } from "vitest";
+import { type Mock, vi } from "vitest";
 import type { ClientLike } from "../lib/client";
 
 export {
@@ -25,6 +28,42 @@ export {
   sonos,
   tick,
 } from "@on-air/control-client/testing";
+
+/** One output's sync row, as `GET /api/sync` reports it. */
+export function mockSyncStatus(overrides: Partial<OutputSyncStatus> = {}): OutputSyncStatus {
+  return {
+    transport: "sonos",
+    device_id: sonos.id,
+    device_name: sonos.name,
+    state: "locked",
+    trim_ms: 0,
+    default_latency_ms: 1000,
+    effective_latency_ms: 1000,
+    calibrated: false,
+    delay_frames: 2400,
+    output_sample_rate_hz: 48000,
+    ...overrides,
+  };
+}
+
+/** A two-speaker group playing together at the shared epoch. */
+export const downstairs: SyncGroupView = {
+  id: 1,
+  name: "Downstairs",
+  members: [
+    { transport: "sonos", device_id: sonos.id, device_name: sonos.name, playing: true },
+    { transport: "airplay", device_id: homepod.id, device_name: homepod.name, playing: true },
+  ],
+  playing: true,
+};
+
+/** An empty group that has not started. */
+export const upstairs: SyncGroupView = {
+  id: 2,
+  name: "Upstairs",
+  members: [],
+  playing: false,
+};
 
 /** Mutable backing store the fake client answers from. */
 export interface FakeCore {
@@ -64,7 +103,14 @@ export function fakeCore(overrides: Partial<FakeCore> = {}): FakeCore {
   };
 }
 
-export type FakeClient = { [K in keyof ClientLike]: ReturnType<typeof vi.fn<ClientLike[K]>> };
+/** The fake core's sync groups, created on first use so fixtures can omit them. */
+function syncGroups(core: FakeCore): SyncGroupView[] {
+  core.sync.groups ??= [];
+  return core.sync.groups;
+}
+
+/** Every `ClientLike` method replaced by a test double that answers from `core`. */
+export type FakeClient = { [K in keyof ClientLike]: Mock<ClientLike[K]> };
 
 /**
  * A `ClientLike` whose reads answer from `core` and whose writes resolve
@@ -129,6 +175,69 @@ export function fakeClient(core: FakeCore, socketOpts: SubscribeOptions = {}): F
         });
       }
       return { trim_ms, effective_latency_ms: Math.max(0, trim_ms) };
+    }),
+    createSyncGroup: vi.fn(async (name: string) => {
+      const groups = syncGroups(core);
+      const group: SyncGroupView = {
+        id: groups.reduce((next, g) => Math.max(next, g.id), 0) + 1,
+        name,
+        members: [],
+        playing: false,
+      };
+      groups.push(group);
+      return group;
+    }),
+    dissolveSyncGroup: vi.fn(async (groupId: number) => {
+      const groups = syncGroups(core);
+      const gone = groups.find((g) => g.id === groupId);
+      core.sync.groups = groups.filter((g) => g.id !== groupId);
+      for (const member of gone?.members ?? []) {
+        const row = core.sync.outputs.find(
+          (o) => o.transport === member.transport && o.device_id === member.device_id,
+        );
+        if (row) delete row.group_id;
+      }
+    }),
+    addSyncGroupMember: vi.fn(async (groupId: number, member: SyncGroupMemberRequest) => {
+      syncGroups(core)
+        .find((g) => g.id === groupId)
+        ?.members.push({
+          transport: member.transport,
+          device_id: member.device_id,
+          device_name:
+            core.outputs.find((o) => o.transport === member.transport && o.id === member.device_id)
+              ?.name ?? member.device_id,
+          playing: false,
+        });
+      const row = core.sync.outputs.find(
+        (o) => o.transport === member.transport && o.device_id === member.device_id,
+      );
+      if (row) row.group_id = groupId;
+    }),
+    leaveSyncGroupMember: vi.fn(async (groupId: number, member: SyncGroupMemberRequest) => {
+      const group = syncGroups(core).find((g) => g.id === groupId);
+      if (group) {
+        group.members = group.members.filter(
+          (m) => m.transport !== member.transport || m.device_id !== member.device_id,
+        );
+        group.playing = group.members.some((m) => m.playing);
+      }
+      const row = core.sync.outputs.find(
+        (o) => o.transport === member.transport && o.device_id === member.device_id,
+      );
+      if (row) delete row.group_id;
+    }),
+    startSyncGroup: vi.fn(async (groupId: number) => {
+      const group = syncGroups(core).find((g) => g.id === groupId);
+      if (!group) return;
+      for (const member of group.members) member.playing = true;
+      group.playing = group.members.length > 0;
+    }),
+    stopSyncGroup: vi.fn(async (groupId: number) => {
+      const group = syncGroups(core).find((g) => g.id === groupId);
+      if (!group) return;
+      for (const member of group.members) member.playing = false;
+      group.playing = false;
     }),
     getAirplayMode: vi.fn(async () => "owntone" as const),
     pairAirplay: vi.fn(async () => {}),

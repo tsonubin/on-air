@@ -248,7 +248,7 @@
     display: grid;
     flex: 1;
     min-height: 0;
-    grid-template-rows: repeat(2, minmax(0, 1fr));
+    grid-template-rows: repeat(2, minmax(0, 1fr)) auto;
     overflow: hidden;
   }
   .routing-section {
@@ -285,7 +285,7 @@
   @media (min-width: 721px) {
     .routing-grid {
       grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) auto;
     }
     .routing-section {
       display: grid;
@@ -345,6 +345,94 @@
     font: var(--text-xs) var(--font-mono);
   }
   .device-sync input[type="number"]:focus-visible {
+    outline: 2px solid var(--color-amber);
+    outline-offset: 1px;
+  }
+  .device-sync select {
+    max-width: 160px;
+    padding: 3px 6px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-well);
+    color: var(--color-ink);
+    font: var(--text-xs) var(--font-mono);
+  }
+  .device-sync select:focus-visible {
+    outline: 2px solid var(--color-amber);
+    outline-offset: 1px;
+  }
+
+  /* "Play together": sync groups below the output list. */
+  .routing-together {
+    display: flex;
+    flex-direction: column;
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow: hidden;
+    padding: 12px;
+    border-top: 1px solid var(--color-line-soft);
+  }
+  .sync-group-blurb {
+    margin: -4px 0 8px;
+    font-size: var(--text-sm);
+    color: var(--color-steel-dim);
+  }
+  .sync-group-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-y: auto;
+  }
+  .sync-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--color-line-soft);
+    border-radius: 6px;
+    background: linear-gradient(180deg, var(--color-face-2), var(--color-face));
+  }
+  .sync-group-name {
+    font: var(--text-xs) var(--font-mono);
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink);
+  }
+  .sync-group-members {
+    display: flex;
+    flex: 1 1 160px;
+    flex-direction: column;
+    min-width: 0;
+    font-size: var(--text-sm);
+    color: var(--color-steel);
+  }
+  .sync-group-members span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sync-group-create {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .sync-group-create input[type="text"] {
+    flex: 1;
+    min-width: 140px;
+    padding: 4px 8px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-well);
+    color: var(--color-ink);
+    font: var(--text-xs) var(--font-mono);
+  }
+  .sync-group-create input[type="text"]:focus-visible {
     outline: 2px solid var(--color-amber);
     outline-offset: 1px;
   }
