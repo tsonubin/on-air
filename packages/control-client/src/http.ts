@@ -9,6 +9,7 @@ import {
   type AirPlayPairRequest,
   type ApiErrorBody,
   type AudioBenchmark,
+  type AudioQualityResponse,
   apiBase,
   type BluetoothIdRequest,
   type BluetoothListResponse,
@@ -17,6 +18,7 @@ import {
   type CdSimulateRequest,
   type CdStatus,
   DEFAULT_PORT,
+  type DspQuality,
   type EqGains,
   type EqResponse,
   type InputsResponse,
@@ -25,10 +27,14 @@ import {
   type OutputVolumeResponse,
   type PinResponse,
   type SampleRateResponse,
+  type SetAudioQualityRequest,
   type SetEqRequest,
   type SetSampleRateRequest,
+  type SetSyncTrimRequest,
   type SetVolumeRequest,
   type StatusResponse,
+  type SyncResponse,
+  type SyncTrimResponse,
   type Transport,
   type VerifyRequest,
   type VerifyResponse,
@@ -75,6 +81,50 @@ export async function setCaptureBuffer(
 /** Local host only. The caller must explain and confirm the rule first. */
 export async function repairFirewall(base: string, opts?: RequestOptions): Promise<void> {
   await request(base, "/api/network/firewall", { method: "POST" }, opts, 125_000);
+}
+
+export async function getAudioQuality(
+  base: string,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<AudioQualityResponse> {
+  return request<AudioQualityResponse>(
+    base,
+    "/api/audio/quality",
+    { headers: authHeaders(token) },
+    opts,
+  );
+}
+
+export async function setAudioQuality(
+  base: string,
+  quality: DspQuality,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  const payload: SetAudioQualityRequest = { quality };
+  await request(base, "/api/audio/quality", jsonInit("PUT", token, payload), opts);
+}
+
+export async function getSync(
+  base: string,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<SyncResponse> {
+  return request<SyncResponse>(base, "/api/sync", { headers: authHeaders(token) }, opts);
+}
+
+/**
+ * One output's latency trim in milliseconds: a manual correction, never a
+ * measurement. It applies the next time that output's feed opens.
+ */
+export async function setSyncTrim(
+  base: string,
+  body: SetSyncTrimRequest,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<SyncTrimResponse> {
+  return request<SyncTrimResponse>(base, "/api/sync/trim", jsonInit("PUT", token, body), opts);
 }
 
 /** Per-call knobs accepted as the trailing argument of every HTTP function. */

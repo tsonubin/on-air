@@ -1,11 +1,21 @@
-import { API_BASE, type AudioBenchmark } from "@on-air/api-types";
+import {
+  API_BASE,
+  type AudioBenchmark,
+  type AudioQualityResponse,
+  type DspQuality,
+} from "@on-air/api-types";
 import {
   AUDIO_CHECK_DESCRIPTION,
   AUDIO_CHECK_OVER_BUDGET,
   audioBenchmarkSummary,
   CAPTURE_BUFFER_OPTIONS,
   captureBufferLabel,
+  DSP_QUALITY_COSTS,
+  DSP_QUALITY_DESCRIPTION,
+  DSP_QUALITY_LABELS,
+  DSP_QUALITY_OPTIONS,
   runAudioBenchmark,
+  setAudioQuality,
   setCaptureBuffer,
 } from "@on-air/control-client";
 import { useState } from "react";
@@ -13,10 +23,13 @@ import { Button } from "../ui/Button";
 
 export function AudioPerformance({
   bufferMs,
+  quality,
   disabled,
   onApplied,
 }: {
   bufferMs?: number;
+  /** `null` on a core too old to report it. */
+  quality: AudioQualityResponse | null;
   disabled: boolean;
   onApplied(): void;
 }) {
@@ -24,7 +37,9 @@ export function AudioPerformance({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
+  const [selectedQuality, setSelectedQuality] = useState<DspQuality | null>(null);
   const available = bufferMs !== undefined;
+  const qualityAvailable = quality !== null;
   const check = async () => {
     setBusy(true);
     setError(null);
@@ -51,6 +66,22 @@ export function AudioPerformance({
       setBusy(false);
     }
   };
+  const applyQuality = async (profile: DspQuality) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await setAudioQuality(API_BASE, profile);
+      setSelectedQuality(null);
+      onApplied();
+    } catch {
+      setError(
+        "The DSP quality change could not be confirmed. Check the host connection and current setting.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pickedQuality = selectedQuality ?? quality?.quality ?? "balanced";
   return (
     <details className="mx-3 mb-2 rounded border border-line p-2 text-sm text-steel">
       <summary className="cursor-pointer">Audio performance</summary>
@@ -87,6 +118,42 @@ export function AudioPerformance({
           {busy ? "Working…" : "Run audio check"}
         </Button>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <label>
+          DSP quality{" "}
+          <select
+            aria-label="DSP quality"
+            className="rounded border border-line bg-face-2 p-1 text-ink"
+            value={pickedQuality}
+            disabled={disabled || busy || !qualityAvailable}
+            onChange={(e) => setSelectedQuality(e.target.value as DspQuality)}
+          >
+            {DSP_QUALITY_OPTIONS.map((profile) => (
+              <option key={profile} value={profile}>
+                {DSP_QUALITY_LABELS[profile]}
+                {quality?.recommended === profile ? " (recommended)" : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          disabled={disabled || busy || !qualityAvailable || selectedQuality === null}
+          onClick={() => void applyQuality(pickedQuality)}
+        >
+          Apply quality
+        </Button>
+        {report && (
+          <Button
+            disabled={disabled || busy}
+            onClick={() => void applyQuality(report.recommended_quality)}
+          >
+            Apply recommended quality ({DSP_QUALITY_LABELS[report.recommended_quality]})
+          </Button>
+        )}
+      </div>
+      <p className="m-0">
+        {DSP_QUALITY_DESCRIPTION} {DSP_QUALITY_COSTS[pickedQuality]}
+      </p>
       {report && (
         <>
           <p>{audioBenchmarkSummary(report)}</p>

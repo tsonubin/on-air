@@ -7,11 +7,14 @@ import type {
   ActiveInputResponse,
   ActiveOutputView,
   AirPlayMode,
+  AudioQualityResponse,
   CdStatus,
   EqGains,
+  MeterLevel,
   OutputInfo,
   SampleRateResponse,
   StatusResponse,
+  SyncResponse,
   WsEvent,
 } from "@on-air/api-types";
 import { isServicePaused, isUnauthorized } from "./errorCopy.ts";
@@ -28,6 +31,10 @@ export interface CoreSnapshot {
   volume: number | null;
   gains: EqGains | null;
   sampleRate: SampleRateResponse | null;
+  /** DSP quality profile: current, recommended and selectable. */
+  audioQuality: AudioQualityResponse | null;
+  /** Per-output latency trim and sync state. */
+  sync: SyncResponse | null;
   /** Loopback-only endpoint: the desktop shows it, the phone never asks. */
   pin: string | null;
   airplayMode: AirPlayMode | null;
@@ -43,6 +50,8 @@ export const EMPTY_SNAPSHOT: CoreSnapshot = {
   volume: null,
   gains: null,
   sampleRate: null,
+  audioQuality: null,
+  sync: null,
   pin: null,
   airplayMode: null,
   cd: null,
@@ -57,8 +66,15 @@ export const DEVICE_SLICES: readonly Slice[] = [
   "outputs",
   "activeOutput",
   "cd",
+  "sync",
 ];
-export const CONFIG_SLICES: readonly Slice[] = ["volume", "gains", "sampleRate", "airplayMode"];
+export const CONFIG_SLICES: readonly Slice[] = [
+  "volume",
+  "gains",
+  "sampleRate",
+  "audioQuality",
+  "airplayMode",
+];
 /** Every slice a LAN client may read. `pin` is loopback-only; the desktop adds it itself. */
 export const ALL_SLICES: readonly Slice[] = ["status", ...DEVICE_SLICES, ...CONFIG_SLICES];
 /** A failed required slice is reported; one of these failing is "partly refreshed". */
@@ -73,7 +89,13 @@ export const REQUIRED_SLICES: readonly Slice[] = [
   "sampleRate",
 ];
 /** Older cores lack these endpoints; a failure here is not an error. */
-export const OPTIONAL_SLICES: readonly Slice[] = ["airplayMode", "cd", "pin"];
+export const OPTIONAL_SLICES: readonly Slice[] = [
+  "airplayMode",
+  "cd",
+  "pin",
+  "audioQuality",
+  "sync",
+];
 
 /** What each slice's endpoint returns. */
 export interface SliceValue {
@@ -85,6 +107,8 @@ export interface SliceValue {
   volume: number;
   gains: EqGains;
   sampleRate: SampleRateResponse;
+  audioQuality: AudioQualityResponse;
+  sync: SyncResponse;
   pin: string;
   airplayMode: AirPlayMode;
   cd: CdStatus;
@@ -102,6 +126,8 @@ export interface SliceApi {
   getVolume(base: string, token?: string): Promise<number>;
   getEq(base: string, token?: string): Promise<EqGains>;
   getSampleRate(base: string, token?: string): Promise<SampleRateResponse>;
+  getAudioQuality(base: string, token?: string): Promise<AudioQualityResponse>;
+  getSync(base: string, token?: string): Promise<SyncResponse>;
   getPairingPin(base: string): Promise<string>;
   getAirplayMode(base: string, token?: string): Promise<AirPlayMode>;
   getCd(base: string, token?: string): Promise<CdStatus>;
@@ -118,6 +144,8 @@ export function sliceReaders(api: SliceApi, base: string, token?: string): Slice
     volume: () => api.getVolume(base, token),
     gains: () => api.getEq(base, token),
     sampleRate: () => api.getSampleRate(base, token),
+    audioQuality: () => api.getAudioQuality(base, token),
+    sync: () => api.getSync(base, token),
     pin: () => api.getPairingPin(base),
     airplayMode: () => api.getAirplayMode(base, token),
     cd: () => api.getCd(base, token),
@@ -284,6 +312,12 @@ function provisionalOutput(ev: Extract<WsEvent, { type: "DeviceJoined" }>): Outp
   };
 }
 
+/** One `LevelMeter` frame: both channels of one moment, straight to the UI. */
+export interface StereoLevels {
+  left: MeterLevel;
+  right: MeterLevel;
+}
+
 export interface EventReduction {
   next: CoreSnapshot;
   /** Slices the event set; stamp them so an older read cannot overwrite them. */
@@ -294,6 +328,11 @@ export interface EventReduction {
   inputStopped: boolean;
   /** A `ServiceStateChanged` arrived with this value. */
   serviceEnabled?: boolean;
+  /**
+   * A `LevelMeter` event's reading. Levels are too frequent for the
+   * snapshot: they never touch a slice and never trigger a read.
+   */
+  meter?: StereoLevels;
 }
 
 /** Applies one WebSocket event to the snapshot. Pure; the hooks do the side effects. */
@@ -336,7 +375,12 @@ export function reduceEvent(prev: CoreSnapshot, ev: WsEvent): EventReduction {
         // A stop for another transport means a switch already replaced it.
         const next =
           prev.activeOutput?.transport === ev.transport ? { ...prev, activeOutput: null } : prev;
-        return { ...unchanged, next, touched: ["activeOutput"] };
+        return {
+          ...unchanged,
+          next,
+          touched: ["activeOutput"],
+          refresh: ["sync"],
+        };
       }
       // The event names the device but does not carry its id; the catalog
       // usually has it, otherwise a refresh fills it in. The core only
@@ -357,14 +401,14 @@ export function reduceEvent(prev: CoreSnapshot, ev: WsEvent): EventReduction {
         ...unchanged,
         next,
         touched: ["activeOutput"],
-        refresh: match ? ["volume"] : ["activeOutput", "volume"],
+        refresh: match ? ["volume", "sync"] : ["activeOutput", "volume", "sync"],
       };
     }
     case "DeviceJoined": {
       const outputs = prev.outputs ?? [];
       const known = outputs.some((o) => o.transport === ev.transport && o.id === ev.id);
       const next = known ? prev : { ...prev, outputs: [...outputs, provisionalOutput(ev)] };
-      return { ...unchanged, next, touched: ["outputs"], refresh: ["outputs"] };
+      return { ...unchanged, next, touched: ["outputs"], refresh: ["outputs", "sync"] };
     }
     case "DeviceLeft": {
       const next = {
@@ -372,10 +416,13 @@ export function reduceEvent(prev: CoreSnapshot, ev: WsEvent): EventReduction {
         outputs:
           prev.outputs?.filter((o) => !(o.transport === ev.transport && o.id === ev.id)) ?? null,
       };
-      return { ...unchanged, next, touched: ["outputs"] };
+      return { ...unchanged, next, touched: ["outputs"], refresh: ["sync"] };
     }
+    case "LevelMeter":
+      // Not snapshot state: hand the reading straight to the UI.
+      return { ...unchanged, meter: { left: ev.left, right: ev.right } };
     default:
-      // Heartbeat, LevelMeter and types this client does not know.
+      // Heartbeat and types this client does not know.
       return unchanged;
   }
 }

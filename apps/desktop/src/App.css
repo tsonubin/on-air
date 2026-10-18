@@ -321,6 +321,33 @@
     margin: 4px 0 0;
     color: var(--color-steel);
   }
+
+  /* Per-output sync: the state line and the manual latency trim. */
+  .device-sync {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 2px 10px 8px 36px;
+    font: var(--text-xs) var(--font-mono);
+    letter-spacing: 0.08em;
+    color: var(--color-steel-dim);
+    text-transform: uppercase;
+  }
+  .device-sync input[type="number"] {
+    width: 88px;
+    margin: 0 4px;
+    padding: 3px 6px;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-well);
+    color: var(--color-ink);
+    font: var(--text-xs) var(--font-mono);
+  }
+  .device-sync input[type="number"]:focus-visible {
+    outline: 2px solid var(--color-amber);
+    outline-offset: 1px;
+  }
   .skeleton-row {
     height: 34px;
     border-radius: 6px;

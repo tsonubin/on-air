@@ -19,6 +19,10 @@ jest.mock("@on-air/control-client", () => ({
   getEq: jest.fn(),
   getSampleRate: jest.fn(),
   getVolume: jest.fn(),
+  getAudioQuality: jest.fn(),
+  getSync: jest.fn(),
+  setAudioQuality: jest.fn(),
+  setSyncTrim: jest.fn(),
   getAirplayMode: jest.fn(),
   getCd: jest.fn(),
   controlCd: jest.fn(),
@@ -104,8 +108,14 @@ function mockDesktop() {
   api.getSampleRate.mockResolvedValue({
     sample_rate_hz: 44100,
     input: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
-    output: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
+    output: { sample_rate_hz: 48000, supported_hz: [44100, 48000] },
   });
+  api.getAudioQuality.mockResolvedValue({
+    quality: "balanced",
+    recommended: "balanced",
+    profiles: ["economy", "balanced", "high"],
+  });
+  api.getSync.mockResolvedValue({ outputs: [] });
   api.getAirplayMode.mockResolvedValue("owntone");
   api.getCd.mockResolvedValue(NO_DISC);
   api.controlCd.mockResolvedValue(NO_DISC);

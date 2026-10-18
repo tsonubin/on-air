@@ -1,7 +1,8 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, CdStatus, MeterLevel, OutputInfo, OutputPhase,
-    SampleRateResponse, SampleRateSide, StatusResponse,
+    ActiveOutput, ActiveOutputView, AudioQualityResponse, CdStatus, DspQuality, MeterLevel,
+    OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
+    SyncState,
 };
 use crate::model::DestState;
 
@@ -69,6 +70,8 @@ fn model_with_mock_snapshot() -> Model {
         cd: None,
         airplay_mode: Some("owntone".into()),
         bluetooth: None,
+        audio_quality: None,
+        sync: None,
     };
     model.autostart = Some(false);
     model
@@ -1022,15 +1025,54 @@ fn audio_check_recommends_without_applying_and_manual_selection_requires_a() {
         worst_case_ms: 25.0,
         recommended_buffer_ms: 100,
         within_buffer_budget: true,
-        recommended_quality: crate::api::DspQuality::Balanced,
+        recommended_quality: DspQuality::High,
     };
     assert!(update(&mut m, Msg::Benchmark(Ok(report))).is_empty());
     assert_eq!(m.buffer_choice_ms, 100);
+    assert_eq!(
+        m.quality_choice,
+        DspQuality::High,
+        "the check's quality recommendation is preselected like the buffer one"
+    );
     assert_eq!(update(&mut m, key('a')), vec![Cmd::SetCaptureBuffer(100)]);
     update(&mut m, done(LABEL_BUFFER, Ok(())));
     assert!(update(&mut m, code(KeyCode::Right)).is_empty());
     assert_eq!(m.buffer_choice_ms, 200);
     assert_eq!(update(&mut m, key('a')), vec![Cmd::SetCaptureBuffer(200)]);
+}
+
+#[test]
+fn audio_check_selects_quality_and_q_applies_the_selection() {
+    let mut m = model_with_mock_snapshot();
+    m.snapshot.audio_quality = Some(AudioQualityResponse {
+        quality: DspQuality::Balanced,
+        recommended: DspQuality::High,
+        profiles: vec![
+            DspQuality::Economy,
+            DspQuality::Balanced,
+            DspQuality::High,
+        ],
+    });
+    assert!(update(&mut m, key('t')).is_empty());
+    assert_eq!(
+        m.quality_choice,
+        DspQuality::Balanced,
+        "the overlay opens on the current profile"
+    );
+    assert!(update(&mut m, code(KeyCode::Up)).is_empty());
+    assert_eq!(m.quality_choice, DspQuality::Economy);
+    assert!(update(&mut m, code(KeyCode::Down)).is_empty());
+    assert_eq!(m.quality_choice, DspQuality::Balanced);
+    assert!(update(&mut m, code(KeyCode::Down)).is_empty());
+    assert_eq!(m.quality_choice, DspQuality::High);
+    assert_eq!(
+        update(&mut m, key('q')),
+        vec![Cmd::SetQuality(DspQuality::High)]
+    );
+    assert_eq!(m.pending, Some(Pending { label: LABEL_QUALITY.into() }));
+    update(&mut m, done(LABEL_QUALITY, Ok(())));
+    assert_eq!(m.pending, None);
+    assert_eq!(m.modal, Modal::AudioCheck, "the overlay stays for more checks");
 }
 
 #[test]
@@ -1185,14 +1227,8 @@ fn cd_and_monitor_events_unchanged() {
         update(
             &mut m,
             ev(WsEvent::LevelMeter {
-                left: MeterLevel {
-                    rms: 0.1,
-                    peak: 0.2
-                },
-                right: MeterLevel {
-                    rms: 0.1,
-                    peak: 0.2
-                },
+                left: MeterLevel { rms: 0.1, peak: 0.2 },
+                right: MeterLevel { rms: 0.1, peak: 0.2 },
             })
         ),
         vec![]
@@ -1358,6 +1394,7 @@ fn live_model() -> Model {
 }
 
 fn level(m: &mut Model, rms: f32, peak: f32) {
+    // A mono source duplicates its one channel into both sides.
     update(
         m,
         Msg::Ws(Incoming::Event(WsEvent::LevelMeter {
@@ -1371,10 +1408,34 @@ fn level(m: &mut Model, rms: f32, peak: f32) {
 fn level_event_sets_meter() {
     let mut m = live_model();
     level(&mut m, 0.5, 1.0);
-    assert!((m.meter.rms_db + 6.02).abs() < 0.01, "{:?}", m.meter);
-    assert_eq!(m.meter.peak_db, 0.0);
-    assert_eq!(m.meter.hold, 10);
-    assert_eq!(m.meter.quiet, 0);
+    assert!((m.meter.left.rms_db + 6.02).abs() < 0.01, "{:?}", m.meter);
+    assert_eq!(m.meter.left.peak_db, 0.0);
+    assert_eq!(m.meter.left.hold, 10);
+    assert_eq!(m.meter.left.quiet, 0);
+    assert_eq!(
+        (m.meter.right.rms_db, m.meter.right.peak_db),
+        (m.meter.left.rms_db, m.meter.left.peak_db),
+        "a duplicated channel reads the same on both sides"
+    );
+}
+
+#[test]
+fn each_channel_meters_independently() {
+    let mut m = live_model();
+    update(
+        &mut m,
+        Msg::Ws(Incoming::Event(WsEvent::LevelMeter {
+            left: MeterLevel { rms: 0.5, peak: 1.0 },
+            right: MeterLevel { rms: 0.0, peak: 0.0 },
+        })),
+    );
+    assert!((m.meter.left.rms_db + 6.02).abs() < 0.01, "{:?}", m.meter);
+    assert_eq!(m.meter.left.peak_db, 0.0);
+    assert_eq!(
+        (m.meter.right.rms_db, m.meter.right.peak_db),
+        (METER_FLOOR_DB, METER_FLOOR_DB),
+        "the silent channel stays on the floor"
+    );
 }
 
 #[test]
@@ -1391,16 +1452,16 @@ fn peak_holds_then_falls() {
     for _ in 0..10 {
         update(&mut m, Msg::Frame);
     }
-    assert_eq!(m.meter.peak_db, 0.0);
+    assert_eq!(m.meter.left.peak_db, 0.0);
     update(&mut m, Msg::Frame);
-    assert_eq!(m.meter.peak_db, -1.5);
+    assert_eq!(m.meter.left.peak_db, -1.5);
     update(&mut m, Msg::Frame);
-    assert_eq!(m.meter.peak_db, -3.0);
+    assert_eq!(m.meter.left.peak_db, -3.0);
     // A lower peak does not disturb the falling one; a higher one resets the hold.
     level(&mut m, 0.5, 0.001);
-    assert_eq!(m.meter.peak_db, -3.0);
+    assert_eq!(m.meter.left.peak_db, -3.0);
     level(&mut m, 0.5, 1.0);
-    assert_eq!((m.meter.peak_db, m.meter.hold), (0.0, 10));
+    assert_eq!((m.meter.left.peak_db, m.meter.left.hold), (0.0, 10));
 }
 
 #[test]
@@ -1410,7 +1471,15 @@ fn meter_times_out() {
     for _ in 0..20 {
         update(&mut m, Msg::Frame);
     }
-    assert_eq!((m.meter.rms_db, m.meter.peak_db), (-60.0, -60.0));
+    assert_eq!(
+        (m.meter.left.rms_db, m.meter.left.peak_db),
+        (-60.0, -60.0)
+    );
+    assert_eq!(
+        (m.meter.right.rms_db, m.meter.right.peak_db),
+        (-60.0, -60.0),
+        "both channels fade out together"
+    );
 }
 
 #[test]
@@ -1418,17 +1487,129 @@ fn meter_reads_zero_when_monitor_off_or_idle() {
     let mut off = live_model();
     off.snapshot.status.as_mut().unwrap().service_enabled = false;
     level(&mut off, 0.5, 1.0);
-    assert_eq!((off.meter.rms_db, off.meter.peak_db), (-60.0, -60.0));
+    assert_eq!(
+        (off.meter.left.rms_db, off.meter.left.peak_db),
+        (-60.0, -60.0)
+    );
 
     let mut idle = live_model();
     idle.snapshot.active_output = None;
     level(&mut idle, 0.5, 1.0);
-    assert_eq!((idle.meter.rms_db, idle.meter.peak_db), (-60.0, -60.0));
+    assert_eq!(
+        (idle.meter.left.rms_db, idle.meter.left.peak_db),
+        (-60.0, -60.0)
+    );
 
     let mut failed = live_model();
     failed.snapshot.active_output.as_mut().unwrap().state = Some(OutputPhase::Failed);
     level(&mut failed, 0.5, 1.0);
-    assert_eq!(failed.meter.peak_db, -60.0);
+    assert_eq!(failed.meter.left.peak_db, -60.0);
+}
+
+fn sync_row(transport: &str, device_id: &str, trim_ms: i32) -> OutputSyncStatus {
+    OutputSyncStatus {
+        transport: transport.into(),
+        device_id: device_id.into(),
+        device_name: "Mock Sonos".into(),
+        state: SyncState::FreeRunning,
+        trim_ms,
+        default_latency_ms: 1000,
+        effective_latency_ms: 1000,
+        calibrated: false,
+        delay_frames: 0,
+        output_sample_rate_hz: 48000,
+        drift_ppm: None,
+    }
+}
+
+#[test]
+fn d_trims_the_selected_output_and_enter_sends_the_manual_value() {
+    let mut m = model_with_mock_snapshot();
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 25)]);
+    assert!(update(&mut m, key('d')).is_empty());
+    let Modal::TrimPrompt {
+        transport,
+        device_id,
+        input,
+        ..
+    } = &m.modal
+    else {
+        panic!("expected the trim prompt, got {:?}", m.modal);
+    };
+    assert_eq!(
+        (transport.as_str(), device_id.as_str(), input.as_str()),
+        ("sonos", "uuid:mock-sonos", "25"),
+        "the prompt opens on the selected output with its current trim"
+    );
+    while !matches!(&m.modal, Modal::TrimPrompt { input, .. } if input.is_empty()) {
+        update(&mut m, code(KeyCode::Backspace));
+    }
+    for c in ['-', '1', '0', '0'] {
+        update(&mut m, key(c));
+    }
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::SetSyncTrim {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            trim_ms: -100,
+        }]
+    );
+    assert_eq!(
+        m.pending,
+        Some(Pending { label: LABEL_TRIM.into() }),
+        "the prompt stays open while the write is in flight"
+    );
+    // Success closes the prompt; the follow-up refresh lands the value.
+    assert_eq!(update(&mut m, done(LABEL_TRIM, Ok(()))), vec![Cmd::Refresh]);
+    assert_eq!(m.pending, None);
+    assert_eq!(m.modal, Modal::None);
+}
+
+#[test]
+fn the_trim_prompt_validates_the_value_and_reports_a_refused_write() {
+    let mut m = model_with_mock_snapshot();
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    update(&mut m, key('d'));
+    while !matches!(&m.modal, Modal::TrimPrompt { input, .. } if input.is_empty()) {
+        update(&mut m, code(KeyCode::Backspace));
+    }
+    // Out of range is refused before anything is sent.
+    for c in ['9', '9', '9', '9', '9', '9'] {
+        update(&mut m, key(c));
+    }
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    assert!(matches!(&m.modal, Modal::TrimPrompt { error: Some(_), .. }));
+    assert_eq!(m.pending, None);
+    // An empty value is refused too.
+    while !matches!(&m.modal, Modal::TrimPrompt { input, .. } if input.is_empty()) {
+        update(&mut m, code(KeyCode::Backspace));
+    }
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    assert!(matches!(&m.modal, Modal::TrimPrompt { error: Some(_), .. }));
+    // A refused write reports into the prompt for another try.
+    for c in ['5', '0'] {
+        update(&mut m, key(c));
+    }
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::SetSyncTrim {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            trim_ms: 50,
+        }]
+    );
+    assert_eq!(update(&mut m, done(LABEL_TRIM, Err("nope".into()))), vec![]);
+    assert_eq!(m.pending, None);
+    let Modal::TrimPrompt {
+        input, error, name, ..
+    } = &m.modal
+    else {
+        panic!("expected the trim prompt, got {:?}", m.modal);
+    };
+    assert_eq!(input, "", "the refused value is cleared");
+    assert_eq!(error.as_deref(), Some("nope"));
+    assert_eq!(name, "Mock Sonos");
 }
 
 fn mouse(target: Target, rect: Rect, column: u16, row: u16, kind: MouseKind) -> Msg {

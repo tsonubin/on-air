@@ -1,10 +1,14 @@
 import type {
   ActiveOutputView,
+  AudioQualityResponse,
   CdStatus,
+  DspQuality,
   EqGains,
   OutputInfo,
   SampleRateResponse,
+  SetSyncTrimRequest,
   StatusResponse,
+  SyncResponse,
 } from "@on-air/api-types";
 import type { EventHandlers, SubscribeOptions } from "@on-air/control-client";
 import { subscribeEvents } from "@on-air/control-client";
@@ -32,6 +36,8 @@ export interface FakeCore {
   volume: number;
   gains: EqGains;
   sampleRate: SampleRateResponse;
+  audioQuality: AudioQualityResponse;
+  sync: SyncResponse;
   pin: string;
   cd: CdStatus;
 }
@@ -46,6 +52,12 @@ export function fakeCore(overrides: Partial<FakeCore> = {}): FakeCore {
     volume: 50,
     gains: [0, 0, 0, 0, 0],
     sampleRate,
+    audioQuality: {
+      quality: "balanced",
+      recommended: "balanced",
+      profiles: ["economy", "balanced", "high"],
+    },
+    sync: { outputs: [] },
     pin: "123456",
     cd: idleCd,
     ...overrides,
@@ -90,6 +102,34 @@ export function fakeClient(core: FakeCore, socketOpts: SubscribeOptions = {}): F
     }),
     getSampleRate: vi.fn(async () => core.sampleRate),
     setSampleRate: vi.fn(async () => {}),
+    getAudioQuality: vi.fn(async () => core.audioQuality),
+    setAudioQuality: vi.fn(async (quality: DspQuality) => {
+      core.audioQuality = { ...core.audioQuality, quality };
+    }),
+    getSync: vi.fn(async () => core.sync),
+    setSyncTrim: vi.fn(async (body: SetSyncTrimRequest) => {
+      const row = core.sync.outputs.find(
+        (o) => o.transport === body.transport && o.device_id === body.device_id,
+      );
+      const trim_ms = body.trim_ms;
+      if (row) {
+        row.trim_ms = trim_ms;
+      } else {
+        core.sync.outputs.push({
+          transport: body.transport,
+          device_id: body.device_id,
+          device_name: body.device_id,
+          state: "free_running",
+          trim_ms,
+          default_latency_ms: 0,
+          effective_latency_ms: 0,
+          calibrated: false,
+          delay_frames: 0,
+          output_sample_rate_hz: 48000,
+        });
+      }
+      return { trim_ms, effective_latency_ms: Math.max(0, trim_ms) };
+    }),
     getAirplayMode: vi.fn(async () => "owntone" as const),
     pairAirplay: vi.fn(async () => {}),
     pairBluetooth: vi.fn(async () => {}),

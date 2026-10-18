@@ -62,6 +62,7 @@ function MixerScreen() {
         activeOutput={remote.activeOutput?.device_name ?? ""}
         outputPhase={remote.activeOutput ? outputPhase(remote.activeOutput) : undefined}
         volume={remote.volume}
+        levels={remote.levels}
         status={{ text: view.statusText, announcement: view.statusAnnouncement, live: view.live }}
         error={remote.error ?? remote.warning}
         firewallWarning={remote.firewallWarning}

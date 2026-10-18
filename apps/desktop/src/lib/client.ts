@@ -3,14 +3,19 @@ import {
   type ActiveOutputView,
   type AirPlayMode,
   API_BASE,
+  type AudioQualityResponse,
   type CdAction,
   type CdControlRequest,
   type CdStatus,
+  type DspQuality,
   type EqGains,
   type OutputInfo,
   type SampleRateResponse,
   type SetSampleRateRequest,
+  type SetSyncTrimRequest,
   type StatusResponse,
+  type SyncResponse,
+  type SyncTrimResponse,
   type Transport,
 } from "@on-air/api-types";
 import type { EventHandlers, EventSubscription, SubscribeOptions } from "@on-air/control-client";
@@ -38,6 +43,10 @@ export interface ClientLike {
   setEq(gains: EqGains): Promise<void>;
   getSampleRate(): Promise<SampleRateResponse>;
   setSampleRate(body: SetSampleRateRequest): Promise<void>;
+  getAudioQuality(): Promise<AudioQualityResponse>;
+  setAudioQuality(quality: DspQuality): Promise<void>;
+  getSync(): Promise<SyncResponse>;
+  setSyncTrim(body: SetSyncTrimRequest): Promise<SyncTrimResponse>;
   getAirplayMode(): Promise<AirPlayMode>;
   pairAirplay(deviceId: string, pin: string): Promise<void>;
   pairBluetooth(id: string): Promise<void>;
@@ -64,6 +73,10 @@ function createClient(base: string = API_BASE): ClientLike {
     setEq: (gains) => cc.setEq(base, gains),
     getSampleRate: () => cc.getSampleRate(base),
     setSampleRate: (body) => cc.setSampleRate(base, body),
+    getAudioQuality: () => cc.getAudioQuality(base),
+    setAudioQuality: (quality) => cc.setAudioQuality(base, quality),
+    getSync: () => cc.getSync(base),
+    setSyncTrim: (body) => cc.setSyncTrim(base, body),
     getAirplayMode: () => cc.getAirplayMode(base),
     pairAirplay: (deviceId, pin) => cc.pairAirplay(base, deviceId, pin),
     pairBluetooth: (id) => cc.pairBluetooth(base, id),

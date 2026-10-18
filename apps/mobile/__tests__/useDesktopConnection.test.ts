@@ -19,6 +19,8 @@ jest.mock("@on-air/control-client", () => ({
   getVolume: jest.fn(),
   getEq: jest.fn(),
   getSampleRate: jest.fn(),
+  getAudioQuality: jest.fn(),
+  getSync: jest.fn(),
   getAirplayMode: jest.fn(),
   getCd: jest.fn(),
 }));
@@ -32,6 +34,8 @@ const reads = {
   getVolume: jest.mocked(client.getVolume),
   getEq: jest.mocked(client.getEq),
   getSampleRate: jest.mocked(client.getSampleRate),
+  getAudioQuality: jest.mocked(client.getAudioQuality),
+  getSync: jest.mocked(client.getSync),
   getAirplayMode: jest.mocked(client.getAirplayMode),
   getCd: jest.mocked(client.getCd),
 };
@@ -61,6 +65,12 @@ function happyReads() {
     input: { sample_rate_hz: 44100, supported_hz: [44100, 48000] },
     output: { sample_rate_hz: 48000, supported_hz: [48000] },
   });
+  reads.getAudioQuality.mockResolvedValue({
+    quality: "balanced",
+    recommended: "balanced",
+    profiles: ["economy", "balanced", "high"],
+  });
+  reads.getSync.mockResolvedValue({ outputs: [] });
   reads.getAirplayMode.mockResolvedValue("owntone");
   reads.getCd.mockResolvedValue({
     present: false,
@@ -182,12 +192,23 @@ test("applies socket payloads directly and refetches only the named slice", asyn
   act(() =>
     FakeSocket.last?.send({ type: "DeviceJoined", transport: "sonos", id: "x", name: "Y" }),
   );
-  act(() => FakeSocket.last?.send({ type: "LevelMeter", rms: 0.1, peak: 0.2 }));
+  act(() =>
+    FakeSocket.last?.send({
+      type: "LevelMeter",
+      left: { rms: 0.1, peak: 0.2 },
+      right: { rms: 0.05, peak: 0.1 },
+    }),
+  );
   expect(callCounts()).toEqual(before);
+  expect(result.current.levels).toEqual({
+    left: { rms: 0.1, peak: 0.2 },
+    right: { rms: 0.05, peak: 0.1 },
+  });
 
   await tick(150);
   expect(reads.getVolume).toHaveBeenCalledTimes(before.getVolume + 1);
   expect(reads.listOutputs).toHaveBeenCalledTimes(before.listOutputs + 1);
+  expect(reads.getSync).toHaveBeenCalledTimes(before.getSync + 1);
   expect(reads.getActiveOutput).toHaveBeenCalledTimes(before.getActiveOutput);
   expect(reads.getCd).toHaveBeenCalledTimes(before.getCd);
   expect(reads.listInputs).toHaveBeenCalledTimes(before.listInputs);

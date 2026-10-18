@@ -1,5 +1,7 @@
+import type { StereoLevels } from "@on-air/control-client";
 import type { MixerHandle } from "../hooks/useMixer";
 import { Fader } from "../ui/Fader";
+import { LevelMeter } from "../ui/LevelMeter";
 import { RateSelect } from "../ui/RateSelect";
 
 const EQ_BANDS = [
@@ -10,9 +12,17 @@ const EQ_BANDS = [
   { label: "12k", name: "12 kilohertz" },
 ] as const;
 
-export function MixerFooter({ mixer, disabled }: { mixer: MixerHandle; disabled: boolean }) {
+export function MixerFooter({
+  mixer,
+  levels,
+  disabled,
+}: {
+  mixer: MixerHandle;
+  levels: StereoLevels | null;
+  disabled: boolean;
+}) {
   return (
-    <footer className="grid shrink-0 grid-cols-1 items-end justify-items-center gap-4 border-t border-line-soft bg-footer px-4 py-3 min-[561px]:grid-cols-[auto_minmax(0,1fr)_minmax(9.5rem,11rem)] min-[561px]:justify-items-stretch [@media(max-height:560px)]:gap-2.5 [@media(max-height:560px)]:px-3 [@media(max-height:560px)]:py-2">
+    <footer className="grid shrink-0 grid-cols-1 items-end justify-items-center gap-4 border-t border-line-soft bg-footer px-4 py-3 min-[561px]:grid-cols-[auto_minmax(0,1fr)_minmax(9.5rem,11rem)_minmax(6.5rem,9rem)] min-[561px]:justify-items-stretch [@media(max-height:560px)]:gap-2.5 [@media(max-height:560px)]:px-3 [@media(max-height:560px)]:py-2">
       <Fader
         label="volume"
         ariaLabel="Volume"
@@ -64,6 +74,7 @@ export function MixerFooter({ mixer, disabled }: { mixer: MixerHandle; disabled:
           onChange={mixer.setOutputRate}
         />
       </div>
+      <LevelMeter levels={levels} disabled={disabled} />
     </footer>
   );
 }

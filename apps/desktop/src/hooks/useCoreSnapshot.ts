@@ -15,6 +15,7 @@ import {
   reduceEvent,
   type Slice,
   type SliceReaders,
+  type StereoLevels,
   type SubscribeOptions,
 } from "@on-air/control-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -50,6 +51,8 @@ export interface CoreSnapshotHandle {
   connection: Connection;
   /** State of the event socket; `"reconnecting"` is shown as "live updates off". */
   liveUpdates: ConnectionState;
+  /** The latest stereo level reading, or `null` while none is arriving. */
+  levels: StereoLevels | null;
   actionError: ActionError | null;
   reportError(err: unknown): void;
   clearError(): void;
@@ -67,6 +70,8 @@ export const DEFAULT_POLL_MS = 15_000;
 export const DEFAULT_DEBOUNCE_MS = 300;
 /** The core sends a Heartbeat text frame every 10 s; three missed ones mean a dead socket. */
 export const EVENT_STALL_MS = 30_000;
+/** Levels arrive ~43/s; the meter re-renders at most at this interval. */
+export const METER_INTERVAL_MS = 50;
 
 // The pairing PIN is a loopback-only read, so only this window asks for it.
 const KIND_SLICES: Record<RefreshKind, readonly Slice[]> = {
@@ -85,6 +90,8 @@ function readersFor(client: ClientLike): SliceReaders {
     volume: () => client.getVolume(),
     gains: () => client.getEq(),
     sampleRate: () => client.getSampleRate(),
+    audioQuality: () => client.getAudioQuality(),
+    sync: () => client.getSync(),
     pin: () => client.getPairingPin(),
     airplayMode: () => client.getAirplayMode(),
     cd: () => client.getCd(),
@@ -102,7 +109,9 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
   const [snapshot, setSnapshot] = useState<CoreSnapshot>(EMPTY_SNAPSHOT);
   const [connection, setConnection] = useState<Connection>("connecting");
   const [liveUpdates, setLiveUpdates] = useState<ConnectionState>("connecting");
+  const [levels, setLevels] = useState<StereoLevels | null>(null);
   const [actionError, setActionError] = useState<ActionError | null>(null);
+  const lastLevelsAt = useRef(0);
   const clientRef = useRef(client);
   clientRef.current = client;
 
@@ -169,6 +178,16 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
   const applyEvent = useCallback(
     (ev: WsEvent) => {
       const reduced = reduceEvent(snapshotRef.current, ev);
+      if (reduced.meter) {
+        // Levels never touch the snapshot; throttle them to the meter's
+        // frame rate and drop the rest.
+        const now = Date.now();
+        if (now - lastLevelsAt.current >= METER_INTERVAL_MS) {
+          lastLevelsAt.current = now;
+          setLevels(reduced.meter);
+        }
+        return;
+      }
       guard.touch(...reduced.touched);
       update(() => reduced.next);
       if (reduced.inputStopped) setActionError({ message: INPUT_STOPPED_COPY, at: Date.now() });
@@ -241,6 +260,7 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
     snapshot,
     connection,
     liveUpdates,
+    levels,
     actionError,
     reportError,
     clearError,

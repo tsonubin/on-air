@@ -305,11 +305,11 @@ async fn run_tui(client: Client) {
         // frame, so a burst of level events costs one draw.
         let now = matches!(msg, Msg::Key(_) | Msg::Mouse { .. });
         let frame = msg == Msg::Frame;
-        let level = (model.meter.rms_db, model.meter.peak_db);
+        let level = model.meter;
         if dispatch(&mut model, msg) {
             break;
         }
-        dirty |= !frame || level != (model.meter.rms_db, model.meter.peak_db);
+        dirty |= !frame || level != model.meter;
         if now || (frame && dirty) {
             dirty = false;
             if !draw(&model, &mut hits) {

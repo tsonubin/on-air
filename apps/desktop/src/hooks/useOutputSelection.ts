@@ -26,6 +26,8 @@ export interface OutputSelectionHandle {
   refreshingDevices: boolean;
   chooseInput(name: string): Promise<void>;
   chooseOutput(output: OutputInfo): Promise<void>;
+  /** One output's manual latency trim in milliseconds. */
+  setTrim(output: OutputInfo, trimMs: number): Promise<void>;
   submitPair(pin: string): Promise<void>;
   cancelPair(): void;
   openBluetoothSettings(): void;
@@ -129,6 +131,20 @@ export function useOutputSelection({
     [activate, snapshot.airplayMode],
   );
 
+  const setTrim = useCallback(
+    async (output: OutputInfo, trimMs: number) => {
+      await perform(async () => {
+        await client.setSyncTrim({
+          transport: output.transport,
+          device_id: output.id,
+          trim_ms: trimMs,
+        });
+        await refresh("devices");
+      });
+    },
+    [client, perform, refresh],
+  );
+
   const submitPair = useCallback(
     async (pin: string) => {
       if (!pairTarget || pairing) return;
@@ -180,6 +196,7 @@ export function useOutputSelection({
     refreshingDevices,
     chooseInput,
     chooseOutput,
+    setTrim,
     submitPair,
     cancelPair,
     openBluetoothSettings,

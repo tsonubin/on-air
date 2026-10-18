@@ -103,6 +103,30 @@ describe("useCoreSnapshot", () => {
     expect(client.getActiveOutput.mock.calls.length).toBe(activeCalls);
   });
 
+  it("hands LevelMeter frames to the meter without refetching or touching state", async () => {
+    const { hook, client } = setup();
+    await loaded(hook);
+    const socket = FakeSocket.latest();
+    act(() => socket.open());
+    await tick(DEBOUNCE * 2);
+    const reads = client.getVolume.mock.calls.length + client.getSync.mock.calls.length;
+    act(() =>
+      socket.send({
+        type: "LevelMeter",
+        left: { rms: 0.5, peak: 1 },
+        right: { rms: 0.25, peak: 0.5 },
+      }),
+    );
+    expect(hook.result.current.levels).toEqual({
+      left: { rms: 0.5, peak: 1 },
+      right: { rms: 0.25, peak: 0.5 },
+    });
+    const snapshot = hook.result.current.snapshot;
+    await tick(DEBOUNCE * 2);
+    expect(hook.result.current.snapshot).toBe(snapshot);
+    expect(client.getVolume.mock.calls.length + client.getSync.mock.calls.length).toBe(reads);
+  });
+
   it("applies InputStateChanged to the active input and refreshes devices", async () => {
     const { hook, client, core } = setup();
     await loaded(hook);

@@ -163,10 +163,36 @@ pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) 
             "Selected buffer: {}   ← / → to choose",
             label(model.buffer_choice_ms)
         )),
-        Line::from("Enter: run ~2 second check   a: apply selected buffer   Esc: close"),
-        Line::from("Check during your usual workload; settings stay unchanged until applied."),
-        Line::from("Larger buffers trade more delay for tolerance of scheduling stalls."),
     ];
+    match &model.snapshot.audio_quality {
+        Some(quality) => {
+            let picked = crate::cli::quality_label(model.quality_choice);
+            let recommendation = (model.quality_choice == quality.recommended)
+                .then_some(" (the check's recommendation)");
+            lines.push(Line::from(format!(
+                "DSP quality: {}   Selected: {}{}   ↑ / ↓ to choose",
+                crate::cli::quality_label(quality.quality),
+                picked,
+                recommendation.unwrap_or(""),
+            )));
+            lines.push(Line::from(format!(
+                "  {}",
+                crate::cli::quality_cost(model.quality_choice)
+            )));
+        }
+        None => lines.push(Line::from(
+            "DSP quality: unavailable — update the on-air core.",
+        )),
+    }
+    lines.push(Line::from(
+        "Enter: run ~2 second check   a: apply buffer   q: apply quality   Esc: close",
+    ));
+    lines.push(Line::from(
+        "Check during your usual workload; settings stay unchanged until applied.",
+    ));
+    lines.push(Line::from(
+        "Larger buffers trade more delay for tolerance of scheduling stalls.",
+    ));
     if let Some(report) = &model.benchmark {
         lines.extend(
             crate::cli::benchmark_text(report)
@@ -183,12 +209,65 @@ pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) 
             Style::new().fg(Color::Red),
         )));
     }
-    let rect = centered(area, area.width.min(92), area.height.min(20));
+    let rect = centered(area, area.width.min(92), area.height.min(22));
     frame.render_widget(Clear, rect);
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .block(Block::bordered().title(" Audio performance ")),
+        rect,
+    );
+    rect
+}
+
+/// The manual latency trim of one output. The copy insists on the truth:
+/// a trim is a correction typed by ear, never a calibrated measurement.
+pub(super) fn trim_overlay(
+    frame: &mut Frame,
+    area: Rect,
+    name: &str,
+    current: Option<i32>,
+    input: &str,
+    error: Option<&str>,
+    working: bool,
+) -> Rect {
+    let mut lines = vec![
+        Line::from("Manual latency correction against what you hear, in milliseconds."),
+        Line::from("It is not measured or calibrated, and applies the next time this output plays."),
+    ];
+    lines.push(Line::from(match current {
+        Some(trim) => format!("Current trim: {trim:+} ms"),
+        None => "Current trim: 0 ms (not yet reported)".to_string(),
+    }));
+    lines.push(Line::from(Span::styled(
+        format!("Trim: {input}▏"),
+        Style::new().bold(),
+    )));
+    if let Some(error) = error {
+        lines.push(Line::from(Span::styled(
+            error.to_string(),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    if working {
+        lines.push(Line::from(Span::styled(
+            "Setting…",
+            Style::new().fg(Color::Yellow),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        "Enter: apply   Esc: close",
+        Style::new().dim(),
+    )));
+    // Two spare rows over the logical lines: the copy wraps at overlay
+    // widths and a clipped input line would hide the control.
+    let height = lines.len() as u16 + 4;
+    let rect = centered(area, area.width.min(64), height.min(area.height));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title(format!(" Latency trim · {name} "))),
         rect,
     );
     rect

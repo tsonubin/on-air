@@ -5,9 +5,10 @@
 use crate::api::WsEvent;
 use crate::api::{
     ActiveInputResponse, ActiveOutputResponse, ActiveOutputView, AirPlayModeResponse, ApiErrorBody,
-    BluetoothDeviceInfo, BluetoothListResponse, CdAction, CdStatus, EqResponse, InputsResponse,
-    OutputInfo, OutputVolumeResponse, OutputsResponse, PinResponse, SampleRateResponse,
-    ServiceResponse, StatusResponse,
+    AudioQualityResponse, BluetoothDeviceInfo, BluetoothListResponse, CdAction, CdStatus,
+    DspQuality, EqResponse, InputsResponse, OutputInfo, OutputSyncStatus, OutputVolumeResponse,
+    OutputsResponse, PinResponse, SampleRateResponse, ServiceResponse, StatusResponse, SyncResponse,
+    SyncTrimResponse,
 };
 use crate::error_copy;
 use crate::model::{MixerControl, Snapshot};
@@ -148,6 +149,8 @@ impl Client {
             cd,
             airplay_mode,
             bluetooth,
+            audio_quality,
+            sync,
         ) = tokio::join!(
             self.status(),
             self.pin(),
@@ -161,6 +164,8 @@ impl Client {
             self.cd(),
             self.airplay_mode(),
             self.bluetooth_devices(),
+            self.audio_quality(),
+            self.sync_status(),
         );
         let mut failures: Vec<String> = Vec::new();
         let paused = matches!(&status, Ok(status) if !status.service_enabled);
@@ -178,6 +183,9 @@ impl Client {
             airplay_mode: take_part(airplay_mode, paused, &mut failures),
             // The list is optional: a failure shows as a line in the pane.
             bluetooth: bluetooth.ok(),
+            // Newer cores only: a failure shows as controls left hidden.
+            audio_quality: audio_quality.ok(),
+            sync: sync.ok(),
         };
         (snapshot, failures)
     }
@@ -208,6 +216,17 @@ impl Client {
             Cmd::SetCaptureBuffer(buffer_ms) => done(
                 update::LABEL_BUFFER,
                 self.set_capture_buffer(buffer_ms).await,
+            ),
+            Cmd::SetQuality(quality) => {
+                done(update::LABEL_QUALITY, self.set_audio_quality(quality).await)
+            }
+            Cmd::SetSyncTrim {
+                transport,
+                device_id,
+                trim_ms,
+            } => done(
+                update::LABEL_TRIM,
+                self.set_sync_trim(&transport, &device_id, trim_ms).await,
             ),
             Cmd::RepairFirewall => {
                 let result = self.repair_firewall().await;
@@ -481,6 +500,42 @@ impl Client {
         .await
     }
 
+    pub async fn audio_quality(&self) -> Result<AudioQualityResponse, ClientError> {
+        self.get("/api/audio/quality").await
+    }
+
+    pub async fn set_audio_quality(&self, quality: DspQuality) -> Result<(), ClientError> {
+        self.send_json(
+            Method::PUT,
+            "/api/audio/quality",
+            json!({"quality": quality}),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Every output's latency trim and sync state.
+    pub async fn sync_status(&self) -> Result<Vec<OutputSyncStatus>, ClientError> {
+        self.get::<SyncResponse>("/api/sync").await.map(|r| r.outputs)
+    }
+
+    /// One output's manual latency trim in milliseconds.
+    pub async fn set_sync_trim(
+        &self,
+        transport: &str,
+        device_id: &str,
+        trim_ms: i32,
+    ) -> Result<(), ClientError> {
+        self.send_json::<SyncTrimResponse>(
+            Method::PUT,
+            "/api/sync/trim",
+            json!({"transport": transport, "device_id": device_id, "trim_ms": trim_ms}),
+            SLOW_TIMEOUT,
+        )
+        .await
+        .map(|_| ())
+    }
+
     pub async fn pin(&self) -> Result<String, ClientError> {
         self.get::<PinResponse>("/api/pairing/pin")
             .await
@@ -682,7 +737,6 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::MeterLevel;
 
     #[test]
     fn a_trailing_slash_is_trimmed_from_the_base() {
@@ -709,8 +763,9 @@ mod tests {
 
     #[test]
     fn level_meter_frame_decodes() {
+        use crate::api::MeterLevel;
         let event = serde_json::from_str::<WsEvent>(
-            r#"{"type":"LevelMeter","left":{"rms":0.25,"peak":0.5},"right":{"rms":0.1,"peak":0.2}}"#,
+            r#"{"type":"LevelMeter","left":{"rms":0.25,"peak":0.5},"right":{"rms":0.125,"peak":0.25}}"#,
         )
         .unwrap();
         assert_eq!(
@@ -721,8 +776,8 @@ mod tests {
                     peak: 0.5
                 },
                 right: MeterLevel {
-                    rms: 0.1,
-                    peak: 0.2
+                    rms: 0.125,
+                    peak: 0.25
                 },
             }
         );

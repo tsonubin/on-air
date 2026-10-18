@@ -1,5 +1,5 @@
-//! The Mixer pane: vertical volume and EQ faders, the level meter and the
-//! sample rates; one line per control when the window is short.
+//! The Mixer pane: vertical volume and EQ faders, the stereo level meter
+//! and the sample rates; one line per control when the window is short.
 
 use super::hit::{HitMap, Target};
 use super::layout::{locked_style, pane_block, row_rect, selection_style};
@@ -192,7 +192,8 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
     }
     x += VOLUME_WIDTH + 2;
 
-    // Level meter, sized to what the faders and rates leave over.
+    // Stereo level meter, sized to what the faders and rates leave over:
+    // one bar per channel behind an L/R gutter.
     let fixed = 5 * BAND_WIDTH + 3 + 4 + RATE_WIDTH + 2;
     let meter_width = inner
         .width
@@ -206,20 +207,31 @@ fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
         meter_width,
         Line::styled("LVL", locked_style(model, Style::new())),
     );
-    let mut cells = meter_cells(&model.meter, usize::from(meter_width));
-    if model.locked() || model.core_down {
-        for cell in &mut cells {
-            cell.style = cell.style.add_modifier(Modifier::DIM);
+    let channels = [("L", &model.meter.left), ("R", &model.meter.right)];
+    for (line, (letter, meter)) in channels.into_iter().enumerate() {
+        put(
+            frame,
+            inner,
+            x,
+            FADER_ROW + line as u16,
+            1,
+            Line::styled(letter, locked_style(model, Style::new())),
+        );
+        let mut cells = meter_cells(meter, usize::from(meter_width) - 1);
+        if model.locked() || model.core_down {
+            for cell in &mut cells {
+                cell.style = cell.style.add_modifier(Modifier::DIM);
+            }
         }
+        put(
+            frame,
+            inner,
+            x + 1,
+            FADER_ROW + line as u16,
+            meter_width - 1,
+            Line::from(cells),
+        );
     }
-    put(
-        frame,
-        inner,
-        x,
-        FADER_ROW + 1,
-        meter_width,
-        Line::from(cells),
-    );
     x += meter_width + 3;
 
     // EQ.

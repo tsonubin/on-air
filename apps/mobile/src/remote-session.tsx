@@ -1,12 +1,15 @@
 import type {
   ActiveOutputView,
   AirPlayMode,
+  AudioQualityResponse,
   CdAction,
   CdStatus,
   DiscoveredHost,
+  DspQuality,
   EqGains,
   FirewallWarning,
   OutputInfo,
+  OutputSyncStatus,
 } from "@on-air/api-types";
 import { outputPhase } from "@on-air/api-types";
 import {
@@ -21,8 +24,11 @@ import {
   pairAirplay,
   pairBluetooth,
   prettyInput,
+  type StereoLevels,
+  setAudioQuality,
   setEq,
   setSampleRate,
+  setSyncTrim,
   setVolume,
   verifyPin,
 } from "@on-air/control-client";
@@ -76,6 +82,12 @@ export type RemoteState = {
   firewallWarning?: FirewallWarning;
   captureBufferMs?: number;
   audioPerformance: AudioPerformanceHandle;
+  /** The latest stereo level reading, or `null` while none is arriving. */
+  levels: StereoLevels | null;
+  /** DSP quality profiles; `null` on a desktop too old to report them. */
+  audioQuality: AudioQualityResponse | null;
+  /** Per-output latency trim and sync state; empty on an older desktop. */
+  sync: OutputSyncStatus[];
   paired: boolean;
   /** The paired desktop as `host` or `host:port`. */
   pairedHost: string;
@@ -125,6 +137,10 @@ export type RemoteActions = {
   applyVolume(value: number): void;
   applyEq(gains: EqGains): void;
   changeBand(index: number, value: number): void;
+  /** Overrides the DSP quality profile. */
+  applyQuality(quality: DspQuality): Promise<void>;
+  /** One output's manual latency trim in milliseconds. */
+  applyTrim(output: OutputInfo, trimMs: number): Promise<void>;
   controlCd(action: Extract<CdAction, "play" | "pause" | "next" | "prev">): Promise<void>;
 };
 
@@ -458,6 +474,40 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     [applyEq],
   );
 
+  const applyQuality = useCallback(
+    async (quality: DspQuality) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      setActionError(null);
+      try {
+        await setAudioQuality(creds.base, quality, creds.token);
+        await refreshNow(["audioQuality"]);
+      } catch (error) {
+        fail(error, "change the DSP quality");
+      }
+    },
+    [fail, refreshNow],
+  );
+
+  const applyTrim = useCallback(
+    async (output: OutputInfo, trimMs: number) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      setActionError(null);
+      try {
+        await setSyncTrim(
+          creds.base,
+          { transport: output.transport, device_id: output.id, trim_ms: trimMs },
+          creds.token,
+        );
+        await refreshNow(["sync"]);
+      } catch (error) {
+        fail(error, "change the latency trim");
+      }
+    },
+    [fail, refreshNow],
+  );
+
   const cdAction = useCallback(
     async (action: Extract<CdAction, "play" | "pause" | "next" | "prev">) => {
       const creds = credentials.current;
@@ -492,6 +542,9 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       firewallWarning: connection.status?.firewall_warning,
       captureBufferMs: connection.status?.capture_buffer_ms,
       audioPerformance,
+      levels: connection.levels,
+      audioQuality: connection.audioQuality,
+      sync: connection.sync,
       paired: Boolean(saved),
       pairedHost,
       found: discovery.found,
@@ -531,6 +584,8 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       applyVolume,
       applyEq,
       changeBand,
+      applyQuality,
+      applyTrim,
       controlCd: cdAction,
     }),
     [
@@ -560,6 +615,9 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       connection.outputRates,
       connection.airplayMode,
       connection.cd,
+      connection.levels,
+      connection.audioQuality,
+      connection.sync,
       busyTarget,
       configuringRate,
       devicePairing,
@@ -579,6 +637,8 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       applyVolume,
       applyEq,
       changeBand,
+      applyQuality,
+      applyTrim,
       cdAction,
     ],
   );

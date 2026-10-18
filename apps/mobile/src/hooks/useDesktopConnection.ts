@@ -1,9 +1,11 @@
 import type {
   ActiveOutputView,
   AirPlayMode,
+  AudioQualityResponse,
   CdStatus,
   EqGains,
   OutputInfo,
+  OutputSyncStatus,
   StatusResponse,
   WsEvent,
 } from "@on-air/api-types";
@@ -21,6 +23,7 @@ import {
   readSlices,
   reduceEvent,
   type Slice,
+  type StereoLevels,
   sliceReaders,
   subscribeEvents,
   type WebSocketConstructor,
@@ -68,6 +71,10 @@ export type Snapshot = {
   outputSampleRate: number;
   inputRates: number[];
   outputRates: number[];
+  /** DSP quality profiles; `null` on a desktop too old to report them. */
+  audioQuality: AudioQualityResponse | null;
+  /** Per-output latency trim and sync state; empty on an older desktop. */
+  sync: OutputSyncStatus[];
   airplayMode: AirPlayMode | null;
   cd: CdStatus;
 };
@@ -100,6 +107,8 @@ function toView(s: CoreSnapshot): Snapshot {
     outputRates: s.sampleRate?.output.supported_hz.length
       ? s.sampleRate.output.supported_hz
       : DEFAULT_RATES,
+    audioQuality: s.audioQuality,
+    sync: s.sync?.outputs ?? [],
     airplayMode: s.airplayMode,
     cd: s.cd ?? EMPTY_CD,
   };
@@ -118,6 +127,8 @@ const SLICE_OF: { [K in keyof Snapshot]: Slice } = {
   outputSampleRate: "sampleRate",
   inputRates: "sampleRate",
   outputRates: "sampleRate",
+  audioQuality: "audioQuality",
+  sync: "sync",
   airplayMode: "airplayMode",
   cd: "cd",
 };
@@ -132,6 +143,8 @@ function applyPatch(prev: CoreSnapshot, update: Partial<Snapshot>): CoreSnapshot
   if (update.activeOutput !== undefined) next.activeOutput = update.activeOutput;
   if (update.volume !== undefined) next.volume = update.volume;
   if (update.gains !== undefined) next.gains = update.gains;
+  if (update.audioQuality !== undefined) next.audioQuality = update.audioQuality;
+  if (update.sync !== undefined) next.sync = { outputs: update.sync };
   if (update.airplayMode !== undefined) next.airplayMode = update.airplayMode;
   if (update.cd !== undefined) next.cd = update.cd;
   const rates = prev.sampleRate;
@@ -177,6 +190,8 @@ export type DesktopConnectionOptions = {
 export type DesktopConnection = Snapshot & {
   phase: ConnectionPhase;
   wsState: ConnectionState;
+  /** The latest stereo level reading, or `null` while none is arriving. */
+  levels: StereoLevels | null;
   /** A person-initiated refresh is running. */
   refreshing: boolean;
   /** Outcome of the last refresh, when something failed. */
@@ -196,6 +211,8 @@ export const DEFAULT_COALESCE_MS = 150;
  * `Heartbeat` text frame every 10 s; three missed ones mean a dead socket.
  */
 export const DEFAULT_STALL_MS = 30_000;
+/** Levels arrive ~43/s; the meter re-renders at most at this interval. */
+export const METER_INTERVAL_MS = 50;
 
 /**
  * One desktop pairing's live state: a coalescing refresh scheduler over the
@@ -217,8 +234,10 @@ export function useDesktopConnection({
   const [snapshot, setSnapshot] = useState<CoreSnapshot>(EMPTY_SNAPSHOT);
   const [phase, setPhase] = useState<ConnectionPhase>("idle");
   const [wsState, setWsState] = useState<ConnectionState>("closed");
+  const [levels, setLevels] = useState<StereoLevels | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lastLevelsAt = useRef(0);
   const credentials = useRef<{ base: string; token: string } | null>(null);
   credentials.current = base && token ? { base, token } : null;
   const onUnauthorizedRef = useRef(onUnauthorized);
@@ -324,6 +343,7 @@ export function useDesktopConnection({
     guard.reset();
     queue.current?.clear();
     update(() => EMPTY_SNAPSHOT);
+    setLevels(null);
     setError(null);
     setPhase(base && token ? "connecting" : "idle");
   }, [base, token, guard, update]);
@@ -331,6 +351,16 @@ export function useDesktopConnection({
   const onEvent = useCallback(
     (event: WsEvent) => {
       const reduced = reduceEvent(snapshotRef.current, event);
+      if (reduced.meter) {
+        // Levels never touch the snapshot; throttle them to the meter's
+        // frame rate and drop the rest.
+        const now = Date.now();
+        if (now - lastLevelsAt.current >= METER_INTERVAL_MS) {
+          lastLevelsAt.current = now;
+          setLevels(reduced.meter);
+        }
+        return;
+      }
       guard.touch(...reduced.touched);
       update(() => reduced.next);
       if (reduced.inputStopped) onNoticeRef.current?.(INPUT_STOPPED_NOTICE);
@@ -385,6 +415,7 @@ export function useDesktopConnection({
     ...view,
     phase,
     wsState,
+    levels,
     refreshing,
     error,
     scheduleRefresh,

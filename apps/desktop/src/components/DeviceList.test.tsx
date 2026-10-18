@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { homepod, sonos } from "../test/fakes";
 import { DeviceList, type DeviceListProps } from "./DeviceList";
@@ -10,11 +10,13 @@ function props(overrides: Partial<DeviceListProps> = {}): DeviceListProps {
     outputs: [],
     activeOutput: null,
     airplayMode: "owntone",
+    sync: null,
     connectingOutput: null,
     refreshing: false,
     disabled: false,
     onChooseInput: vi.fn(),
     onChooseOutput: vi.fn(),
+    onSetTrim: vi.fn(async () => {}),
     onBluetoothSettings: vi.fn(),
     onAirplayInfo: vi.fn(),
     onRefresh: vi.fn(),
@@ -126,5 +128,72 @@ describe("DeviceList", () => {
       "true",
     );
     expect(screen.getByTestId("active-output")).toHaveTextContent(/^sonos: Mock Sonos$/);
+  });
+
+  it("shows the sync state with drift and sends a manual trim", async () => {
+    const onSetTrim = vi.fn(async () => {});
+    render(
+      <DeviceList
+        {...props({
+          outputs: [sonos],
+          onSetTrim,
+          sync: [
+            {
+              transport: "sonos",
+              device_id: sonos.id,
+              device_name: sonos.name,
+              state: "locked",
+              trim_ms: -100,
+              default_latency_ms: 1000,
+              effective_latency_ms: 900,
+              calibrated: false,
+              delay_frames: 2400,
+              output_sample_rate_hz: 48000,
+              drift_ppm: 42.4,
+            },
+          ],
+        })}
+      />,
+    );
+    const row = screen.getByTestId(`sync-sonos-${sonos.id}`);
+    expect(row).toHaveTextContent("Locked · 42 ppm");
+    const input = within(row).getByRole("spinbutton");
+    expect(input.closest("label")).toHaveAttribute(
+      "title",
+      expect.stringContaining("not measured or calibrated"),
+    );
+    expect(input).toHaveValue(-100);
+    fireEvent.change(input, { target: { value: "-250" } });
+    fireEvent.click(within(row).getByRole("button", { name: "Set trim" }));
+    await waitFor(() => expect(onSetTrim).toHaveBeenCalledWith(sonos, -250));
+  });
+
+  it("hides the sync row on cores without sync status and reports free-running driftless", () => {
+    const { rerender } = render(<DeviceList {...props({ outputs: [sonos], sync: null })} />);
+    expect(screen.queryByTestId(`sync-sonos-${sonos.id}`)).toBeNull();
+    rerender(
+      <DeviceList
+        {...props({
+          outputs: [sonos],
+          sync: [
+            {
+              transport: "sonos",
+              device_id: sonos.id,
+              device_name: sonos.name,
+              state: "free_running",
+              trim_ms: 0,
+              default_latency_ms: 1000,
+              effective_latency_ms: 1000,
+              calibrated: false,
+              delay_frames: 0,
+              output_sample_rate_hz: 48000,
+            },
+          ],
+        })}
+      />,
+    );
+    const row = screen.getByTestId(`sync-sonos-${sonos.id}`);
+    expect(row).toHaveTextContent(/^Free-running/);
+    expect(row).not.toHaveTextContent("ppm");
   });
 });
