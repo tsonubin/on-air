@@ -397,7 +397,12 @@ fn scale_l16(pcm: &mut [u8], volume: u8) {
     }
     for sample in pcm.as_chunks_mut::<2>().0 {
         let value = i32::from(i16::from_le_bytes(*sample));
-        *sample = ((value * i32::from(volume) / 100) as i16).to_le_bytes();
+        // Round to nearest rather than truncating: truncation here would undo
+        // the dither applied at the L16 conversion and reintroduce the
+        // quantization error it removed.
+        let scaled = value * i32::from(volume);
+        let rounded = (scaled + if scaled < 0 { -50 } else { 50 }) / 100;
+        *sample = (rounded as i16).to_le_bytes();
     }
 }
 
@@ -410,7 +415,7 @@ mod tests {
 
     #[test]
     fn a_full_output_queue_drops_whole_frames() {
-        use crate::dsp::bridge::f32_to_l16_le;
+        use crate::dsp::bridge::{f32_to_l16_le, TpdfDither};
         use ringbuf::traits::Observer;
         let (producer, consumer) = HeapRb::<f32>::new(5).split();
         let sink = CpalPcmSink {
@@ -419,8 +424,12 @@ mod tests {
             volume: Arc::new(AtomicU8::new(100)),
             stream: Mutex::new(None),
         };
-        sink.write(&f32_to_l16_le(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3]))
-            .unwrap();
+        let mut dither = TpdfDither::new(1);
+        sink.write(&f32_to_l16_le(
+            &[0.1, -0.1, 0.2, -0.2, 0.3, -0.3],
+            &mut dither,
+        ))
+        .unwrap();
         assert_eq!(consumer.occupied_len(), 4, "a frame was split");
     }
 

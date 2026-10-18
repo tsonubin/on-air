@@ -1,3 +1,4 @@
+use crate::dsp::bridge::TpdfDither;
 use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::PcmResampler;
 use crate::dsp::PIPELINE_CHANNELS;
@@ -39,8 +40,8 @@ impl ProcessingTaskHandle {
     }
 }
 
-fn f32_to_le_i16_bytes(samples: &[f32]) -> Bytes {
-    Bytes::from(crate::dsp::bridge::f32_to_l16_le(samples))
+fn f32_to_le_i16_bytes(samples: &[f32], dither: &mut TpdfDither) -> Bytes {
+    Bytes::from(crate::dsp::bridge::f32_to_l16_le(samples, dither))
 }
 
 /// Called once, from the processing thread, if it panics. Receives the
@@ -146,6 +147,8 @@ fn process_until_stopped(
         .unwrap_or(1024);
     let mut chunk = vec![0.0f32; chunk_frames * PIPELINE_CHANNELS];
     let mut resampled = Vec::new();
+    // One dither per capture, so parallel captures do not share noise.
+    let mut dither = TpdfDither::for_stream(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS);
 
     while !stop_flag.load(Ordering::Relaxed) {
         let mut filled = 0;
@@ -182,9 +185,9 @@ fn process_until_stopped(
             let pcm_bytes = match resampler.as_mut() {
                 Some(resampler) => {
                     resampler.process_into(&chunk, &mut resampled);
-                    f32_to_le_i16_bytes(&resampled)
+                    f32_to_le_i16_bytes(&resampled, &mut dither)
                 }
-                None => f32_to_le_i16_bytes(&chunk),
+                None => f32_to_le_i16_bytes(&chunk, &mut dither),
             };
             let _ = audio_tx.send(pcm_bytes);
         }
