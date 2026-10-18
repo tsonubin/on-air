@@ -4,7 +4,7 @@ use super::hit::{HitMap, Target};
 use super::layout::{centered, locked_style, pane_block, row_rect, selection_style, truncate};
 use crate::api::{ChannelMode, SyncState};
 use crate::labels::input_labels;
-use crate::model::{DestEntry, DestRow, DestState, Model, Pane};
+use crate::model::{DestEntry, DestRow, DestState, LatencyFigure, Model, Pane};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -80,6 +80,15 @@ fn dest_tags(entry: &DestEntry) -> Vec<(String, Style)> {
             None => format!("≈ {word}"),
         };
         tags.push((text, style));
+        // The latency figure names itself: a measurement says "measured",
+        // a documented default says "default (not measured)".
+        tags.push((
+            sync.latency.describe(),
+            match sync.latency {
+                LatencyFigure::Measured { .. } => Style::new(),
+                LatencyFigure::Default { .. } => Style::new().add_modifier(Modifier::DIM),
+            },
+        ));
         if sync.trim_ms != 0 {
             tags.push((
                 format!("{:+} ms trim", sync.trim_ms),

@@ -1,7 +1,7 @@
 //! The pure half of the UI: `update(model, msg) -> commands`. No I/O lives
 //! here, so every key, event and reply can be tested without a core.
 
-use crate::api::{CdAction, ChannelMode, DspQuality, SampleRateResponse, WsEvent};
+use crate::api::{CalibrationRunView, CdAction, ChannelMode, DspQuality, SampleRateResponse, WsEvent};
 use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
@@ -41,6 +41,8 @@ pub enum Msg {
     /// The 50 ms frame tick that animates the level meter.
     Frame,
     Benchmark(Result<crate::api::AudioBenchmark, String>),
+    /// A finished calibration run, or why it never finished.
+    Calibration(Result<CalibrationRunView, String>),
     /// The first-run tuning status behind the audio-check surface.
     Tuning(Result<crate::api::TuningStatus, String>),
     Ws(Incoming),
@@ -65,6 +67,13 @@ pub enum Cmd {
     Refresh,
     RepairFirewall,
     RunAudioCheck,
+    /// Measure one output's playout latency by mic loopback: a probe plays
+    /// through it and `capture_input` listens. Three runs per target.
+    RunCalibration {
+        transport: String,
+        device_id: String,
+        capture_input: String,
+    },
     SetCaptureBuffer(u32),
     /// The DSP quality profile the user selected.
     SetQuality(DspQuality),
@@ -171,6 +180,7 @@ pub const LABEL_MONITOR: &str = "Changing monitor";
 pub const LABEL_REFRESH: &str = "Refreshing";
 pub const LABEL_FIREWALL: &str = "Authorizing firewall rule";
 pub const LABEL_BENCHMARK: &str = "Checking audio performance";
+pub const LABEL_CALIBRATE: &str = "Measuring latency";
 pub const LABEL_BUFFER: &str = "Changing capture buffer";
 pub const LABEL_QUALITY: &str = "Changing DSP quality";
 pub const LABEL_TRIM: &str = "Changing latency trim";
@@ -188,6 +198,9 @@ pub const TRIM_LIMIT_MS: i32 = 10_000;
 
 /// A sync group's name is 1..=64 characters (`CreateSyncGroupRequest`).
 pub const GROUP_NAME_MAX: usize = 64;
+
+/// The longest capture-device label the calibrate prompt accepts.
+pub const CALIBRATE_INPUT_MAX: usize = 128;
 
 /// The quality profiles in selector order, cheapest first.
 const QUALITIES: [DspQuality; 3] = [DspQuality::Economy, DspQuality::Balanced, DspQuality::High];
@@ -251,6 +264,26 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                 }
                 Err(error) => {
                     model.error = Some(error);
+                    vec![]
+                }
+            }
+        }
+        Msg::Calibration(result) => {
+            model.pending = None;
+            match result {
+                Ok(run) => {
+                    model.calibration = Some(run);
+                    model.error = None;
+                    // Applied measurements land in the sync rows too.
+                    vec![Cmd::Refresh]
+                }
+                Err(copy) => {
+                    if let Modal::Calibrate { error, .. } = &mut model.modal {
+                        // The prompt stays open for another try.
+                        *error = Some(copy);
+                    } else {
+                        model.error = Some(copy);
+                    }
                     vec![]
                 }
             }
@@ -651,6 +684,9 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
         // Groups were created, reshaped, started or stopped: the sync rows
         // and group badges are all re-read.
         WsEvent::SyncGroupChanged { .. } => schedule_refresh(model),
+        // A calibration run started or finished somewhere: the applied
+        // measurements and defaults are all re-read.
+        WsEvent::CalibrationChanged { .. } => schedule_refresh(model),
         WsEvent::DeviceJoined {
             transport,
             id,
@@ -921,6 +957,59 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                         trim_ms,
                     };
                     pending(model, LABEL_TRIM, vec![cmd])
+                }
+                _ => vec![],
+            };
+        }
+        Modal::Calibrate {
+            transport,
+            device_id,
+            input,
+            error,
+            ..
+        } => {
+            return match key.code {
+                KeyCode::Esc => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Char(c) if input.chars().count() < CALIBRATE_INPUT_MAX => {
+                    input.push(c);
+                    *error = None;
+                    vec![]
+                }
+                // One measurement at a time; the prompt says it is running.
+                KeyCode::Enter if model.pending.is_none() => {
+                    let capture_input = input.trim().to_string();
+                    if capture_input.is_empty() {
+                        *error =
+                            Some("Name the microphone that hears the probe, like Built-in mic.".into());
+                        return vec![];
+                    }
+                    // Refused here rather than letting the core reject it:
+                    // a digital loopback would report ~0 and be a lie.
+                    if crate::labels::is_monitor_source(&capture_input) {
+                        *error = Some(
+                            "A monitor/loopback source cannot measure this — it hears the \
+                             transport's own digital signal. Name a real microphone."
+                                .into(),
+                        );
+                        return vec![];
+                    }
+                    *error = None;
+                    // A fresh run replaces the previous report when it ends.
+                    model.calibration = None;
+                    let cmd = Cmd::RunCalibration {
+                        transport: transport.clone(),
+                        device_id: device_id.clone(),
+                        capture_input,
+                    };
+                    pending(model, LABEL_CALIBRATE, vec![cmd])
                 }
                 _ => vec![],
             };
@@ -1213,6 +1302,20 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
             }
             vec![]
         }
+        Action::Calibrate => {
+            if let Some(entry) = model.selected_dest() {
+                model.modal = Modal::Calibrate {
+                    transport: entry.transport.to_string(),
+                    device_id: entry.id,
+                    name: entry.name,
+                    input: calibrate_prefill(model),
+                    error: None,
+                };
+                // The report shown is the one of the run started here.
+                model.calibration = None;
+            }
+            vec![]
+        }
         Action::NextTrack => cd_action(model, CdAction::Next),
         Action::PrevTrack => cd_action(model, CdAction::Prev),
         Action::Bluetooth => pending(model, LABEL_SETTINGS, vec![Cmd::OpenBluetoothSettings]),
@@ -1358,6 +1461,20 @@ fn on_mouse(
         }
         _ => vec![],
     }
+}
+
+/// The microphone label the calibrate prompt starts with: the active
+/// capture input when it can actually hear a probe. A monitor/loopback
+/// source is refused by the core, so it is never pre-filled — the prompt's
+/// copy names a real microphone instead.
+fn calibrate_prefill(model: &Model) -> String {
+    model
+        .snapshot
+        .active_input
+        .as_deref()
+        .filter(|name| !crate::labels::is_monitor_source(name))
+        .unwrap_or_default()
+        .to_string()
 }
 
 fn open_audio_check(model: &mut Model) -> Vec<Cmd> {

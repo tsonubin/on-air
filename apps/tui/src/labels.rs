@@ -40,6 +40,24 @@ pub fn pretty_input(name: &str) -> String {
     name.into()
 }
 
+/// Whether a capture source is a digital monitor/loopback and cannot be
+/// a calibration microphone. Mirrors the core's refusal
+/// (`calibration::record::is_forbidden_capture_input`): measuring a
+/// transport against its own digital monitor would report ~0 and lie.
+pub fn is_monitor_source(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    name == "System audio"
+        || name.contains(".monitor")
+        || lower.contains("monitor")
+        || lower.contains("loopback")
+        || lower.contains("blackhole")
+        || lower.contains("soundflower")
+        || lower.contains("stereo mix")
+        || lower.contains("what u hear")
+        || lower.contains("screencapture")
+        || lower.contains("wasapi")
+}
+
 /// Dedupes devices by raw name, then labels each one. When different names
 /// shorten to the same label, the later ones get a " (n)" suffix.
 pub fn input_labels(names: &[String]) -> Vec<InputLabel> {
@@ -90,6 +108,24 @@ mod tests {
         assert_eq!(pretty_input("HDA Intel HDMI, HDMI 0"), "HDMI HDMI 0");
         assert_eq!(pretty_input("Audio CD"), "Audio CD");
         assert_eq!(pretty_input("USB mic"), "USB mic");
+    }
+
+    #[test]
+    fn monitor_and_loopback_sources_are_named() {
+        for name in [
+            "System audio",
+            "alsa_output.pci.analog-stereo.monitor",
+            "Mock Monitor",
+            "Loopback PCM",
+            "BlackHole 2ch",
+            "Stereo Mix",
+            "What U Hear",
+        ] {
+            assert!(is_monitor_source(name), "{name}");
+        }
+        for name in ["Built-in mic", "USB mic", "Audio CD"] {
+            assert!(!is_monitor_source(name), "{name}");
+        }
     }
 
     #[test]

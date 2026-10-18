@@ -8,6 +8,45 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
+
+/// How many rows one logical line takes once the overlay's `Paragraph`
+/// wraps it at `inner` cells: words break on spaces and a word longer
+/// than the line wraps inside itself.
+fn line_rows(line: &Line, inner: usize) -> usize {
+    let inner = inner.max(1);
+    let mut rows = 1;
+    let mut used = 0;
+    let text: String = line.iter().map(|span| span.content.as_ref()).collect();
+    for word in text.split(' ') {
+        let width = word.width();
+        if width == 0 {
+            continue;
+        }
+        if used > 0 && used + 1 + width <= inner {
+            used += 1 + width;
+            continue;
+        }
+        if used > 0 {
+            rows += 1;
+        }
+        // A fresh row for this word; long words span rows of their own.
+        let spanned = width.div_ceil(inner);
+        rows += spanned - 1;
+        used = width - (spanned - 1) * inner;
+    }
+    rows
+}
+
+/// The height of a wrapped overlay box for `lines` at `width` cells: the
+/// rows the copy really takes, two borders and two spare rows. Counting
+/// logical lines instead would clip the controls at the bottom whenever
+/// a sentence wraps.
+fn overlay_height(lines: &[Line<'_>], width: u16, area: Rect) -> u16 {
+    let inner = usize::from(width.saturating_sub(2));
+    let rows: usize = lines.iter().map(|line| line_rows(line, inner)).sum();
+    u16::try_from(rows + 4).unwrap_or(u16::MAX).min(area.height)
+}
 
 /// The key table, then the mouse rows, so the help still fits 100×30.
 pub(super) fn help_overlay(frame: &mut Frame, area: Rect, mouse: bool) -> Rect {
@@ -254,21 +293,40 @@ pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) 
 }
 
 /// The manual latency trim of one output. The copy insists on the truth:
-/// a trim is a correction typed by ear, never a calibrated measurement.
-pub(super) fn trim_overlay(
-    frame: &mut Frame,
-    area: Rect,
-    name: &str,
-    current: Option<i32>,
-    input: &str,
-    error: Option<&str>,
-    working: bool,
-) -> Rect {
-    let mut lines = vec![
-        Line::from("Manual latency correction against what you hear, in milliseconds."),
-        Line::from("It is not measured or calibrated, and applies the next time this output plays."),
-    ];
-    lines.push(Line::from(match current {
+/// a trim is a correction typed by ear. Against an uncalibrated default it
+/// is not a measurement either; against a measured latency it only nudges
+/// the measured value.
+pub(super) fn trim_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
+    let Modal::TrimPrompt {
+        transport,
+        device_id,
+        name,
+        input,
+        error,
+    } = &model.modal
+    else {
+        unreachable!("trim_overlay is only called for the trim prompt");
+    };
+    let row = model.sync_row(transport, device_id);
+    let working = model.pending.is_some();
+    let mut lines = vec![Line::from(
+        "Manual latency correction against what you hear, in milliseconds.",
+    )];
+    match row.and_then(|row| row.calibration.as_ref()) {
+        Some(measurement) => {
+            let ms = (measurement.latency_us + 500) / 1000;
+            lines.push(Line::from(format!(
+                "Measured: {ms} ms ({} confidence, {} run{}). The trim nudges the measured value, and applies the next time this output plays.",
+                crate::model::confidence_word(measurement.confidence),
+                measurement.runs,
+                if measurement.runs == 1 { "" } else { "s" },
+            )));
+        }
+        None => lines.push(Line::from(
+            "It is not measured or calibrated, and applies the next time this output plays.",
+        )),
+    }
+    lines.push(Line::from(match row.map(|row| row.trim_ms) {
         Some(trim) => format!("Current trim: {trim:+} ms"),
         None => "Current trim: 0 ms (not yet reported)".to_string(),
     }));
@@ -292,10 +350,8 @@ pub(super) fn trim_overlay(
         "Enter: apply   Esc: close",
         Style::new().dim(),
     )));
-    // Two spare rows over the logical lines: the copy wraps at overlay
-    // widths and a clipped input line would hide the control.
-    let height = lines.len() as u16 + 4;
-    let rect = centered(area, area.width.min(64), height.min(area.height));
+    let width = area.width.min(64);
+    let rect = centered(area, width, overlay_height(&lines, width, area));
     frame.render_widget(Clear, rect);
     frame.render_widget(
         Paragraph::new(lines)
@@ -309,7 +365,7 @@ pub(super) fn trim_overlay(
 /// The sync-group overlay for one output: which groups exist, where this
 /// output plays and the keys that change it. The copy insists on the
 /// truth: a group is several speakers playing in sync, never one merged
-/// device, and nothing here is calibrated.
+/// device, and each member's latency figure says whether it was measured.
 pub(super) fn group_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
     let Modal::GroupPrompt {
         transport,
@@ -330,7 +386,7 @@ pub(super) fn group_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rec
     let mut lines = vec![
         Line::from("Several speakers play the same audio in sync — not one merged device."),
         Line::from("Each keeps its own volume and latency trim, typed by ear."),
-        Line::from("Nothing here is measured or calibrated."),
+        Line::from("Latency per output: measured where marked, a documented default otherwise, plus any trim."),
         Line::from(match current.and_then(|id| groups.iter().find(|g| g.id == id)) {
             Some(group) => format!("This output: {name} — in \"{}\"", group.name),
             None => format!("This output: {name} — not in a group yet"),
@@ -404,15 +460,93 @@ pub(super) fn group_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rec
             Style::new().fg(Color::Yellow),
         )));
     }
-    // Two spare rows over the logical lines: the copy wraps at overlay
-    // widths and a clipped list line would hide the group it names.
-    let height = lines.len() as u16 + 4;
-    let rect = centered(area, area.width.min(72), height.min(area.height));
+    let width = area.width.min(72);
+    let rect = centered(area, width, overlay_height(&lines, width, area));
     frame.render_widget(Clear, rect);
     frame.render_widget(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .block(Block::bordered().title(format!(" Sync group · {name} "))),
+        rect,
+    );
+    rect
+}
+
+/// The acoustic calibration prompt for one output: what the run does,
+/// the microphone that listens, the latency figure in effect today and —
+/// once a run finishes — exactly what it measured and what the core did
+/// with it. The copy insists on the truth: a documented default is never
+/// a measurement, and a low-confidence result is reported, not applied.
+pub(super) fn calibrate_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
+    let Modal::Calibrate {
+        transport,
+        device_id,
+        name,
+        input,
+        error,
+    } = &model.modal
+    else {
+        unreachable!("calibrate_overlay is only called for the calibrate prompt");
+    };
+    let mut lines = vec![
+        Line::from(format!(
+            "Measure what {name} really plays: a short probe plays through THIS output, and the microphone you name below hears it arrive."
+        )),
+        Line::from(
+            "Keep the room quiet while it runs: three probe runs, a few seconds each. Voices or music spoil the detection.",
+        ),
+    ];
+    match model
+        .sync_row(transport, device_id)
+        .map(crate::model::latency_figure)
+    {
+        Some(figure) => lines.push(Line::from(format!("Latency now: {}", figure.describe()))),
+        None => lines.push(Line::from(
+            "Latency now: this core does not report one for this output.",
+        )),
+    }
+    lines.push(Line::from(Span::styled(
+        format!("Microphone: {input}▏"),
+        Style::new().bold(),
+    )));
+    lines.push(Line::from(
+        "A monitor/loopback source is refused: it would hear the transport's own digital signal and report ~0. Name a real microphone.",
+    ));
+    if let Some(report) = &model.calibration {
+        lines.push(Line::from("Last run:"));
+        lines.extend(
+            crate::cli::calibration_report_text(report)
+                .lines()
+                .map(|line| Line::from(line.to_string())),
+        );
+    }
+    if model.pending.is_some() {
+        lines.push(Line::from(Span::styled(
+            "Measuring… the probe plays three times; keep the room quiet.",
+            Style::new().fg(Color::Yellow),
+        )));
+    }
+    if let Some(error) = error {
+        lines.push(Line::from(Span::styled(
+            error.to_string(),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    lines.push(Line::from(Span::styled(
+        if model.calibration.is_some() {
+            "Enter: measure again   Esc: close"
+        } else {
+            "Enter: start measuring   Esc: close"
+        },
+        Style::new().dim(),
+    )));
+    let width = area.width.min(88);
+    let rect = centered(area, width, overlay_height(&lines, width, area));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title(format!(" Calibrate · {name} "))),
         rect,
     );
     rect

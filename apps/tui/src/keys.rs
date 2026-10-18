@@ -29,6 +29,8 @@ pub enum Action {
     SeekForward,
     Eject,
     Trim,
+    /// `c`: acoustic latency calibration of the selected output.
+    Calibrate,
     /// `g`: sync groups on a Destination row, CD go to track elsewhere.
     Group,
     Monitor,
@@ -125,6 +127,11 @@ pub const KEYS: &[Binding] = &[
         keys: "d",
         action: Action::Trim,
         help: "Latency trim for the selected output (manual, in ms)",
+    },
+    Binding {
+        keys: "c",
+        action: Action::Calibrate,
+        help: "Measure this output's latency (mic loopback)",
     },
     Binding {
         keys: "g",
@@ -228,6 +235,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             'g' => Action::Group,
             'e' => Action::Eject,
             'd' => Action::Trim,
+            'c' => Action::Calibrate,
             'm' => Action::Monitor,
             'c' => Action::CycleChannel,
             'a' => Action::Autostart,
@@ -263,6 +271,10 @@ mod tests {
             Some(Action::Monitor)
         );
         assert_eq!(action_for(&press(KeyCode::Char('d'))), Some(Action::Trim));
+        assert_eq!(
+            action_for(&press(KeyCode::Char('c'))),
+            Some(Action::Calibrate)
+        );
         assert_eq!(action_for(&press(KeyCode::Char('g'))), Some(Action::Group));
         assert_eq!(
             action_for(&press(KeyCode::Char('c'))),

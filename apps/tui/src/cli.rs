@@ -3,9 +3,12 @@
 //! share the client with the TUI so there is no shell script to keep in
 //! step with the API.
 
-use crate::api::{ActiveOutputView, DspQuality, StatusResponse};
+use crate::api::{
+    ActiveOutputView, CalibrationConfidence, CalibrationRunView, CalibrationTarget,
+    CalibrationTargetState, CalibrationTargetStatus, DspQuality, StatusResponse,
+};
 use crate::client::{Client, ClientError};
-use crate::model::TRANSPORTS;
+use crate::model::{confidence_word, TRANSPORTS};
 use serde::Serialize;
 
 /// How each DSP quality profile is named in the UIs.
@@ -88,6 +91,163 @@ pub async fn audio(
         "Capture buffer: system default".into()
     } else {
         format!("Requested capture buffer: {buffer} ms")
+    })
+}
+
+/// A microsecond figure as milliseconds, for report lines.
+fn ms(us: u64) -> f64 {
+    us as f64 / 1000.0
+}
+
+/// One target's share of a finished run's report: what was measured,
+/// whether the core applied it, and each run's own delay. A not-applied
+/// measurement says so; a default is never presented as a measurement.
+fn target_report(target: &CalibrationTargetStatus) -> String {
+    let name = &target.device_name;
+    let mut lines = Vec::new();
+    match &target.measurement {
+        Some(measurement) => {
+            let tail = if target.state == CalibrationTargetState::Complete {
+                "applied"
+            } else if measurement.confidence == CalibrationConfidence::Low {
+                "low confidence — not applied"
+            } else {
+                "not applied"
+            };
+            lines.push(format!(
+                "{name}: measured {:.1} ms ({} confidence, {} run{}, spread {:.1} ms) — {tail}",
+                ms(measurement.latency_us),
+                confidence_word(measurement.confidence),
+                measurement.runs,
+                if measurement.runs == 1 { "" } else { "s" },
+                ms(measurement.spread_us),
+            ));
+            if !measurement.run_delays_us.is_empty() {
+                let delays: Vec<String> = measurement
+                    .run_delays_us
+                    .iter()
+                    .map(|us| format!("{:.1}", ms(*us)))
+                    .collect();
+                lines.push(format!("  runs: {} ms", delays.join(", ")));
+            }
+        }
+        None => lines.push(format!("{name}: no measurement — not applied")),
+    }
+    if let Some(error) = &target.error {
+        lines.push(format!("  {error}"));
+    }
+    lines.join("\n")
+}
+
+/// The final per-target report of a finished calibration run, shared by
+/// `on-air calibrate` and the TUI's calibrate overlay.
+pub fn calibration_report_text(run: &CalibrationRunView) -> String {
+    run.targets
+        .iter()
+        .map(target_report)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// What `on-air calibrate` hands back: what to print, and whether any
+/// target earned an applied measurement. The exit code follows `applied`.
+pub struct CalibrateReport {
+    pub output: String,
+    pub applied: bool,
+}
+
+/// `on-air calibrate`: mic-loopback measurement of one output's — or every
+/// known output's — playout latency. The probe plays through each target
+/// in turn and the named microphone listens; `--json` prints the finished
+/// run instead of the report.
+pub async fn calibrate(
+    client: &Client,
+    target: Option<(&str, &str)>,
+    input: Option<&str>,
+    runs: Option<u32>,
+    json: bool,
+) -> Result<CalibrateReport, String> {
+    let copy = crate::error_copy::calibration_copy;
+    let capture_input = match input {
+        Some(input) => input.to_string(),
+        // The active source is the natural default, unless it cannot hear
+        // a probe: a monitor/loopback is refused by the core anyway.
+        None => match client
+            .active_input()
+            .await
+            .map_err(|error| copy(&error))?
+            .name
+        {
+            Some(name) if crate::labels::is_monitor_source(&name) => {
+                return Err(format!(
+                    "The active source \"{name}\" is a monitor/loopback and cannot hear the probe. Name a real microphone with --input."
+                ));
+            }
+            Some(name) => name,
+            None => return Err("No capture source is active. Name the microphone with --input.".into()),
+        },
+    };
+    let targets = match target {
+        Some((transport, device_id)) => {
+            if transport.is_empty() || device_id.is_empty() {
+                return Err("calibrate needs a transport and a device id, or --all".into());
+            }
+            vec![CalibrationTarget {
+                transport: transport.to_string(),
+                device_id: device_id.to_string(),
+            }]
+        }
+        // "All transports" is one target per output in the catalog,
+        // local ones included; runs are sequential server-side.
+        None => {
+            let outputs = client.outputs().await.map_err(|error| copy(&error))?;
+            let targets: Vec<CalibrationTarget> = outputs
+                .into_iter()
+                .filter(|output| !output.id.is_empty())
+                .map(|output| CalibrationTarget {
+                    transport: output.transport,
+                    device_id: output.id,
+                })
+                .collect();
+            if targets.is_empty() {
+                return Err("No outputs are known yet — connect one first.".into());
+            }
+            // The core measures at most 16 targets per run.
+            if targets.len() > 16 {
+                return Err(format!(
+                    "The core measures at most 16 outputs per run ({} known); calibrate them in batches.",
+                    targets.len()
+                ));
+            }
+            targets
+        }
+    };
+    let runs_per_target = runs.unwrap_or(crate::client::CALIBRATION_RUNS);
+    if !json {
+        let scope = match target {
+            Some((transport, device_id)) => format!("{transport}/{device_id}"),
+            None => format!("{} outputs, one after another", targets.len()),
+        };
+        println!(
+            "Measuring latency of {scope} on microphone \"{capture_input}\", {runs_per_target} probe run(s) each. Keep the room quiet: the probe plays through every output being measured."
+        );
+    }
+    client
+        .start_calibration(&targets, &capture_input, runs_per_target)
+        .await
+        .map_err(|error| copy(&error))?;
+    let run = client.wait_for_calibration().await.map_err(|error| copy(&error))?;
+    let applied = run
+        .targets
+        .iter()
+        .any(|target| target.state == CalibrationTargetState::Complete);
+    Ok(CalibrateReport {
+        output: if json {
+            serde_json::to_string_pretty(&run).unwrap()
+        } else {
+            calibration_report_text(&run)
+        },
+        applied,
     })
 }
 
@@ -269,7 +429,98 @@ pub async fn monitor(client: &Client, arg: &str) -> Result<String, ClientError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{ActiveOutput, OutputPhase};
+    use crate::api::{
+        ActiveOutput, CalibrationMeasurement, CalibrationRunState, OutputPhase,
+    };
+
+    fn measurement(
+        latency_us: u64,
+        confidence: CalibrationConfidence,
+        runs: u32,
+        spread_us: u64,
+        run_delays_us: Vec<u64>,
+    ) -> CalibrationMeasurement {
+        CalibrationMeasurement {
+            transport: "sonos".into(),
+            device_id: "s1".into(),
+            latency_us,
+            confidence,
+            runs,
+            samples: 48000,
+            spread_us,
+            sample_rate_hz: 48000,
+            measured_at_unix_s: 0,
+            run_delays_us,
+        }
+    }
+
+    fn target(
+        name: &str,
+        state: CalibrationTargetState,
+        measurement: Option<CalibrationMeasurement>,
+        error: Option<&str>,
+    ) -> CalibrationTargetStatus {
+        CalibrationTargetStatus {
+            transport: "sonos".into(),
+            device_id: name.to_lowercase().replace(' ', "-"),
+            device_name: name.into(),
+            state,
+            measurement,
+            error: error.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn the_calibration_report_says_what_was_measured_and_what_was_applied() {
+        let run = CalibrationRunView {
+            run_id: 7,
+            state: CalibrationRunState::Complete,
+            targets: vec![
+                target(
+                    "Mock Sonos",
+                    CalibrationTargetState::Complete,
+                    Some(measurement(
+                        1_234_600,
+                        CalibrationConfidence::High,
+                        3,
+                        200,
+                        vec![1_234_500, 1_234_600, 1_234_700],
+                    )),
+                    None,
+                ),
+                target(
+                    "Kitchen",
+                    CalibrationTargetState::Failed,
+                    Some(measurement(
+                        812_300,
+                        CalibrationConfidence::Low,
+                        3,
+                        4_200,
+                        vec![812_000, 812_300, 816_200],
+                    )),
+                    Some("the runs disagreed badly; the default stays"),
+                ),
+                target(
+                    "Bedroom",
+                    CalibrationTargetState::Failed,
+                    None,
+                    Some("no trustworthy probe arrival was found"),
+                ),
+            ],
+            started_at_unix_s: 0,
+        };
+        let text = calibration_report_text(&run);
+        for needle in [
+            "Mock Sonos: measured 1234.6 ms (high confidence, 3 runs, spread 0.2 ms) — applied",
+            "runs: 1234.5, 1234.6, 1234.7 ms",
+            "Kitchen: measured 812.3 ms (low confidence, 3 runs, spread 4.2 ms) — low confidence — not applied",
+            "  the runs disagreed badly; the default stays",
+            "Bedroom: no measurement — not applied",
+            "  no trustworthy probe arrival was found",
+        ] {
+            assert!(text.contains(needle), "{needle} missing:\n{text}");
+        }
+    }
 
     fn status(enabled: bool) -> StatusResponse {
         StatusResponse {

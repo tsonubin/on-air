@@ -22,8 +22,8 @@ use cd::cd_strip;
 use header::{hint_line, render_header};
 use mixer::mixer_pane;
 use overlay::{
-    audio_check_overlay, eject_overlay, firewall_overlay, group_overlay, help_overlay,
-    pin_overlay, status_overlay, track_overlay, trim_overlay,
+    audio_check_overlay, calibrate_overlay, eject_overlay, firewall_overlay, group_overlay,
+    help_overlay, pin_overlay, status_overlay, track_overlay, trim_overlay,
 };
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -124,24 +124,8 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
         Modal::TrackPrompt { input, error } => {
             Some(track_overlay(frame, area, input, error.as_deref()))
         }
-        Modal::TrimPrompt {
-            transport,
-            device_id,
-            name,
-            input,
-            error,
-        } => {
-            let current = model.sync_row(transport, device_id).map(|row| row.trim_ms);
-            Some(trim_overlay(
-                frame,
-                area,
-                name,
-                current,
-                input,
-                error.as_deref(),
-                model.pending.is_some(),
-            ))
-        }
+        Modal::TrimPrompt { .. } => Some(trim_overlay(model, frame, area)),
+        Modal::Calibrate { .. } => Some(calibrate_overlay(model, frame, area)),
         Modal::GroupPrompt { .. } => Some(group_overlay(model, frame, area)),
         Modal::ConfirmEject => Some(eject_overlay(frame, area)),
         Modal::Status => Some(status_overlay(model, frame, area)),

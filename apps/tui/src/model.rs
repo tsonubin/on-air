@@ -3,8 +3,9 @@
 //! error.
 
 use crate::api::{
-    ActiveOutputView, BluetoothDeviceInfo, CdStatus, ChannelMode, DspQuality, OutputInfo,
-    OutputPhase, OutputSyncStatus, SampleRateResponse, StatusResponse, SyncGroupView, SyncState,
+    ActiveOutputView, BluetoothDeviceInfo, CalibrationConfidence, CalibrationRunView, CdStatus,
+    ChannelMode, DspQuality, OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse,
+    StatusResponse, SyncGroupView, SyncState,
 };
 use crate::client::Connection;
 use crate::update::Cmd;
@@ -117,6 +118,16 @@ pub enum Modal {
     Status,
     Firewall,
     AudioCheck,
+    /// Acoustic latency calibration of one output: the microphone to
+    /// listen on, and the report of what the run measured.
+    Calibrate {
+        transport: String,
+        device_id: String,
+        name: String,
+        /// The capture-device label the probe is heard on.
+        input: String,
+        error: Option<String>,
+    },
 }
 
 /// One action in flight, shown in the header until its `Done` arrives.
@@ -251,6 +262,56 @@ pub struct StereoMeter {
     pub right: Meter,
 }
 
+/// One output's latency figure as the UI shows it: the applied acoustic
+/// measurement when the core has one, else the documented default. A
+/// default is NEVER shown as a measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LatencyFigure {
+    /// The measurement the sync machinery uses, rounded to milliseconds.
+    Measured {
+        ms: u64,
+        confidence: CalibrationConfidence,
+    },
+    /// The documented per-transport default: not measured on hardware.
+    Default { ms: u32 },
+}
+
+impl LatencyFigure {
+    /// The row tag and overlay line. Both readings say which one they are.
+    pub fn describe(&self) -> String {
+        match self {
+            LatencyFigure::Measured { ms, confidence } => {
+                format!("≈ {ms} ms measured ({})", confidence_word(*confidence))
+            }
+            LatencyFigure::Default { ms } => format!("{ms} ms default (not measured)"),
+        }
+    }
+}
+
+/// How a measurement's trust is named on every surface.
+pub fn confidence_word(confidence: CalibrationConfidence) -> &'static str {
+    match confidence {
+        CalibrationConfidence::High => "high",
+        CalibrationConfidence::Medium => "medium",
+        CalibrationConfidence::Low => "low",
+    }
+}
+
+/// A sync row's latency figure: the applied measurement when one exists,
+/// else the documented default, explicitly not a measurement. The trimmed
+/// `effective_latency_ms` is never presented as either.
+pub fn latency_figure(row: &OutputSyncStatus) -> LatencyFigure {
+    match &row.calibration {
+        Some(measurement) => LatencyFigure::Measured {
+            ms: (measurement.latency_us + 500) / 1000,
+            confidence: measurement.confidence,
+        },
+        None => LatencyFigure::Default {
+            ms: row.default_latency_ms,
+        },
+    }
+}
+
 /// How one output's sync stands, as the Destination row shows it. Drift is
 /// rounded to whole ppm; the trim is a manual correction, never a
 /// measurement.
@@ -259,11 +320,16 @@ pub struct SyncBadge {
     pub state: SyncState,
     pub drift_ppm: Option<i64>,
     pub trim_ms: i32,
+    /// Measured or documented-default latency; see [`LatencyFigure`].
+    pub latency: LatencyFigure,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub benchmark: Option<crate::api::AudioBenchmark>,
+    /// The last calibration run this UI started, as it finished. The
+    /// calibrate overlay reports it until a fresh run replaces it.
+    pub calibration: Option<CalibrationRunView>,
     /// The first-run tuning status behind the audio-check surface.
     pub tuning: Option<crate::api::TuningStatus>,
     /// The DSP quality profile the Audio performance overlay has selected.
@@ -318,6 +384,7 @@ impl Model {
     pub fn new() -> Self {
         Model {
             benchmark: None,
+            calibration: None,
             tuning: None,
             quality_choice: DspQuality::Balanced,
             buffer_choice_ms: 0,
@@ -469,6 +536,7 @@ impl Model {
             state: row.state,
             drift_ppm: row.drift_ppm.map(|ppm| ppm.round() as i64),
             trim_ms: row.trim_ms,
+            latency: latency_figure(row),
         })
     }
 

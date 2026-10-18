@@ -1,8 +1,10 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, AudioQualityResponse, BluetoothDeviceInfo, CdStatus,
-    ChannelMode, DspQuality, OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse,
-    SampleRateSide, StatusResponse, SyncGroupMember, SyncGroupView, SyncState,
+    ActiveOutput, ActiveOutputView, AudioQualityResponse, BluetoothDeviceInfo,
+    CalibrationConfidence, CalibrationMeasurement, CalibrationRunState, CalibrationRunView,
+    CalibrationTargetState, CalibrationTargetStatus, CdStatus, ChannelMode, DspQuality, OutputInfo,
+    OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
+    SyncGroupMember, SyncGroupView, SyncState,
 };
 use crate::client::Connection;
 use crate::keys::KEYS;
@@ -914,10 +916,26 @@ fn sync_status(transport: &str, device_id: &str, state: SyncState, trim_ms: i32)
         default_latency_ms: 1000,
         effective_latency_ms: 1000,
         calibrated: false,
+        calibration: None,
         delay_frames: 0,
         output_sample_rate_hz: 48000,
         drift_ppm: None,
         group_id: None,
+    }
+}
+
+fn measurement(latency_us: u64, confidence: CalibrationConfidence) -> CalibrationMeasurement {
+    CalibrationMeasurement {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        latency_us,
+        confidence,
+        runs: 3,
+        samples: 48000,
+        spread_us: 100,
+        sample_rate_hz: 48000,
+        measured_at_unix_s: 0,
+        run_delays_us: vec![latency_us - 50, latency_us, latency_us + 50],
     }
 }
 
@@ -930,10 +948,28 @@ fn destination_rows_show_sync_state_drift_and_manual_trim() {
         locked,
         sync_status("airplay", "ap-living", SyncState::FreeRunning, 0),
     ]);
-    let t = text(&render(&m, 100, 30));
+    // Wide enough that every tag fits on the row.
+    let t = text(&render(&m, 140, 30));
     assert!(t.contains("≈ locked +42 ppm"), "{t}");
     assert!(t.contains("-100 ms trim"), "{t}");
     assert!(t.contains("≈ free-running"), "{t}");
+}
+
+#[test]
+fn destination_rows_never_show_a_default_latency_as_a_measurement() {
+    let mut m = model();
+    let mut calibrated = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, 0);
+    calibrated.calibrated = true;
+    calibrated.calibration = Some(measurement(1_235_400, CalibrationConfidence::High));
+    calibrated.default_latency_ms = 2000;
+    let mut defaulted = sync_status("airplay", "ap-living", SyncState::FreeRunning, 0);
+    defaulted.default_latency_ms = 2000;
+    m.snapshot.sync = Some(vec![calibrated, defaulted]);
+    let t = text(&render(&m, 100, 30));
+    assert!(t.contains("1235 ms measured (high)"), "{t}");
+    assert!(t.contains("2000 ms default (not measured)"), "{t}");
+    // The default is never dressed up as a measurement.
+    assert!(!t.contains("2000 ms measured"), "{t}");
 }
 
 #[test]
@@ -958,6 +994,32 @@ fn the_trim_overlay_calls_the_trim_manual_and_shows_the_current_value() {
     ] {
         assert!(t.contains(needle), "{needle} missing:\n{t}");
     }
+}
+
+#[test]
+fn the_trim_overlay_nudges_a_measured_latency_and_says_so() {
+    let mut m = model();
+    let mut row = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, -100);
+    row.calibrated = true;
+    row.calibration = Some(measurement(1_235_400, CalibrationConfidence::High));
+    m.snapshot.sync = Some(vec![row]);
+    m.modal = Modal::TrimPrompt {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        name: "Mock Sonos".into(),
+        input: "-100".into(),
+        error: None,
+    };
+    let t = text(&render(&m, 100, 30));
+    for needle in [
+        "Measured: 1235 ms (high confidence, 3 runs)",
+        "The trim nudges",
+        "the measured value",
+    ] {
+        assert!(t.contains(needle), "{needle} missing:\n{t}");
+    }
+    // A measured latency is never called unmeasured.
+    assert!(!t.contains("not measured or calibrated"), "{t}");
 }
 
 fn member(device_name: &str, error: bool) -> SyncGroupMember {
@@ -991,7 +1053,8 @@ fn destination_rows_show_the_sync_group_they_play_with() {
         vec![member("Mock Sonos", false)],
         true,
     )]);
-    let t = text(&render(&m, 100, 30));
+    // Wide enough that every tag fits on the row.
+    let t = text(&render(&m, 140, 30));
     assert!(t.contains("together: downstairs"), "{t}");
 }
 
@@ -1023,7 +1086,7 @@ fn the_group_overlay_says_several_speakers_and_lists_the_groups() {
     for needle in [
         "not one merged device",
         "typed by ear",
-        "measured or calibrated",
+        "measured where marked",
         "This output: Mock Sonos",
         "in \"downstairs\"",
         "playing together",
@@ -1075,4 +1138,70 @@ fn the_audio_check_overlay_offers_the_quality_profiles() {
     m.snapshot.audio_quality = None;
     let t = text(&render(&m, 100, 30));
     assert!(t.contains("DSP quality: unavailable"), "{t}");
+}
+
+#[test]
+fn the_calibrate_overlay_names_the_probe_the_microphone_and_the_truth() {
+    let mut m = model();
+    let mut row = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, 0);
+    row.calibrated = true;
+    row.calibration = Some(measurement(1_235_400, CalibrationConfidence::High));
+    m.snapshot.sync = Some(vec![row]);
+    m.modal = Modal::Calibrate {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        name: "Mock Sonos".into(),
+        input: "Built-in mic".into(),
+        error: None,
+    };
+    let t = text(&render(&m, 100, 30));
+    for needle in [
+        "Calibrate · Mock Sonos",
+        "probe plays through THIS output",
+        "Keep the room quiet",
+        "Latency now: ≈ 1235 ms measured (high)",
+        "Microphone: Built-in mic",
+        "monitor/loopback source is refused",
+        "Enter: start measuring",
+        "Esc: close",
+    ] {
+        assert!(t.contains(needle), "{needle} missing:\n{t}");
+    }
+}
+
+#[test]
+fn the_calibrate_overlay_reports_the_finished_run_and_offers_a_re_run() {
+    let mut m = model();
+    let mut row = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, 0);
+    row.default_latency_ms = 2000;
+    m.snapshot.sync = Some(vec![row]);
+    m.modal = Modal::Calibrate {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        name: "Mock Sonos".into(),
+        input: "Built-in mic".into(),
+        error: None,
+    };
+    m.calibration = Some(CalibrationRunView {
+        run_id: 7,
+        state: CalibrationRunState::Complete,
+        targets: vec![CalibrationTargetStatus {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            device_name: "Mock Sonos".into(),
+            state: CalibrationTargetState::Complete,
+            measurement: Some(measurement(1_234_600, CalibrationConfidence::High)),
+            error: None,
+        }],
+        started_at_unix_s: 0,
+    });
+    let t = text(&render(&m, 100, 30));
+    for needle in [
+        "Latency now: 2000 ms default (not measured)",
+        "Last run:",
+        "measured 1234.6 ms (high confidence, 3 runs, spread 0.1 ms) — applied",
+        "Enter: measure again",
+    ] {
+        assert!(t.contains(needle), "{needle} missing:\n{t}");
+    }
 }

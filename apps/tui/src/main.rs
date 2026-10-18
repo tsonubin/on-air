@@ -24,6 +24,9 @@ const USAGE: &str = "usage: on-air [--base URL]                 the terminal UI
        on-air service start|stop|restart   control the on-air-core systemd user service
        on-air audio check [--json]         benchmark audio and recommend a buffer
        on-air audio buffer [default|50|100|200|400]  read or set capture buffering
+       on-air calibrate <transport> <device-id> [--input <mic>] [--runs N] [--json]
+       on-air calibrate --all [--input <mic>] [--runs N] [--json]
+                        measure playout latency by microphone loopback
        on-air firewall [allow]            show firewall help or authorize a scoped repair
        on-air --version | --help
 
@@ -55,6 +58,15 @@ pub enum Invocation {
         value: Option<u32>,
         json: bool,
     },
+    /// Mic-loopback latency measurement: one output, or every known one
+    /// (`--all`).
+    Calibrate {
+        base: String,
+        target: Option<(String, String)>,
+        input: Option<String>,
+        runs: Option<u32>,
+        json: bool,
+    },
     Firewall {
         base: String,
         allow: bool,
@@ -62,11 +74,14 @@ pub enum Invocation {
     Help,
 }
 
-/// Hand-rolled: the surface is six forms and two flags.
+/// Hand-rolled: the surface is eight forms and a handful of flags.
 pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
     let mut base = DEFAULT_BASE.to_string();
     let mut base_given = false;
     let mut json = false;
+    let mut all = false;
+    let mut input: Option<String> = None;
+    let mut runs: Option<u32> = None;
     let mut positional: Vec<&str> = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -79,6 +94,29 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
                 base_given = true;
             }
             "--json" => json = true,
+            "--all" => all = true,
+            "--input" => {
+                input = Some(
+                    iter.next()
+                        .cloned()
+                        .ok_or_else(|| format!("--input needs a capture-device label\n{USAGE}"))?,
+                );
+            }
+            "--runs" => {
+                let value = iter
+                    .next()
+                    .cloned()
+                    .ok_or_else(|| format!("--runs needs a count\n{USAGE}"))?;
+                let count = value
+                    .parse::<u32>()
+                    .map_err(|_| format!("--runs must be a number from 1 to 10, got {value:?}\n{USAGE}"))?;
+                if !(1..=10).contains(&count) {
+                    return Err(format!(
+                        "--runs must be a number from 1 to 10, got {value:?}\n{USAGE}"
+                    ));
+                }
+                runs = Some(count);
+            }
             "--version" | "-V" => return Ok(Invocation::Version),
             "--help" | "-h" => return Ok(Invocation::Help),
             flag if flag.starts_with('-') => {
@@ -86,6 +124,13 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
             }
             word => positional.push(word),
         }
+    }
+    if (all || input.is_some() || runs.is_some())
+        && !matches!(positional.as_slice(), ["calibrate", ..])
+    {
+        return Err(format!(
+            "--all, --input and --runs belong to calibrate\n{USAGE}"
+        ));
     }
     match positional.as_slice() {
         [] => Ok(Invocation::Tui { base }),
@@ -121,6 +166,26 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
                 _ => Err("buffer must be default, 50, 100, 200 or 400 ms".into()),
             }
         }
+        ["calibrate"] if all => Ok(Invocation::Calibrate {
+            base,
+            target: None,
+            input,
+            runs,
+            json,
+        }),
+        ["calibrate"] => Err(format!(
+            "calibrate needs a transport and device id, or --all\n{USAGE}"
+        )),
+        ["calibrate", transport, device_id] if !all => Ok(Invocation::Calibrate {
+            base,
+            target: Some((transport.to_string(), device_id.to_string())),
+            input,
+            runs,
+            json,
+        }),
+        ["calibrate", ..] => Err(format!(
+            "calibrate measures one output (transport device-id) or all of them (--all), not both\n{USAGE}"
+        )),
         ["monitor", arg @ ("on" | "off" | "toggle")] => Ok(Invocation::Monitor {
             base,
             arg: arg.to_string(),
@@ -179,6 +244,38 @@ async fn main() {
         Invocation::Firewall { base, allow } => cli::firewall(&Client::new(&base), allow)
             .await
             .map_err(|error| error_copy::copy(&error)),
+        Invocation::Calibrate {
+            base,
+            target,
+            input,
+            runs,
+            json,
+        } => {
+            let target = target.as_ref().map(|(t, d)| (t.as_str(), d.as_str()));
+            return match cli::calibrate(
+                &Client::new(&base),
+                target,
+                input.as_deref(),
+                runs,
+                json,
+            )
+            .await
+            {
+                Ok(report) => {
+                    println!("{}", report.output);
+                    // Scripts read the exit code: nothing applied is not a
+                    // successful measurement.
+                    if !report.applied {
+                        eprintln!("No latency measurement was applied.");
+                        std::process::exit(1);
+                    }
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    std::process::exit(1);
+                }
+            };
+        }
         Invocation::Tui { base } => {
             run_tui(Client::new(&base)).await;
             return;
@@ -391,6 +488,53 @@ mod tests {
         }
         assert_eq!(parse_args(&args(&["--version"])), Ok(Invocation::Version));
         assert_eq!(parse_args(&args(&["--help"])), Ok(Invocation::Help));
+    }
+
+    #[test]
+    fn calibrate_forms_parse() {
+        assert_eq!(
+            parse_args(&args(&["calibrate", "sonos", "uuid:1"])),
+            Ok(Invocation::Calibrate {
+                base: "http://127.0.0.1:47990".into(),
+                target: Some(("sonos".into(), "uuid:1".into())),
+                input: None,
+                runs: None,
+                json: false,
+            })
+        );
+        assert_eq!(
+            parse_args(&args(&[
+                "calibrate",
+                "--all",
+                "--input",
+                "Built-in mic",
+                "--runs",
+                "5",
+                "--json",
+            ])),
+            Ok(Invocation::Calibrate {
+                base: "http://127.0.0.1:47990".into(),
+                target: None,
+                input: Some("Built-in mic".into()),
+                runs: Some(5),
+                json: true,
+            })
+        );
+    }
+
+    #[test]
+    fn calibrate_arg_mistakes_are_errors() {
+        // A transport and device id, or --all — never both, never neither.
+        assert!(parse_args(&args(&["calibrate"])).is_err());
+        assert!(parse_args(&args(&["calibrate", "sonos"])).is_err());
+        assert!(parse_args(&args(&["calibrate", "--all", "sonos", "uuid:1"])).is_err());
+        // The flags belong to calibrate alone.
+        assert!(parse_args(&args(&["bar", "--all"])).is_err());
+        assert!(parse_args(&args(&["status", "--input", "mic"])).is_err());
+        // Probe repetitions are 1..=10.
+        assert!(parse_args(&args(&["calibrate", "--all", "--runs", "0"])).is_err());
+        assert!(parse_args(&args(&["calibrate", "--all", "--runs", "11"])).is_err());
+        assert!(parse_args(&args(&["calibrate", "--all", "--runs", "soon"])).is_err());
     }
 
     #[test]

@@ -61,6 +61,17 @@ pub fn copy(error: &ClientError) -> String {
     }
 }
 
+/// Copy for a calibration failure. A 409 on the calibration routes is a
+/// run already in progress, not an output switching.
+pub fn calibration_copy(error: &ClientError) -> String {
+    match error {
+        ClientError::Http { status: 409, .. } => {
+            "A calibration run is already in progress. Let it finish, then try again.".to_string()
+        }
+        _ => copy(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +102,15 @@ mod tests {
             copy(&http(418, Some("teapot"))),
             "The audio service answered 418."
         );
+    }
+
+    #[test]
+    fn a_busy_calibration_run_is_not_an_output_switch() {
+        assert_eq!(
+            calibration_copy(&http(409, Some("conflict"))),
+            "A calibration run is already in progress. Let it finish, then try again."
+        );
+        assert_eq!(calibration_copy(&http(500, None)), copy(&http(500, None)));
     }
 
     #[test]

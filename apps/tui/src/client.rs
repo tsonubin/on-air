@@ -1,13 +1,17 @@
 //! Loopback HTTP client for the core. Routes, bodies and timeouts match
 //! `packages/control-client/src/http.ts`; the TUI never needs a pairing
-//! token because the core trusts loopback callers.
+//! token because the core trusts loopback callers. One set of routes is
+//! TUI-first and not yet in the shared client: the acoustic calibration
+//! routes (`/api/sync/calibrate`, `/api/sync/calibration`) — desktop and
+//! mobile pick those up when `packages/control-client` grows them.
 
 use crate::api::WsEvent;
 use crate::api::{
     ActiveInputResponse, ActiveOutputResponse, ActiveOutputView, AirPlayModeResponse, ApiErrorBody,
-    AudioQualityResponse, BluetoothDeviceInfo, BluetoothListResponse, CdAction, CdStatus,
-    DspQuality, EqResponse, InputsResponse, OutputInfo, OutputVolumeResponse, OutputsResponse,
-    PinResponse, SampleRateResponse, ServiceResponse, StatusResponse, SyncGroupView, SyncResponse,
+    AudioQualityResponse, BluetoothDeviceInfo, BluetoothListResponse, CalibrationRunView,
+    CalibrationStatusResponse, CalibrationTarget, CdAction, CdStatus, DspQuality, EqResponse,
+    InputsResponse, OutputInfo, OutputVolumeResponse, OutputsResponse, PinResponse,
+    SampleRateResponse, ServiceResponse, StatusResponse, SyncGroupView, SyncResponse,
     SyncTrimResponse,
 };
 use crate::error_copy;
@@ -26,6 +30,13 @@ use tokio_tungstenite::tungstenite::Message;
 pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Budget for calls that wait on a device handshake or on audio stopping.
 pub const SLOW_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Probe runs per calibration target when the caller does not choose.
+pub const CALIBRATION_RUNS: u32 = 3;
+/// How often an in-progress calibration run is re-read.
+pub const CALIBRATION_POLL: Duration = Duration::from_millis(500);
+/// How long one calibration run may take before the wait gives up.
+pub const CALIBRATION_WAIT: Duration = Duration::from_secs(600);
 
 pub const DEFAULT_BASE: &str = "http://127.0.0.1:47990";
 
@@ -219,6 +230,15 @@ impl Client {
                 self.audio_check()
                     .await
                     .map_err(|error| error_copy::copy(&error)),
+            )],
+            Cmd::RunCalibration {
+                transport,
+                device_id,
+                capture_input,
+            } => vec![Msg::Calibration(
+                self.run_calibration(&transport, &device_id, &capture_input)
+                    .await
+                    .map_err(|error| error_copy::calibration_copy(&error)),
             )],
             Cmd::SetCaptureBuffer(buffer_ms) => done(
                 update::LABEL_BUFFER,
@@ -634,6 +654,72 @@ impl Client {
         )
         .await
         .map(|_| ())
+    }
+
+    /// `POST /api/sync/calibrate`: start an acoustic calibration run over
+    /// `targets`, measured one after another. The reply is immediate; the
+    /// run continues in the background and is read with
+    /// [`Self::calibration_status`].
+    pub async fn start_calibration(
+        &self,
+        targets: &[CalibrationTarget],
+        capture_input: &str,
+        runs_per_target: u32,
+    ) -> Result<CalibrationRunView, ClientError> {
+        self.send_json(
+            Method::POST,
+            "/api/sync/calibrate",
+            json!({
+                "targets": targets,
+                "capture_input": capture_input,
+                "runs_per_target": runs_per_target,
+            }),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// `GET /api/sync/calibration`: the run in progress, if any, and the
+    /// most recently finished run.
+    pub async fn calibration_status(&self) -> Result<CalibrationStatusResponse, ClientError> {
+        self.get("/api/sync/calibration").await
+    }
+
+    /// Measure one output's latency: three probe runs, then wait for the
+    /// run to finish and report what it measured.
+    pub async fn run_calibration(
+        &self,
+        transport: &str,
+        device_id: &str,
+        capture_input: &str,
+    ) -> Result<CalibrationRunView, ClientError> {
+        let targets = [CalibrationTarget {
+            transport: transport.to_string(),
+            device_id: device_id.to_string(),
+        }];
+        self.start_calibration(&targets, capture_input, CALIBRATION_RUNS)
+            .await?;
+        self.wait_for_calibration().await
+    }
+
+    /// Poll the calibration status until no run is in progress and the
+    /// finished run has landed: `active` is null and `last` is present.
+    /// Each read is bounded by [`READ_TIMEOUT`], the whole wait by
+    /// [`CALIBRATION_WAIT`].
+    pub async fn wait_for_calibration(&self) -> Result<CalibrationRunView, ClientError> {
+        let deadline = tokio::time::Instant::now() + CALIBRATION_WAIT;
+        loop {
+            let status = self.calibration_status().await?;
+            if status.active.is_none() {
+                if let Some(last) = status.last {
+                    return Ok(last);
+                }
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(ClientError::Timeout);
+            }
+            tokio::time::sleep(CALIBRATION_POLL).await;
+        }
     }
 
     /// Create an empty named sync group; the reply carries its id.

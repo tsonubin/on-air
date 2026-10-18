@@ -1,8 +1,9 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, AudioQualityResponse, CdStatus, ChannelMode, DspQuality,
-    MeterLevel, OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide,
-    StatusResponse, SyncGroupView, SyncState,
+    ActiveOutput, ActiveOutputView, AudioQualityResponse, CalibrationConfidence,
+    CalibrationMeasurement, CalibrationRunState, CalibrationRunView, CalibrationTargetState,
+    CalibrationTargetStatus, CdStatus, ChannelMode, DspQuality, MeterLevel, OutputInfo, OutputPhase,
+    OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse, SyncGroupView, SyncState,
 };
 use crate::model::DestState;
 
@@ -1569,6 +1570,7 @@ fn sync_row(transport: &str, device_id: &str, trim_ms: i32) -> OutputSyncStatus 
         default_latency_ms: 1000,
         effective_latency_ms: 1000,
         calibrated: false,
+        calibration: None,
         delay_frames: 0,
         output_sample_rate_hz: 48000,
         drift_ppm: None,
@@ -1664,6 +1666,150 @@ fn the_trim_prompt_validates_the_value_and_reports_a_refused_write() {
     assert_eq!(input, "", "the refused value is cleared");
     assert_eq!(error.as_deref(), Some("nope"));
     assert_eq!(name, "Mock Sonos");
+}
+
+fn measurement(latency_us: u64, confidence: CalibrationConfidence) -> CalibrationMeasurement {
+    CalibrationMeasurement {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        latency_us,
+        confidence,
+        runs: 3,
+        samples: 48000,
+        spread_us: 200,
+        sample_rate_hz: 48000,
+        measured_at_unix_s: 0,
+        run_delays_us: vec![latency_us - 100, latency_us, latency_us + 100],
+    }
+}
+
+fn calibration_run(
+    state: CalibrationTargetState,
+    measurement: Option<CalibrationMeasurement>,
+    error: Option<&str>,
+) -> CalibrationRunView {
+    CalibrationRunView {
+        run_id: 7,
+        state: if state == CalibrationTargetState::Complete {
+            CalibrationRunState::Complete
+        } else {
+            CalibrationRunState::Failed
+        },
+        targets: vec![CalibrationTargetStatus {
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+            device_name: "Mock Sonos".into(),
+            state,
+            measurement,
+            error: error.map(str::to_string),
+        }],
+        started_at_unix_s: 0,
+    }
+}
+
+#[test]
+fn c_opens_the_calibrate_prompt_and_enter_measures_the_output() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.active_input = Some("Built-in mic".into());
+    assert!(update(&mut m, key('c')).is_empty());
+    let Modal::Calibrate {
+        transport,
+        device_id,
+        name,
+        input,
+        ..
+    } = &m.modal
+    else {
+        panic!("expected the calibrate prompt, got {:?}", m.modal);
+    };
+    assert_eq!(
+        (
+            transport.as_str(),
+            device_id.as_str(),
+            name.as_str(),
+            input.as_str()
+        ),
+        ("sonos", "uuid:mock-sonos", "Mock Sonos", "Built-in mic"),
+        "the prompt is about the selected output and starts on the active microphone"
+    );
+    let cmd = Cmd::RunCalibration {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        capture_input: "Built-in mic".into(),
+    };
+    assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![cmd.clone()]);
+    assert_eq!(
+        m.pending,
+        Some(Pending {
+            label: LABEL_CALIBRATE.into()
+        })
+    );
+    // The finished run lands on the model and re-reads the sync rows.
+    let run = calibration_run(
+        CalibrationTargetState::Complete,
+        Some(measurement(1_234_600, CalibrationConfidence::High)),
+        None,
+    );
+    assert_eq!(
+        update(&mut m, Msg::Calibration(Ok(run.clone()))),
+        vec![Cmd::Refresh]
+    );
+    assert_eq!(m.pending, None);
+    assert_eq!(m.calibration, Some(run));
+    // Enter again starts a fresh run; the old report gives way to it.
+    assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![cmd]);
+    assert_eq!(m.calibration, None);
+}
+
+#[test]
+fn the_calibrate_prompt_refuses_monitor_sources_and_empty_names() {
+    let mut m = on_dest("uuid:mock-sonos");
+    // A monitor/loopback source cannot hear a probe, so it is never the
+    // pre-filled microphone.
+    m.snapshot.active_input = Some("alsa_output.pci.analog-stereo.monitor".into());
+    update(&mut m, key('c'));
+    let Modal::Calibrate { input, .. } = &m.modal else {
+        panic!("expected the calibrate prompt, got {:?}", m.modal);
+    };
+    assert!(input.is_empty(), "the monitor source is not prefilled");
+    // Nothing typed: nothing sent, and the prompt says what is missing.
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    assert!(matches!(&m.modal, Modal::Calibrate { error: Some(_), .. }));
+    assert_eq!(m.pending, None);
+    // A typed monitor source is refused here rather than by the core.
+    for c in "System audio".chars() {
+        update(&mut m, key(c));
+    }
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    assert!(matches!(&m.modal, Modal::Calibrate { error: Some(_), .. }));
+    assert_eq!(m.pending, None);
+}
+
+#[test]
+fn a_refused_calibration_run_reports_into_the_prompt() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.active_input = Some("Built-in mic".into());
+    update(&mut m, key('c'));
+    assert_eq!(update(&mut m, code(KeyCode::Enter)).len(), 1);
+    assert!(update(&mut m, Msg::Calibration(Err("nope".into()))).is_empty());
+    assert_eq!(m.pending, None);
+    let Modal::Calibrate { error, input, .. } = &m.modal else {
+        panic!("expected the calibrate prompt, got {:?}", m.modal);
+    };
+    assert_eq!(error.as_deref(), Some("nope"));
+    assert_eq!(input, "Built-in mic", "the prompt stays open for another try");
+}
+
+#[test]
+fn a_calibration_event_debounces_into_one_refresh() {
+    let mut m = model_with_mock_snapshot();
+    assert_eq!(
+        update(&mut m, ev(WsEvent::CalibrationChanged { run_id: 7 })),
+        vec![]
+    );
+    assert_eq!(m.refresh_in, Some(REFRESH_DEBOUNCE_FRAMES));
+    assert_eq!(frames(&mut m, 5), vec![]);
+    assert_eq!(update(&mut m, Msg::Frame), vec![Cmd::Refresh]);
 }
 
 fn group(id: u64, name: &str, playing: bool) -> SyncGroupView {
