@@ -417,6 +417,69 @@
               exposed. Every latency figure is a documented default, not a measurement.
             </span>
           </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              Stereo level meter, DSP quality profiles, sync-aware Sonos recovery —
+              <a href="https://github.com/tsonubin/on-air/pull/17">PR #17</a>,
+              <span class="tag tag-review">in review</span>. The level meter reports left and right
+              separately instead of one combined reading. Three resampler quality profiles, chosen
+              by a benchmark that measures each one on the machine it is running on. Sonos stall
+              recovery no longer restarts playback at arbitrary times when an output is in a sync
+              group.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              Stereo meters, DSP quality selection and sync controls in every client —
+              <a href="https://github.com/tsonubin/on-air/pull/18">PR #18</a>,
+              <span class="tag tag-review">in review</span>. The terminal UI, the desktop window and
+              the phone remote all show the two meters, the quality profile, and a per-output
+              latency trim with its sync state.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              D-Bus MPRIS bridge —
+              <a href="https://github.com/tsonubin/on-air/pull/19">PR #19</a>,
+              <span class="tag tag-review">in review</span>. External media controls can see and
+              drive on-air. The bridge holds no bus connection at all while nothing is playing, so a
+              machine with no disc and no active output shows no phantom player.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              Tests for the desktop installer's decision and failure paths —
+              <a href="https://github.com/tsonubin/on-air/pull/20">PR #20</a>,
+              <span class="tag tag-review">in review</span>. The desktop installer was only checked
+              for shell syntax. It is now driven for real, with the toolchain mocked and no network
+              or root. Fixes a defect found along the way: a failed install was reported as success.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              First-use automatic tuning and audio-path allocation guardrails —
+              <a href="https://github.com/tsonubin/on-air/pull/21">PR #21</a>,
+              <span class="tag tag-review">in review</span>. A new computer runs the audio check once
+              by itself and configures its capture buffer and resampler from the result, without
+              overwriting anything the user already chose. The audio path's per-chunk allocation
+              behaviour is now a measured number rather than a claim.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              Sync groups: create them over the API, form them in every client —
+              <a href="https://github.com/tsonubin/on-air/pull/22">PR #22</a>,
+              <span class="tag tag-review">in review</span>. Several speakers can be put into a group
+              and started together at one instant. This is what makes the timeline above reachable
+              by a user rather than only by the code.
+            </span>
+          </li>
         </ol>
       </section>
     </main>
