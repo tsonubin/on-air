@@ -89,10 +89,22 @@ test("open delivers parsed events and reports connecting then open", async () =>
   h.socket(0).open();
   assert.deepEqual(h.states, ["connecting", "open"]);
   assert.equal(h.opens(), 1);
-  h.socket(0).send(JSON.stringify({ type: "LevelMeter", rms: 0.1, peak: 0.5 }));
+  h.socket(0).send(
+    JSON.stringify({
+      type: "LevelMeter",
+      left: { rms: 0.1, peak: 0.5 },
+      right: { rms: 0.05, peak: 0.4 },
+    }),
+  );
   h.socket(0).send("not json");
   h.socket(0).send(new ArrayBuffer(2));
-  assert.deepEqual(h.events, [{ type: "LevelMeter", rms: 0.1, peak: 0.5 }]);
+  assert.deepEqual(h.events, [
+    {
+      type: "LevelMeter",
+      left: { rms: 0.1, peak: 0.5 },
+      right: { rms: 0.05, peak: 0.4 },
+    },
+  ]);
   h.sub.close();
 });
 
@@ -147,7 +159,13 @@ test("a stalled socket is closed and replaced; frames and pings keep it alive", 
   // Keep it alive past the stall window with messages, then with pings.
   for (let i = 0; i < 4; i += 1) {
     await sleep(10);
-    h.socket(0).send(JSON.stringify({ type: "LevelMeter", rms: 0, peak: 0 }));
+    h.socket(0).send(
+      JSON.stringify({
+        type: "LevelMeter",
+        left: { rms: 0, peak: 0 },
+        right: { rms: 0, peak: 0 },
+      }),
+    );
   }
   for (let i = 0; i < 4; i += 1) {
     await sleep(10);

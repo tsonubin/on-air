@@ -5,5 +5,7 @@ export * from "./events.ts";
 export * from "./http.ts";
 export * from "./inputLabels.ts";
 export * from "./latestWrite.ts";
+export * from "./levels.ts";
 export * from "./refreshQueue.ts";
 export * from "./snapshot.ts";
+export * from "./syncStatus.ts";

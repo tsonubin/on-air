@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { OutputInfo, StatusResponse } from "@on-air/api-types";
+import type {
+  AudioQualityResponse,
+  OutputInfo,
+  StatusResponse,
+  SyncResponse,
+} from "@on-air/api-types";
 import { HttpError } from "./http.ts";
 import {
   ALL_SLICES,
@@ -17,6 +22,29 @@ import {
 import { idleCd, sonos } from "./testing.ts";
 
 const status: StatusResponse = { status: "ok", version: "0.2.0", service_enabled: true };
+
+const quality: AudioQualityResponse = {
+  quality: "balanced",
+  recommended: "high",
+  profiles: ["economy", "balanced", "high"],
+};
+
+const sync: SyncResponse = {
+  outputs: [
+    {
+      transport: "sonos",
+      device_id: "uuid:mock-sonos",
+      device_name: "Mock Sonos",
+      state: "free_running",
+      trim_ms: 0,
+      default_latency_ms: 1000,
+      effective_latency_ms: 1000,
+      calibrated: false,
+      delay_frames: 0,
+      output_sample_rate_hz: 48000,
+    },
+  ],
+};
 
 function readers(overrides: Partial<SliceReaders> = {}): SliceReaders & { calls: string[] } {
   const calls: string[] = [];
@@ -40,6 +68,8 @@ function readers(overrides: Partial<SliceReaders> = {}): SliceReaders & { calls:
       input: { sample_rate_hz: 44100, supported_hz: [44100] },
       output: { sample_rate_hz: 48000, supported_hz: [48000] },
     }),
+    audioQuality: track("audioQuality", quality),
+    sync: track("sync", sync),
     pin: track("pin", "123456"),
     airplayMode: track("airplayMode", "owntone"),
     cd: track("cd", idleCd),
@@ -149,7 +179,7 @@ test("reduceEvent applies output, input, disc and catalog events", () => {
     device_id: "uuid:mock-sonos",
     state: "live",
   });
-  assert.deepEqual(r.refresh, ["volume"]);
+  assert.deepEqual(r.refresh, ["volume", "sync"]);
   snapshot = r.next;
 
   r = reduceEvent(snapshot, {
@@ -204,17 +234,70 @@ test("reduceEvent applies output, input, disc and catalog events", () => {
     name: "Patio",
   });
   assert.equal(r.next.outputs?.length, 3);
-  assert.deepEqual(r.refresh, ["outputs"]);
+  assert.deepEqual(r.refresh, ["outputs", "sync"]);
   r = reduceEvent(r.next, { type: "DeviceLeft", transport: "airplay", id: "hp-1" });
   assert.deepEqual(
     r.next.outputs?.map((o) => o.id),
     ["uuid:mock-sonos", "uuid:new"],
   );
-  assert.deepEqual(r.refresh, []);
+  assert.deepEqual(r.refresh, ["sync"]);
 
   r = reduceEvent(snapshot, { type: "ServiceStateChanged", enabled: false });
   assert.equal(r.serviceEnabled, false);
   assert.deepEqual(r.refresh, []);
   r = reduceEvent(snapshot, { type: "Heartbeat" });
   assert.equal(r.next, snapshot);
+});
+
+test("a LevelMeter frame reaches the UI as two channels without touching the snapshot", () => {
+  const snapshot: CoreSnapshot = { ...EMPTY_SNAPSHOT, outputs: [sonos] };
+  const r = reduceEvent(snapshot, {
+    type: "LevelMeter",
+    left: { rms: 0.25, peak: 0.5 },
+    right: { rms: 0.125, peak: 0.4 },
+  });
+  assert.equal(r.next, snapshot, "levels are never snapshot state");
+  assert.deepEqual(r.touched, [], "levels stamp no slice");
+  assert.deepEqual(r.refresh, [], "43 frames/s must never trigger a read");
+  assert.deepEqual(r.meter, {
+    left: { rms: 0.25, peak: 0.5 },
+    right: { rms: 0.125, peak: 0.4 },
+  });
+
+  // A meter frame between state events leaves the state path untouched.
+  const r2 = reduceEvent(snapshot, { type: "Heartbeat" });
+  assert.equal(r2.next, snapshot);
+  assert.equal(r2.meter, undefined, "only LevelMeter frames carry a reading");
+});
+
+test("quality and sync are optional slices: an old core is not an outage", async () => {
+  const r = readers({
+    audioQuality: async () => {
+      throw new HttpError("/api/audio/quality", 404, "");
+    },
+    sync: async () => {
+      throw new HttpError("/api/sync", 404, "");
+    },
+  });
+  const results = await readSlices(r, ALL_SLICES);
+  assert.deepEqual(judgeResults(results, ALL_SLICES), {
+    kind: "settled",
+    phase: "connected",
+    partial: false,
+  });
+  const prev = { ...EMPTY_SNAPSHOT, audioQuality: quality, sync };
+  const next = mergeResults(prev, results);
+  assert.equal(next.audioQuality, quality, "a failed read keeps the last state");
+  assert.equal(next.sync, sync);
+});
+
+test("a stale sync read cannot overwrite a fresher local trim", async () => {
+  const trimmed: SyncResponse = {
+    outputs: [{ ...sync.outputs[0], trim_ms: -100 }],
+  };
+  const results = await readSlices(readers(), ["sync", "audioQuality"]);
+  const prev = { ...EMPTY_SNAPSHOT, sync: trimmed };
+  const next = mergeResults(prev, results, (slice) => slice === "sync");
+  assert.equal(next.sync, trimmed, "the write that stamped sync wins");
+  assert.equal(next.audioQuality, quality, "unstale slices still land");
 });

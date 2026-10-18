@@ -11,10 +11,12 @@ import {
   getActiveInput,
   getActiveOutput,
   getAirplayMode,
+  getAudioQuality,
   getCd,
   getEq,
   getPairingPin,
   getSampleRate,
+  getSync,
   getVolume,
   HttpError,
   listBluetooth,
@@ -25,8 +27,10 @@ import {
   pairBluetooth,
   REQUEST_TIMEOUT_MS,
   SLOW_REQUEST_TIMEOUT_MS,
+  setAudioQuality,
   setEq,
   setSampleRate,
+  setSyncTrim,
   setVolume,
   simulateCd,
   verifyPin,
@@ -457,4 +461,70 @@ test("simulateCd posts to the mock-only /api/mock/cd route", async () => {
   assert.equal(calls[0].url, `${BASE}/api/mock/cd`);
   assert.equal(calls[0].init?.method, "POST");
   assert.equal(calls[0].init?.body, JSON.stringify(body));
+});
+
+test("getAudioQuality reads the DSP profile selection", async () => {
+  const { fetchImpl, calls } = respond(
+    json({ quality: "balanced", recommended: "high", profiles: ["economy", "balanced", "high"] }),
+  );
+  assert.deepEqual(await getAudioQuality(BASE, "tok", { fetchImpl }), {
+    quality: "balanced",
+    recommended: "high",
+    profiles: ["economy", "balanced", "high"],
+  });
+  assert.equal(calls[0].url, `${BASE}/api/audio/quality`);
+  assert.equal(headersOf(calls[0].init).authorization, "Bearer tok");
+});
+
+test("setAudioQuality puts one profile and accepts the empty 204", async () => {
+  const { fetchImpl, calls } = respond(new Response(null, { status: 204 }));
+  assert.equal(await setAudioQuality(BASE, "high", "tok", { fetchImpl }), undefined);
+  assert.equal(calls[0].url, `${BASE}/api/audio/quality`);
+  assert.equal(calls[0].init?.method, "PUT");
+  assert.equal(calls[0].init?.body, JSON.stringify({ quality: "high" }));
+});
+
+test("getSync reads every output's latency and sync state", async () => {
+  const { fetchImpl, calls } = respond(
+    json({
+      outputs: [
+        {
+          transport: "bluetooth",
+          device_id: "bt-1",
+          device_name: "Patio",
+          state: "locked",
+          trim_ms: -100,
+          default_latency_ms: 150,
+          effective_latency_ms: 50,
+          calibrated: false,
+          delay_frames: 2400,
+          output_sample_rate_hz: 48000,
+          drift_ppm: 42,
+        },
+      ],
+    }),
+  );
+  const body = await getSync(BASE, "tok", { fetchImpl });
+  assert.equal(body.outputs.length, 1);
+  assert.equal(body.outputs[0].state, "locked");
+  assert.equal(body.outputs[0].trim_ms, -100);
+  assert.equal(body.outputs[0].drift_ppm, 42);
+  assert.equal(calls[0].url, `${BASE}/api/sync`);
+});
+
+test("setSyncTrim puts a manual trim and returns its effective latency", async () => {
+  const { fetchImpl, calls } = respond(json({ trim_ms: -100, effective_latency_ms: 50 }));
+  const result = await setSyncTrim(
+    BASE,
+    { transport: "bluetooth", device_id: "bt-1", trim_ms: -100 },
+    "tok",
+    { fetchImpl },
+  );
+  assert.deepEqual(result, { trim_ms: -100, effective_latency_ms: 50 });
+  assert.equal(calls[0].url, `${BASE}/api/sync/trim`);
+  assert.equal(calls[0].init?.method, "PUT");
+  assert.equal(
+    calls[0].init?.body,
+    JSON.stringify({ transport: "bluetooth", device_id: "bt-1", trim_ms: -100 }),
+  );
 });
