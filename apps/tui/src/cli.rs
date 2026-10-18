@@ -3,10 +3,31 @@
 //! share the client with the TUI so there is no shell script to keep in
 //! step with the API.
 
-use crate::api::{ActiveOutputView, StatusResponse};
+use crate::api::{ActiveOutputView, DspQuality, StatusResponse};
 use crate::client::{Client, ClientError};
 use crate::model::TRANSPORTS;
 use serde::Serialize;
+
+/// How each DSP quality profile is named in the UIs.
+pub fn quality_label(quality: DspQuality) -> &'static str {
+    match quality {
+        DspQuality::Economy => "Economy",
+        DspQuality::Balanced => "Balanced",
+        DspQuality::High => "High",
+    }
+}
+
+/// What each DSP quality profile costs: the resampler behind it and its
+/// CPU price.
+pub fn quality_cost(quality: DspQuality) -> &'static str {
+    match quality {
+        DspQuality::Economy => "Cubic (Farrow) resampler: the cheapest, with rougher conversion.",
+        DspQuality::Balanced => "128-tap sinc resampler: clean conversion at moderate CPU cost.",
+        DspQuality::High => {
+            "256-tap sinc resampler: the cleanest conversion, the highest CPU cost."
+        }
+    }
+}
 
 const GLYPH_ON: &str = "\u{f075a}"; // nf-md-speaker
 const GLYPH_OFF: &str = "\u{f075b}"; // nf-md-speaker_off
@@ -32,9 +53,10 @@ pub async fn firewall(client: &Client, allow: bool) -> Result<String, ClientErro
 }
 
 pub fn benchmark_text(report: &crate::api::AudioBenchmark) -> String {
-    format!("Audio check: {} → {} Hz\nPipeline p95: {:.1} ms; scheduler p95: {:.1} ms\nWorst round trip: {:.1} ms\nRecommended capture buffer: {} ms (3× timing margin + one audio quantum)\n{}\nRun during your usual workload. This does not measure USB capture errors or network/speaker buffering.",
+    format!("Audio check: {} → {} Hz\nPipeline p95: {:.1} ms; scheduler p95: {:.1} ms\nWorst round trip: {:.1} ms\nRecommended capture buffer: {} ms (3× timing margin + one audio quantum)\nRecommended DSP quality: {} — {}\n{}\nRun during your usual workload. This does not measure USB capture errors or network/speaker buffering.",
         report.input_hz, report.output_hz, report.pipeline_p95_ms, report.scheduler_p95_ms,
         report.worst_case_ms, report.recommended_buffer_ms,
+        quality_label(report.recommended_quality), quality_cost(report.recommended_quality),
         if report.within_buffer_budget { "System priority stays unchanged." } else { "Measured stalls exceed the available buffer budget. Reduce load or sample rate and retry." })
 }
 

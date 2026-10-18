@@ -3,8 +3,8 @@
 //! error.
 
 use crate::api::{
-    ActiveOutputView, BluetoothDeviceInfo, CdStatus, OutputInfo, OutputPhase, SampleRateResponse,
-    StatusResponse,
+    ActiveOutputView, BluetoothDeviceInfo, CdStatus, DspQuality, OutputInfo, OutputPhase,
+    OutputSyncStatus, SampleRateResponse, StatusResponse, SyncState,
 };
 use crate::client::Connection;
 use crate::update::Cmd;
@@ -91,6 +91,14 @@ pub enum Modal {
         input: String,
         error: Option<String>,
     },
+    /// The manual latency trim of one output, typed in milliseconds.
+    TrimPrompt {
+        transport: String,
+        device_id: String,
+        name: String,
+        input: String,
+        error: Option<String>,
+    },
     ConfirmEject,
     /// The `i` info overlay.
     Status,
@@ -116,6 +124,10 @@ pub struct Snapshot {
     pub volume: u8,
     pub eq: [f32; 5],
     pub rates: Option<SampleRateResponse>,
+    /// The DSP quality profile: current, recommended and selectable.
+    pub audio_quality: Option<crate::api::AudioQualityResponse>,
+    /// Per-output latency trim and sync state; `None` on an older core.
+    pub sync: Option<Vec<OutputSyncStatus>>,
     pub cd: Option<CdStatus>,
     pub airplay_mode: Option<String>,
     /// Known Bluetooth devices; `None` when the list failed to load.
@@ -147,6 +159,8 @@ pub struct DestEntry {
     pub state: DestState,
     /// A device shown while discovery has not listed it yet.
     pub placeholder: bool,
+    /// Its latency trim and sync state, when the core reports them.
+    pub sync: Option<SyncBadge>,
 }
 
 /// A row of the Destination pane: a transport header, a device or the
@@ -186,8 +200,8 @@ pub const TRANSPORTS: [(&str, &str); 4] = [
 /// The bottom of the meter scale, in dBFS.
 pub const METER_FLOOR_DB: f32 = -60.0;
 
-/// The level meter: RMS and held peak in dBFS, and the frame counters that
-/// drive the peak fall and the timeout.
+/// One channel's level meter: RMS and held peak in dBFS, and the frame
+/// counters that drive the peak fall and the timeout.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Meter {
     pub rms_db: f32,
@@ -209,10 +223,30 @@ impl Default for Meter {
     }
 }
 
+/// The stereo level meter: one [`Meter`] per channel. A mono source
+/// duplicates its one channel into both.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct StereoMeter {
+    pub left: Meter,
+    pub right: Meter,
+}
+
+/// How one output's sync stands, as the Destination row shows it. Drift is
+/// rounded to whole ppm; the trim is a manual correction, never a
+/// measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncBadge {
+    pub state: SyncState,
+    pub drift_ppm: Option<i64>,
+    pub trim_ms: i32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub benchmark: Option<crate::api::AudioBenchmark>,
     pub buffer_choice_ms: u32,
+    /// The DSP quality profile the Audio performance overlay has selected.
+    pub quality_choice: DspQuality,
     pub connection: Connection,
     pub snapshot: Snapshot,
     pub pane: Pane,
@@ -225,7 +259,7 @@ pub struct Model {
     pub mixer_row: MixerRow,
     /// Indexed by `MixerControl as usize`.
     pub writes: [WriteSlot; 4],
-    pub meter: Meter,
+    pub meter: StereoMeter,
     pub activation: Option<Activation>,
     /// The (transport, id) whose last activation failed.
     pub failed_output: Option<(String, String)>,
@@ -263,6 +297,7 @@ impl Model {
         Model {
             benchmark: None,
             buffer_choice_ms: 0,
+            quality_choice: DspQuality::Balanced,
             connection: Connection::Connecting,
             snapshot: Snapshot::default(),
             pane: Pane::Sources,
@@ -271,7 +306,7 @@ impl Model {
             selected_dest_key: None,
             mixer_row: MixerRow::Volume,
             writes: [const { WriteSlot::Idle }; 4],
-            meter: Meter::default(),
+            meter: StereoMeter::default(),
             activation: None,
             failed_output: None,
             placeholders: Vec::new(),
@@ -337,6 +372,7 @@ impl Model {
                     pair_badge: output.kind == "pair" || output.member_count >= 2,
                     state: self.dest_state(transport, &output.id, Some(output), device),
                     placeholder: false,
+                    sync: self.sync_badge(transport, &output.id),
                 }));
             }
             if transport == "bluetooth" {
@@ -351,6 +387,7 @@ impl Model {
                         pair_badge: false,
                         state: self.dest_state(transport, &device.id, None, Some(device)),
                         placeholder: false,
+                        sync: self.sync_badge(transport, &device.id),
                     }));
                 }
                 self.push_placeholders(transport, &mut rows);
@@ -389,6 +426,25 @@ impl Model {
             .find(|d| d.id == id)
     }
 
+    /// The sync status row of one output, when the core reports it.
+    pub fn sync_row(&self, transport: &str, id: &str) -> Option<&OutputSyncStatus> {
+        self.snapshot
+            .sync
+            .as_ref()?
+            .iter()
+            .find(|row| row.transport == transport && row.device_id == id)
+    }
+
+    /// One output's sync badge for the Destination row.
+    fn sync_badge(&self, transport: &str, id: &str) -> Option<SyncBadge> {
+        let row = self.sync_row(transport, id)?;
+        Some(SyncBadge {
+            state: row.state,
+            drift_ppm: row.drift_ppm.map(|ppm| ppm.round() as i64),
+            trim_ms: row.trim_ms,
+        })
+    }
+
     /// Devices announced by the core before the next snapshot lists them.
     fn push_placeholders(&self, transport: &'static str, rows: &mut Vec<DestRow>) {
         let listed = |id: &str| {
@@ -410,6 +466,7 @@ impl Model {
                 pair_badge: false,
                 state: DestState::Idle,
                 placeholder: true,
+                sync: None,
             }));
         }
     }

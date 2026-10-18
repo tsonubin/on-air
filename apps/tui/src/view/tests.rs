@@ -1,7 +1,8 @@
 use super::*;
 use crate::api::{
-    ActiveOutput, ActiveOutputView, BluetoothDeviceInfo, CdStatus, OutputInfo, OutputPhase,
-    SampleRateResponse, SampleRateSide, StatusResponse,
+    ActiveOutput, ActiveOutputView, AudioQualityResponse, BluetoothDeviceInfo, CdStatus, DspQuality,
+    OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
+    SyncState,
 };
 use crate::client::Connection;
 use crate::keys::KEYS;
@@ -84,6 +85,8 @@ fn model() -> Model {
         cd: None,
         airplay_mode: Some("owntone".into()),
         bluetooth: None,
+        audio_quality: None,
+        sync: None,
     };
     model
 }
@@ -484,12 +487,22 @@ fn the_focused_band_alone_shows_its_db() {
 }
 
 #[test]
-fn the_meter_draws_the_rms_bar() {
+fn the_meter_draws_one_rms_bar_per_channel() {
     let mut m = model();
-    m.meter.rms_db = -6.0;
-    m.meter.peak_db = -6.0;
-    let t = text(&render(&m, 100, 30));
-    assert!(t.contains("█"), "{t}");
+    m.meter.left.rms_db = -6.0;
+    m.meter.left.peak_db = -6.0;
+    let b = render(&m, 100, 30);
+    let (x, y) = cell_of(&b, "LVL");
+    let rows = rows(&b);
+    let left = &rows[(y + 1) as usize];
+    let right = &rows[(y + 2) as usize];
+    assert_eq!(left.as_bytes()[x as usize], b'L', "{left}");
+    assert_eq!(right.as_bytes()[x as usize], b'R', "{right}");
+    assert!(left.contains('█'), "the loud channel fills its bar:\n{left}");
+    assert!(
+        !right.contains('█'),
+        "the silent channel keeps its bar empty:\n{right}"
+    );
 }
 
 #[test]
@@ -872,4 +885,87 @@ fn status_overlay_uses_the_cores_port() {
     m.base = String::new();
     let t = text(&render(&m, 100, 30));
     assert!(t.contains("Port: 47990"), "falls back:\n{t}");
+}
+
+fn sync_status(transport: &str, device_id: &str, state: SyncState, trim_ms: i32) -> OutputSyncStatus {
+    OutputSyncStatus {
+        transport: transport.into(),
+        device_id: device_id.into(),
+        device_name: String::new(),
+        state,
+        trim_ms,
+        default_latency_ms: 1000,
+        effective_latency_ms: 1000,
+        calibrated: false,
+        delay_frames: 0,
+        output_sample_rate_hz: 48000,
+        drift_ppm: None,
+    }
+}
+
+#[test]
+fn destination_rows_show_sync_state_drift_and_manual_trim() {
+    let mut m = model();
+    let mut locked = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, -100);
+    locked.drift_ppm = Some(42.4);
+    m.snapshot.sync = Some(vec![
+        locked,
+        sync_status("airplay", "ap-living", SyncState::FreeRunning, 0),
+    ]);
+    let t = text(&render(&m, 100, 30));
+    assert!(t.contains("≈ locked +42 ppm"), "{t}");
+    assert!(t.contains("-100 ms trim"), "{t}");
+    assert!(t.contains("≈ free-running"), "{t}");
+}
+
+#[test]
+fn the_trim_overlay_calls_the_trim_manual_and_shows_the_current_value() {
+    let mut m = model();
+    m.snapshot.sync = Some(vec![sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, -100)]);
+    m.modal = Modal::TrimPrompt {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        name: "Mock Sonos".into(),
+        input: "-100".into(),
+        error: None,
+    };
+    let t = text(&render(&m, 100, 30));
+    for needle in [
+        "Latency trim · Mock Sonos",
+        "not measured or calibrated",
+        "applies the next time this output plays",
+        "Current trim: -100 ms",
+        "Trim: -100",
+        "Enter: apply",
+    ] {
+        assert!(t.contains(needle), "{needle} missing:\n{t}");
+    }
+}
+
+#[test]
+fn the_audio_check_overlay_offers_the_quality_profiles() {
+    let mut m = model();
+    m.snapshot.audio_quality = Some(AudioQualityResponse {
+        quality: DspQuality::Balanced,
+        recommended: DspQuality::High,
+        profiles: vec![
+            DspQuality::Economy,
+            DspQuality::Balanced,
+            DspQuality::High,
+        ],
+    });
+    m.quality_choice = DspQuality::High;
+    m.modal = Modal::AudioCheck;
+    let t = text(&render(&m, 100, 30));
+    for needle in [
+        "DSP quality: Balanced   Selected: High (the check's recommendation)",
+        "256-tap sinc resampler: the cleanest conversion, the highest CPU cost.",
+        "q: apply quality",
+    ] {
+        assert!(t.contains(needle), "{needle} missing:\n{t}");
+    }
+    // An older core says so instead of offering the choice.
+    m.snapshot.audio_quality = None;
+    let t = text(&render(&m, 100, 30));
+    assert!(t.contains("DSP quality: unavailable"), "{t}");
 }

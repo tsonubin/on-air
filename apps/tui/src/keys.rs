@@ -28,6 +28,7 @@ pub enum Action {
     SeekForward,
     GotoTrack,
     Eject,
+    Trim,
     Monitor,
     Autostart,
     Status,
@@ -112,6 +113,11 @@ pub const KEYS: &[Binding] = &[
         keys: "e",
         action: Action::Eject,
         help: "CD eject (asks first)",
+    },
+    Binding {
+        keys: "d",
+        action: Action::Trim,
+        help: "Latency trim for the selected output (manual, in ms)",
     },
     Binding {
         keys: "m",
@@ -209,6 +215,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             ']' => Action::SeekForward,
             'g' => Action::GotoTrack,
             'e' => Action::Eject,
+            'd' => Action::Trim,
             'm' => Action::Monitor,
             'a' => Action::Autostart,
             'i' => Action::Status,
@@ -242,9 +249,10 @@ mod tests {
             action_for(&press(KeyCode::Char('m'))),
             Some(Action::Monitor)
         );
+        assert_eq!(action_for(&press(KeyCode::Char('d'))), Some(Action::Trim));
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 23);
+        assert_eq!(KEYS.len(), 24);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),

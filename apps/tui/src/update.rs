@@ -1,13 +1,13 @@
 //! The pure half of the UI: `update(model, msg) -> commands`. No I/O lives
 //! here, so every key, event and reply can be tested without a core.
 
-use crate::api::{CdAction, SampleRateResponse, WsEvent};
+use crate::api::{CdAction, DspQuality, SampleRateResponse, WsEvent};
 use crate::client::{Connection, Incoming};
 use crate::keys::{action_for, Action};
 use crate::labels::input_labels;
 use crate::model::{
     Activation, ActivationStep, DestRow, Meter, MixerControl, MixerRow, Modal, Model, PairTarget,
-    Pane, Pending, Snapshot, WriteSlot, METER_FLOOR_DB,
+    Pane, Pending, Snapshot, StereoMeter, WriteSlot, METER_FLOOR_DB,
 };
 use crate::view::{fader_value, CdButton, Target};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -64,6 +64,14 @@ pub enum Cmd {
     RepairFirewall,
     RunAudioCheck,
     SetCaptureBuffer(u32),
+    /// The DSP quality profile the user selected.
+    SetQuality(DspQuality),
+    /// One output's manual latency trim in milliseconds.
+    SetSyncTrim {
+        transport: String,
+        device_id: String,
+        trim_ms: i32,
+    },
     ActivateInput(String),
     ActivateOutput {
         transport: String,
@@ -128,11 +136,26 @@ pub const LABEL_REFRESH: &str = "Refreshing";
 pub const LABEL_FIREWALL: &str = "Authorizing firewall rule";
 pub const LABEL_BENCHMARK: &str = "Checking audio performance";
 pub const LABEL_BUFFER: &str = "Changing capture buffer";
+pub const LABEL_QUALITY: &str = "Changing DSP quality";
+pub const LABEL_TRIM: &str = "Changing latency trim";
 pub const LABEL_AUTOSTART: &str = "Changing autostart";
 pub const LABEL_SETTINGS: &str = "Opening Bluetooth settings";
 pub const LABEL_CD: &str = "Disc";
 /// How far `[` and `]` move the playhead.
 pub const CD_SEEK_MS: i64 = 10_000;
+
+/// The manual latency trim stays inside ±10 s, the core's own limit
+/// (`on-air-core` `sync::latency::TRIM_LIMIT_MS`).
+pub const TRIM_LIMIT_MS: i32 = 10_000;
+
+/// The quality profiles in selector order, cheapest first.
+const QUALITIES: [DspQuality; 3] = [DspQuality::Economy, DspQuality::Balanced, DspQuality::High];
+
+/// The quality `delta` steps from `current` in [`QUALITIES`], wrapping.
+fn cycled_quality(current: DspQuality, delta: i32) -> DspQuality {
+    let index = QUALITIES.iter().position(|q| *q == current).unwrap_or(0) as i32;
+    QUALITIES[(index + delta).rem_euclid(QUALITIES.len() as i32) as usize]
+}
 
 /// Where a seek of `delta_ms` from `position_ms` lands, kept inside the track.
 pub fn seek_target(position_ms: u64, duration_ms: u64, delta_ms: i64) -> u64 {
@@ -178,6 +201,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             match result {
                 Ok(report) => {
                     model.buffer_choice_ms = report.recommended_buffer_ms;
+                    model.quality_choice = report.recommended_quality;
                     model.benchmark = Some(report);
                     model.error = None;
                 }
@@ -201,7 +225,8 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::Tick => vec![],
         Msg::Frame => {
-            step_meter(&mut model.meter);
+            step_meter(&mut model.meter.left);
+            step_meter(&mut model.meter.right);
             if let Some(left) = model.refresh_in {
                 if left <= 1 {
                     model.refresh_in = None;
@@ -360,6 +385,9 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
             if label == LABEL_FIREWALL {
                 model.modal = Modal::None;
             }
+            if label == LABEL_TRIM {
+                model.modal = Modal::None;
+            }
             if chain_step.is_some() {
                 let Some(device) = current_device(model) else {
                     return vec![Cmd::Refresh];
@@ -397,6 +425,14 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
                     *error = Some(copy);
                     input.clear();
                     model.activation = None;
+                    return vec![];
+                }
+            }
+            if label == LABEL_TRIM {
+                if let Modal::TrimPrompt { error, input, .. } = &mut model.modal {
+                    // The modal stays open for another try.
+                    *error = Some(copy);
+                    input.clear();
                     return vec![];
                 }
             }
@@ -579,28 +615,33 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
             clamp_selection(model);
             schedule_refresh(model)
         }
-        WsEvent::LevelMeter { rms, peak } => {
+        WsEvent::LevelMeter { left, right } => {
             let live = model
                 .snapshot
                 .active_output
                 .as_ref()
                 .is_some_and(|active| active.is_live());
             if model.locked() || !live {
-                model.meter = Meter::default();
+                model.meter = StereoMeter::default();
             } else {
-                let peak_db = level_db(peak);
-                let meter = &mut model.meter;
-                meter.rms_db = level_db(rms);
-                if peak_db >= meter.peak_db {
-                    meter.peak_db = peak_db;
-                    meter.hold = PEAK_HOLD_FRAMES;
-                }
-                meter.quiet = 0;
+                apply_level(&mut model.meter.left, left.rms, left.peak);
+                apply_level(&mut model.meter.right, right.rms, right.peak);
             }
             vec![]
         }
         WsEvent::Heartbeat | WsEvent::Unknown => vec![],
     }
+}
+
+/// Fold one `LevelMeter` frame of one channel into its meter.
+fn apply_level(meter: &mut Meter, rms: f32, peak: f32) {
+    let peak_db = level_db(peak);
+    meter.rms_db = level_db(rms);
+    if peak_db >= meter.peak_db {
+        meter.peak_db = peak_db;
+        meter.hold = PEAK_HOLD_FRAMES;
+    }
+    meter.quiet = 0;
 }
 
 /// One frame of meter decay: the peak holds, then falls; silence for too
@@ -639,6 +680,9 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                     LABEL_BUFFER,
                     vec![Cmd::SetCaptureBuffer(model.buffer_choice_ms)],
                 ),
+                KeyCode::Char('q') if model.pending.is_none() => {
+                    pending(model, LABEL_QUALITY, vec![Cmd::SetQuality(model.quality_choice)])
+                }
                 KeyCode::Left | KeyCode::Right if model.pending.is_none() => {
                     model.buffer_choice_ms = next_in_catalog(
                         &[0, 50, 100, 200, 400],
@@ -646,6 +690,13 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                         if key.code == KeyCode::Right { 1 } else { -1 },
                     )
                     .unwrap_or(0);
+                    vec![]
+                }
+                KeyCode::Up | KeyCode::Down if model.pending.is_none() => {
+                    model.quality_choice = cycled_quality(
+                        model.quality_choice,
+                        if key.code == KeyCode::Down { 1 } else { -1 },
+                    );
                     vec![]
                 }
                 _ => vec![],
@@ -754,6 +805,49 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                         track: Some(track),
                     };
                     pending(model, LABEL_CD, vec![cmd])
+                }
+                _ => vec![],
+            };
+        }
+        Modal::TrimPrompt {
+            transport,
+            device_id,
+            input,
+            error,
+            ..
+        } => {
+            return match key.code {
+                KeyCode::Esc => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Char(c)
+                    if (c.is_ascii_digit() || (c == '-' && input.is_empty())) && input.len() < 6 =>
+                {
+                    input.push(c);
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Enter if model.pending.is_none() => {
+                    let Ok(trim_ms) = input.trim().parse::<i32>() else {
+                        *error = Some("Type the trim in milliseconds, like -120 or 250.".into());
+                        return vec![];
+                    };
+                    if trim_ms.abs() > TRIM_LIMIT_MS {
+                        *error = Some("The trim must stay between -10000 and 10000 ms.".into());
+                        return vec![];
+                    }
+                    let cmd = Cmd::SetSyncTrim {
+                        transport: transport.clone(),
+                        device_id: device_id.clone(),
+                        trim_ms,
+                    };
+                    pending(model, LABEL_TRIM, vec![cmd])
                 }
                 _ => vec![],
             };
@@ -888,6 +982,22 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::Eject => {
             if has_disc(model) {
                 model.modal = Modal::ConfirmEject;
+            }
+            vec![]
+        }
+        Action::Trim => {
+            if let Some(entry) = model.selected_dest() {
+                let current = model
+                    .sync_row(&entry.transport, &entry.id)
+                    .map(|row| row.trim_ms)
+                    .unwrap_or(0);
+                model.modal = Modal::TrimPrompt {
+                    transport: entry.transport.to_string(),
+                    device_id: entry.id,
+                    name: entry.name,
+                    input: current.to_string(),
+                    error: None,
+                };
             }
             vec![]
         }
@@ -1045,6 +1155,12 @@ fn open_audio_check(model: &mut Model) -> Vec<Cmd> {
         .as_ref()
         .and_then(|s| s.capture_buffer_ms)
         .unwrap_or(0);
+    model.quality_choice = model
+        .snapshot
+        .audio_quality
+        .as_ref()
+        .map(|quality| quality.quality)
+        .unwrap_or(DspQuality::Balanced);
     model.modal = Modal::AudioCheck;
     vec![]
 }

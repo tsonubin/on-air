@@ -2,6 +2,7 @@
 
 use super::hit::{HitMap, Target};
 use super::layout::{centered, locked_style, pane_block, row_rect, selection_style, truncate};
+use crate::api::SyncState;
 use crate::labels::input_labels;
 use crate::model::{DestEntry, DestRow, DestState, Model, Pane};
 use ratatui::layout::Rect;
@@ -60,11 +61,30 @@ pub(super) fn source_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &m
     }
 }
 
-/// The right-aligned tags of a Destination row: `⚇ pair` first, then its state.
-fn dest_tags(entry: &DestEntry) -> Vec<(&'static str, Style)> {
+/// The right-aligned tags of a Destination row: `⚇ pair` first, then its
+/// sync standing and manual trim, then its state.
+fn dest_tags(entry: &DestEntry) -> Vec<(String, Style)> {
     let mut tags = Vec::new();
     if entry.pair_badge {
-        tags.push(("⚇ pair", Style::new()));
+        tags.push(("⚇ pair".to_string(), Style::new()));
+    }
+    if let Some(sync) = entry.sync {
+        let (word, style) = match sync.state {
+            SyncState::FreeRunning => ("free-running", Style::new().add_modifier(Modifier::DIM)),
+            SyncState::Syncing => ("syncing", Style::new().fg(Color::Yellow)),
+            SyncState::Locked => ("locked", Style::new().fg(Color::Green)),
+        };
+        let text = match sync.drift_ppm {
+            Some(ppm) => format!("≈ {word} {ppm:+} ppm"),
+            None => format!("≈ {word}"),
+        };
+        tags.push((text, style));
+        if sync.trim_ms != 0 {
+            tags.push((
+                format!("{:+} ms trim", sync.trim_ms),
+                Style::new().add_modifier(Modifier::DIM),
+            ));
+        }
     }
     let state = match entry.state {
         DestState::Live => Some(("live", Style::new().fg(Color::Green))),
@@ -77,7 +97,7 @@ fn dest_tags(entry: &DestEntry) -> Vec<(&'static str, Style)> {
         DestState::NotPaired => Some(("not paired", Style::new().add_modifier(Modifier::DIM))),
         DestState::Idle => None,
     };
-    tags.extend(state);
+    tags.extend(state.map(|(tag, style)| (tag.to_string(), style)));
     tags
 }
 
