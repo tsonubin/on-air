@@ -351,11 +351,49 @@ pub struct OutputSyncStatus {
     /// Absent until a feed has measured a window.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drift_ppm: Option<f64>,
+    /// The sync group this output belongs to, if any. An output is a member
+    /// of at most one group at a time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<u64>,
+}
+
+/// One member of a sync group as `GET /api/sync` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncGroupMember {
+    pub transport: String,
+    pub device_id: String,
+    /// Filled in when the core knows the display name; clients may join the
+    /// `GET /api/outputs` catalog instead.
+    pub device_name: String,
+    /// True while this member is playing together with its group (started
+    /// at the group's shared presentation epoch).
+    pub playing: bool,
+    /// Why this member is not playing after a start failed, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A named sync group: SEVERAL SPEAKERS PLAYING IN SYNC, not one merged
+/// device. Every member keeps its own transport, volume, latency default
+/// and trim, and each member is started and stopped on its own session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncGroupView {
+    pub id: u64,
+    /// Display name chosen on creation. Names are not unique; the `id`
+    /// identifies the group.
+    pub name: String,
+    pub members: Vec<SyncGroupMember>,
+    /// True while at least one member is playing with the group.
+    pub playing: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncResponse {
     pub outputs: Vec<OutputSyncStatus>,
+    /// Every sync group with its members. Absent on cores older than this
+    /// feature; clients must tolerate its absence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<SyncGroupView>>,
 }
 
 /// `PUT /api/sync/trim`: manually calibrate one output's latency in
@@ -372,6 +410,24 @@ pub struct SetSyncTrimRequest {
 pub struct SyncTrimResponse {
     pub trim_ms: i32,
     pub effective_latency_ms: u32,
+}
+
+/// `POST /api/sync/groups`: create an empty named sync group. Several named
+/// groups may exist at once; names are for display and need not be unique.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CreateSyncGroupRequest {
+    /// 1..=64 characters.
+    pub name: String,
+}
+
+/// `POST /api/sync/groups/{id}/members` (add) and
+/// `POST /api/sync/groups/{id}/leave` (remove): move one output into or out
+/// of a sync group. Membership is configuration: it never disturbs what is
+/// playing right now, and it takes effect at the group's next `start`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncGroupMemberRequest {
+    pub transport: String,
+    pub device_id: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +609,12 @@ pub enum WsEvent {
     },
     ServiceStateChanged {
         enabled: bool,
+    },
+    /// Sync groups changed: one was created, dissolved, its membership
+    /// moved, or it was started or stopped. The event carries no state;
+    /// clients re-read `GET /api/sync`.
+    SyncGroupChanged {
+        group_id: u64,
     },
     CdStateChanged {
         present: bool,
