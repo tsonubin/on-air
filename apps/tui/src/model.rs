@@ -212,6 +212,10 @@ impl Default for Meter {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub benchmark: Option<crate::api::AudioBenchmark>,
+    /// The first-run tuning status behind the audio-check surface.
+    pub tuning: Option<crate::api::TuningStatus>,
+    /// The DSP profile the audio-check surface would apply (`q` cycles it).
+    pub quality_choice: crate::api::DspQuality,
     pub buffer_choice_ms: u32,
     pub connection: Connection,
     pub snapshot: Snapshot,
@@ -262,6 +266,8 @@ impl Model {
     pub fn new() -> Self {
         Model {
             benchmark: None,
+            tuning: None,
+            quality_choice: crate::api::DspQuality::default(),
             buffer_choice_ms: 0,
             connection: Connection::Connecting,
             snapshot: Snapshot::default(),

@@ -163,10 +163,47 @@ pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) 
             "Selected buffer: {}   ← / → to choose",
             label(model.buffer_choice_ms)
         )),
-        Line::from("Enter: run ~2 second check   a: apply selected buffer   Esc: close"),
-        Line::from("Check during your usual workload; settings stay unchanged until applied."),
-        Line::from("Larger buffers trade more delay for tolerance of scheduling stalls."),
     ];
+    match model.tuning.as_ref() {
+        None => lines.push(Line::from("First-use tuning: status not loaded.")),
+        Some(tuning) => {
+            let recommend = |quality: Option<crate::api::DspQuality>| {
+                quality
+                    .map(|q| q.to_string())
+                    .unwrap_or_else(|| "unmeasured".into())
+            };
+            match &tuning.automatic {
+                Some(record) => {
+                    let applied = match (record.applied_buffer, record.applied_quality) {
+                        (true, true) => "both settings were set",
+                        (true, false) => "the capture buffer was set; your quality choice was kept",
+                        (false, true) => "the DSP quality was set; your buffer choice was kept",
+                        (false, false) => "your own settings were kept",
+                    };
+                    lines.push(Line::from(format!(
+                        "First-use tuning: this machine was measured and recommends {} ms buffer, \
+                         {} quality; {applied}.",
+                        record.recommended_buffer_ms,
+                        recommend(tuning.recommended_quality),
+                    )));
+                }
+                None if tuning.tuned => lines.push(Line::from(format!(
+                    "An audio check ran here before (recommends {} quality); settings are yours.",
+                    recommend(tuning.recommended_quality),
+                ))),
+                None => lines.push(Line::from(
+                    "First-use tuning: not run yet — it runs automatically once audio is live.",
+                )),
+            }
+        }
+    }
+    lines.push(Line::from(format!(
+        "DSP quality: {}   q: cycle (economy → balanced → high)",
+        model.quality_choice
+    )));
+    lines.push(Line::from("Enter: run ~2 second check   a: apply selected settings   Esc: close"));
+    lines.push(Line::from("Check during your usual workload; settings stay unchanged until applied."));
+    lines.push(Line::from("Larger buffers trade more delay for tolerance of scheduling stalls."));
     if let Some(report) = &model.benchmark {
         lines.extend(
             crate::cli::benchmark_text(report)

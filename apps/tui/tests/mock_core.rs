@@ -4,7 +4,7 @@
 //! serde structs they copy.
 
 use on_air_core::state::CoreState;
-use on_air_tui::api::{CdAction, WsEvent};
+use on_air_tui::api::{CdAction, DspQuality, WsEvent};
 use on_air_tui::client::{Client, ClientError, Connection, Incoming};
 use on_air_tui::error_copy;
 use on_air_tui::update::{Cmd, Msg};
@@ -333,4 +333,18 @@ async fn cd_seek_goto_eject() {
     assert_eq!(c.cd().await.unwrap().track, 2);
     c.control_cd(CdAction::Eject, None, None).await.unwrap();
     assert!(!c.cd().await.unwrap().present);
+}
+
+#[tokio::test]
+async fn the_tuning_mirror_types_round_trip_against_the_real_core() {
+    let c = mock_core().await;
+    let tuning = c.tuning_status().await.unwrap();
+    assert!(!tuning.tuned, "no check has run on this machine");
+    assert_eq!(tuning.quality, DspQuality::Economy);
+    assert_eq!(tuning.quality_override, None);
+    assert_eq!(tuning.profiles, DspQuality::ALL.to_vec());
+    c.set_dsp_quality(DspQuality::High).await.unwrap();
+    let tuning = c.tuning_status().await.unwrap();
+    assert_eq!(tuning.quality, DspQuality::High);
+    assert_eq!(tuning.quality_override, Some(DspQuality::High));
 }
