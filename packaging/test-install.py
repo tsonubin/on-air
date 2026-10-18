@@ -82,6 +82,9 @@ elif command == "makepkg":
 elif command == "sudo":
     if args[:2] == ["-n", "true"]:
         sys.exit(1 if flag("INSTALL_TEST_NO_SUDO") else 0)
+    # sudo itself works, but the package install it is asked to run fails.
+    if "pacman" in args and flag("INSTALL_TEST_PACMAN_FAIL"):
+        sys.exit(1)
 elif command == "pkexec":
     if flag("INSTALL_TEST_PKEXEC_FAIL"):
         sys.exit(1)
@@ -523,6 +526,24 @@ class DesktopInstallerTest(unittest.TestCase):
         self.assertEqual([c for c in run.called("sudo") if c[1:2] != ["-n"]], [])
         self.assertEqual(run.added("tmpdir"), set())
         self.assertEqual(run.added("home"), set())
+
+    def test_a_failing_package_install_is_reported_as_a_failure(self):
+        # sudo works and the install command runs — it just fails. This is
+        # different from test_sudo_failure_keeps_package_and_stops, where no
+        # install is attempted at all. `install_as_root` used to `return 0`
+        # unconditionally after the install command, so this case printed
+        # "Installed on-air-desktop" and exited 0 on a failed install.
+        run = self.run_installer(("yay",), env={"INSTALL_TEST_PACMAN_FAIL": "1"})
+        self.assertEqual(run.result.returncode, 1, run.result.stdout)
+        self.assertNotIn("Installed on-air-desktop", run.result.stdout)
+        package = self.root / "packaging/dist/on-air-desktop-1-1-test.pkg.tar.zst"
+        self.assertTrue(package.is_file(), "the built package must survive for a manual install")
+        self.assertEqual(list((self.root / "packaging/dist").iterdir()), [package])
+        self.assertIn("The package is built", run.result.stderr)
+        self.assertIn(
+            [c for c in run.called("sudo") if "pacman" in c],
+            [[["sudo", "pacman", "-U", "--noconfirm", str(package)]]],
+        )
 
     def test_pkexec_failure_keeps_package_and_stops(self):
         env = {"INSTALL_TEST_NO_SUDO": "1", "INSTALL_TEST_POLKIT_AGENT": "1",
