@@ -11,7 +11,9 @@ makedepends=('binutils')
 provides=('on-air-desktop')
 conflicts=('on-air-desktop')
 options=('!strip' '!debug')
-source=("LICENSE::https://raw.githubusercontent.com/tsonubin/on-air/v${pkgver}/LICENSE")
+# The license is saved as on-air-LICENSE: a source named LICENSE would be
+# shadowed by this recipe's own 0BSD LICENSE next to the PKGBUILD.
+source=("on-air-LICENSE::https://raw.githubusercontent.com/tsonubin/on-air/v${pkgver}/LICENSE")
 sha256sums=('38dae14fca3e1311278dee423daf62ec11047d37ce12182ad33202f1bf6baee5')
 source_x86_64=("on-air-desktop_${pkgver}_amd64.deb::https://github.com/tsonubin/on-air/releases/download/v${pkgver}/on-air-desktop_${pkgver}_amd64.deb")
 source_aarch64=("on-air-desktop_${pkgver}_arm64.deb::https://github.com/tsonubin/on-air/releases/download/v${pkgver}/on-air-desktop_${pkgver}_arm64.deb")
@@ -27,5 +29,5 @@ package() {
   cd "$srcdir"
   ar x "$deb"
   tar -xf data.tar.* -C "$pkgdir"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 on-air-LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
