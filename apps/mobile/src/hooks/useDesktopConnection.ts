@@ -7,6 +7,7 @@ import type {
   OutputInfo,
   OutputSyncStatus,
   StatusResponse,
+  SyncGroupView,
   WsEvent,
 } from "@on-air/api-types";
 import * as client from "@on-air/control-client";
@@ -29,7 +30,7 @@ import {
   type WebSocketConstructor,
 } from "@on-air/control-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { friendlyError, isUnauthorized } from "@/errors";
+import { friendlyError } from "@/errors";
 
 export { ALL_SLICES, OPTIONAL_SLICES, REQUIRED_SLICES, type Slice } from "@on-air/control-client";
 
@@ -75,6 +76,8 @@ export type Snapshot = {
   audioQuality: AudioQualityResponse | null;
   /** Per-output latency trim and sync state; empty on an older desktop. */
   sync: OutputSyncStatus[];
+  /** Sync groups, empty when the desktop predates them. */
+  syncGroups: SyncGroupView[];
   airplayMode: AirPlayMode | null;
   cd: CdStatus;
 };
@@ -109,6 +112,7 @@ function toView(s: CoreSnapshot): Snapshot {
       : DEFAULT_RATES,
     audioQuality: s.audioQuality,
     sync: s.sync?.outputs ?? [],
+    syncGroups: s.sync?.groups ?? [],
     airplayMode: s.airplayMode,
     cd: s.cd ?? EMPTY_CD,
   };
@@ -129,6 +133,7 @@ const SLICE_OF: { [K in keyof Snapshot]: Slice } = {
   outputRates: "sampleRate",
   audioQuality: "audioQuality",
   sync: "sync",
+  syncGroups: "sync",
   airplayMode: "airplayMode",
   cd: "cd",
 };
@@ -144,7 +149,13 @@ function applyPatch(prev: CoreSnapshot, update: Partial<Snapshot>): CoreSnapshot
   if (update.volume !== undefined) next.volume = update.volume;
   if (update.gains !== undefined) next.gains = update.gains;
   if (update.audioQuality !== undefined) next.audioQuality = update.audioQuality;
-  if (update.sync !== undefined) next.sync = { outputs: update.sync };
+  // Rows and groups share one wire response; a patch of either keeps the other.
+  if (update.sync !== undefined || update.syncGroups !== undefined) {
+    next.sync = {
+      outputs: update.sync ?? prev.sync?.outputs ?? [],
+      groups: update.syncGroups ?? prev.sync?.groups,
+    };
+  }
   if (update.airplayMode !== undefined) next.airplayMode = update.airplayMode;
   if (update.cd !== undefined) next.cd = update.cd;
   const rates = prev.sampleRate;

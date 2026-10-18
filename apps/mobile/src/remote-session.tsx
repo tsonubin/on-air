@@ -10,16 +10,21 @@ import type {
   FirewallWarning,
   OutputInfo,
   OutputSyncStatus,
+  SyncGroupView,
 } from "@on-air/api-types";
 import { outputPhase } from "@on-air/api-types";
 import {
   activateInput,
   activateOutput,
+  addSyncGroupMember,
   controlCd,
+  createSyncGroup,
+  dissolveSyncGroup,
   fetchStatus,
   HttpError,
   type InputLabel,
   inputLabels,
+  leaveSyncGroupMember,
   openBluetoothSettings,
   pairAirplay,
   pairBluetooth,
@@ -30,6 +35,8 @@ import {
   setSampleRate,
   setSyncTrim,
   setVolume,
+  startSyncGroup,
+  stopSyncGroup,
   verifyPin,
 } from "@on-air/control-client";
 import type { ReactNode } from "react";
@@ -88,6 +95,8 @@ export type RemoteState = {
   audioQuality: AudioQualityResponse | null;
   /** Per-output latency trim and sync state; empty on an older desktop. */
   sync: OutputSyncStatus[];
+  /** Sync groups, empty when the desktop predates them. */
+  syncGroups: SyncGroupView[];
   paired: boolean;
   /** The paired desktop as `host` or `host:port`. */
   pairedHost: string;
@@ -141,6 +150,27 @@ export type RemoteActions = {
   applyQuality(quality: DspQuality): Promise<void>;
   /** One output's manual latency trim in milliseconds. */
   applyTrim(output: OutputInfo, trimMs: number): Promise<void>;
+  /**
+   * Forms an empty named group of speakers that play in sync — never one
+   * merged device. Resolves `true` once the group exists.
+   */
+  createGroup(name: string): Promise<boolean>;
+  /**
+   * Puts one speaker into a group. Membership is configuration: it takes
+   * effect at the group's next start together. Resolves `true` on success.
+   */
+  joinGroup(output: OutputInfo, groupId: number): Promise<boolean>;
+  /**
+   * Takes one speaker out of its group, stopping it cleanly if it plays
+   * along. Resolves `true` on success.
+   */
+  leaveGroup(output: OutputInfo): Promise<boolean>;
+  /** Starts every member at one presentation epoch: the speakers begin together. */
+  startGroup(groupId: number): Promise<void>;
+  /** Stops every member cleanly; the group stays configured. */
+  stopGroup(groupId: number): Promise<void>;
+  /** Stops the members and forgets the group. */
+  dissolveGroup(groupId: number): Promise<void>;
   controlCd(action: Extract<CdAction, "play" | "pause" | "next" | "prev">): Promise<void>;
 };
 
@@ -508,6 +538,119 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     [fail, refreshNow],
   );
 
+  const syncRowsRef = useRef(connection.sync);
+  syncRowsRef.current = connection.sync;
+  const createGroup = useCallback(
+    async (name: string) => {
+      const creds = credentials.current;
+      if (!creds) return false;
+      setActionError(null);
+      try {
+        await createSyncGroup(creds.base, name, creds.token);
+        await refreshNow(["sync"]);
+        return true;
+      } catch (error) {
+        fail(error, "create the group");
+        return false;
+      }
+    },
+    [fail, refreshNow],
+  );
+
+  const joinGroup = useCallback(
+    async (output: OutputInfo, groupId: number) => {
+      const creds = credentials.current;
+      if (!creds) return false;
+      setActionError(null);
+      try {
+        await addSyncGroupMember(
+          creds.base,
+          groupId,
+          { transport: output.transport, device_id: output.id },
+          creds.token,
+        );
+        await refreshNow(["sync"]);
+        return true;
+      } catch (error) {
+        fail(error, "add that speaker to the group");
+        return false;
+      }
+    },
+    [fail, refreshNow],
+  );
+
+  const leaveGroup = useCallback(
+    async (output: OutputInfo) => {
+      const creds = credentials.current;
+      // The row's `group_id` is the membership of record; without one there
+      // is no group to leave.
+      const groupId = syncRowsRef.current.find(
+        (row) => row.transport === output.transport && row.device_id === output.id,
+      )?.group_id;
+      if (!creds || groupId === undefined) return false;
+      setActionError(null);
+      try {
+        await leaveSyncGroupMember(
+          creds.base,
+          groupId,
+          { transport: output.transport, device_id: output.id },
+          creds.token,
+        );
+        await refreshNow(["sync"]);
+        return true;
+      } catch (error) {
+        fail(error, "take that speaker out of the group");
+        return false;
+      }
+    },
+    [fail, refreshNow],
+  );
+
+  const startGroup = useCallback(
+    async (groupId: number) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      setActionError(null);
+      try {
+        await startSyncGroup(creds.base, groupId, creds.token);
+        await refreshNow(["sync"]);
+      } catch (error) {
+        fail(error, "start the speakers together");
+      }
+    },
+    [fail, refreshNow],
+  );
+
+  const stopGroup = useCallback(
+    async (groupId: number) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      setActionError(null);
+      try {
+        await stopSyncGroup(creds.base, groupId, creds.token);
+        await refreshNow(["sync"]);
+      } catch (error) {
+        fail(error, "stop the speakers");
+      }
+    },
+    [fail, refreshNow],
+  );
+
+  const dissolveGroup = useCallback(
+    async (groupId: number) => {
+      const creds = credentials.current;
+      if (!creds) return;
+      setActionError(null);
+      try {
+        await dissolveSyncGroup(creds.base, groupId, creds.token);
+        await refreshNow(["sync"]);
+      } catch (error) {
+        fail(error, "dissolve the group");
+      }
+    },
+    [fail, refreshNow],
+  );
+
   const cdAction = useCallback(
     async (action: Extract<CdAction, "play" | "pause" | "next" | "prev">) => {
       const creds = credentials.current;
@@ -545,6 +688,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       levels: connection.levels,
       audioQuality: connection.audioQuality,
       sync: connection.sync,
+      syncGroups: connection.syncGroups,
       paired: Boolean(saved),
       pairedHost,
       found: discovery.found,
@@ -586,6 +730,12 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       changeBand,
       applyQuality,
       applyTrim,
+      createGroup,
+      joinGroup,
+      leaveGroup,
+      startGroup,
+      stopGroup,
+      dissolveGroup,
       controlCd: cdAction,
     }),
     [
@@ -618,6 +768,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       connection.levels,
       connection.audioQuality,
       connection.sync,
+      connection.syncGroups,
       busyTarget,
       configuringRate,
       devicePairing,
@@ -639,6 +790,12 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       changeBand,
       applyQuality,
       applyTrim,
+      createGroup,
+      joinGroup,
+      leaveGroup,
+      startGroup,
+      stopGroup,
+      dissolveGroup,
       cdAction,
     ],
   );

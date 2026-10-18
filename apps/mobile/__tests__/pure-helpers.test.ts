@@ -1,4 +1,4 @@
-import type { OutputSyncStatus } from "@on-air/api-types";
+import type { OutputSyncStatus, SyncGroupView } from "@on-air/api-types";
 import { DEFAULT_PORT } from "@on-air/api-types";
 import { HttpError, inputLabels } from "@on-air/control-client";
 import { Platform } from "react-native";
@@ -7,6 +7,7 @@ import { friendlyError } from "@/errors";
 import { digitsOnly, isForeground } from "@/remote-session";
 import { outputAction, syncSummary } from "@/sheets/output-sheet";
 import { sheetProps } from "@/sheets/sheet-props";
+import { groupSummary, membershipSummary } from "@/sheets/sync-groups";
 
 describe("sheetProps", () => {
   const original = Platform.OS;
@@ -29,6 +30,12 @@ describe("sheetProps", () => {
     expect(sheetProps({ kind: "output", count: 2, trim: true }).snapPoints).toEqual([
       { height: 502 },
     ]);
+    expect(
+      sheetProps({ kind: "output", count: 2, groups: { speakers: 2, groups: 1 } }).snapPoints,
+    ).toEqual([{ height: 776 }]);
+    expect(
+      sheetProps({ kind: "output", count: 2, groups: { speakers: 4, groups: 3 } }).snapPoints,
+    ).toEqual(["full"]);
     expect(sheetProps({ kind: "output", count: 6 }).snapPoints).toEqual(["full"]);
     expect(sheetProps({ kind: "device-pair", transport: "airplay" }).snapPoints).toEqual([
       { height: 360 },
@@ -142,5 +149,48 @@ test("a sync line reads state, drift and the manual trim", () => {
   expect(syncSummary(row)).toBe("Locked · 42 ppm · trim -100 ms");
   expect(syncSummary({ ...row, state: "free_running", drift_ppm: undefined, trim_ms: 0 })).toBe(
     "Free-running",
+  );
+});
+
+test("a membership line names the group the speaker plays with", () => {
+  const row: OutputSyncStatus = {
+    transport: "sonos",
+    device_id: "s",
+    device_name: "S",
+    state: "free_running",
+    trim_ms: 0,
+    default_latency_ms: 1000,
+    effective_latency_ms: 1000,
+    calibrated: false,
+    delay_frames: 0,
+    output_sample_rate_hz: 48000,
+    group_id: 2,
+  };
+  const groups: SyncGroupView[] = [
+    { id: 1, name: "Kitchen", members: [], playing: false },
+    { id: 2, name: "Patio", members: [], playing: false },
+  ];
+  expect(membershipSummary(row, groups)).toBe("Playing with Patio");
+  expect(membershipSummary({ ...row, group_id: undefined }, groups)).toBe("Playing alone");
+  // The group dissolved under a stale row still reads as playing alone.
+  expect(membershipSummary({ ...row, group_id: 9 }, groups)).toBe("Playing alone");
+});
+
+test("a group's card lists its speakers and whether they play together now", () => {
+  const group: SyncGroupView = {
+    id: 1,
+    name: "Kitchen",
+    members: [
+      { transport: "sonos", device_id: "s", device_name: "Mock Sonos", playing: true },
+      { transport: "airplay", device_id: "ap", device_name: "Living Room AirPlay", playing: true },
+    ],
+    playing: true,
+  };
+  expect(groupSummary(group)).toBe("Mock Sonos, Living Room AirPlay · playing together now");
+  expect(groupSummary({ ...group, playing: false })).toBe(
+    "Mock Sonos, Living Room AirPlay · not playing",
+  );
+  expect(groupSummary({ ...group, members: [], playing: false })).toBe(
+    "No speakers yet · not playing",
   );
 });
