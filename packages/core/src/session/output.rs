@@ -188,6 +188,11 @@ impl OutputSession {
         self.snapshot().identity
     }
 
+    /// Whether two handles refer to one session (cheap pointer comparison).
+    pub fn same_as(&self, other: &OutputSession) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Name of the retained sender (live or failed). Waits for an in-flight
     /// transition.
     pub async fn sender_name(&self) -> Option<String> {

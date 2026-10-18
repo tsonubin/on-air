@@ -5,7 +5,9 @@
 //!
 //! - a [`SyncGroup`] (see [`group`]) gives several outputs one presentation
 //!   epoch and per-output delay lines, so fast transports wait for slow
-//!   ones;
+//!   ones. Groups are named user configuration: several may exist at once,
+//!   an output is a member of at most one at a time, and membership only
+//!   takes effect at the group's next scheduled start;
 //! - [`latency`] supplies the per-transport latency model: documented,
 //!   explicitly unmeasured defaults plus a user trim in milliseconds;
 //! - [`drift`] measures each consumer's real consumption rate against the
@@ -21,12 +23,16 @@
 pub mod drift;
 pub mod group;
 pub mod latency;
+pub mod lifecycle;
 
 pub use drift::{DriftController, DriftReport};
 pub use group::{delay_frames, MemberId, OutputKey, PresentationEpoch, StartPlan, SyncGroup};
 pub use latency::{default_latency_ms, effective_latency, effective_latency_ms, LatencyEstimate};
+pub use lifecycle::GroupError;
 
-use on_air_api::{OutputSyncStatus, SyncState};
+use crate::session::OutputSession;
+use crate::settings::{SavedSyncGroup, SavedSyncGroupMember};
+use on_air_api::{OutputPhase, OutputSyncStatus, SyncGroupMember, SyncGroupView, SyncState};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -45,12 +51,31 @@ struct OutputRow {
     report: Option<DriftReport>,
 }
 
+/// One named sync group and the sessions its `start` gave its members.
+struct GroupRow {
+    name: String,
+    group: Arc<SyncGroup>,
+}
+
 #[derive(Default)]
 struct Registry {
-    groups: Vec<Arc<SyncGroup>>,
+    groups: Vec<GroupRow>,
     next_group_id: u64,
     membership: HashMap<OutputKey, (Arc<SyncGroup>, MemberId)>,
+    /// Member sessions a group's `start` created. An entry claims the
+    /// receiver until the member is stopped or leaves its group.
+    playing: HashMap<OutputKey, OutputSession>,
     outputs: HashMap<OutputKey, OutputRow>,
+}
+
+/// Why [`SyncController::join`] refused a membership change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum JoinError {
+    /// The output is already a member of another sync group. An output
+    /// plays in at most one group at a time; take it out of the other group
+    /// first.
+    #[error("this output already plays in another sync group")]
+    AlreadyInGroup,
 }
 
 /// Process-wide sync registry: sync groups, per-output latency trims and the
@@ -67,38 +92,50 @@ impl SyncController {
         }
     }
 
-    /// A fresh sync group. Outputs join it via [`SyncController::join`].
-    pub fn create_group(self: &Arc<Self>) -> Arc<SyncGroup> {
+    /// A fresh, empty named sync group. Outputs join it via
+    /// [`SyncController::join`].
+    pub fn create_group(self: &Arc<Self>, name: impl Into<String>) -> Arc<SyncGroup> {
         let mut registry = self.registry.lock();
         let group = Arc::new(SyncGroup::new(registry.next_group_id));
         registry.next_group_id += 1;
-        registry.groups.push(group.clone());
+        registry.groups.push(GroupRow {
+            name: name.into(),
+            group: group.clone(),
+        });
         group
     }
 
     /// Join `output` to `group` at its effective latency (documented default
-    /// plus the user's trim). The previous group, if any, is left behind.
+    /// plus the user's trim). An output plays in at most one group at a
+    /// time: joining is REFUSED while it is a member of another group, so
+    /// two groups can never pull the same speaker in different directions.
+    /// Re-joining the same group is idempotent.
     pub fn join(
         self: &Arc<Self>,
         group: &Arc<SyncGroup>,
         output: &on_air_api::ActiveOutput,
-    ) -> MemberId {
+    ) -> Result<MemberId, JoinError> {
         let key = OutputKey::new(&output.transport, &output.device_id);
         let latency = {
             let mut registry = self.registry.lock();
+            if let Some((current, member)) = registry.membership.get(&key) {
+                return if current.id() == group.id() {
+                    Ok(*member)
+                } else {
+                    Err(JoinError::AlreadyInGroup)
+                };
+            }
             let row = registry.outputs.entry(key.clone()).or_default();
             row.name = output.device_name.clone();
             let trim_ms = row.trim_ms;
             latency::effective_latency(&output.transport, trim_ms)
         };
-        // An output plays in at most one group at a time.
-        let _ = self.leave(&key);
         let member = group.join(key.clone(), latency);
         self.registry
             .lock()
             .membership
             .insert(key, (group.clone(), member));
-        member
+        Ok(member)
     }
 
     /// Remove one output from its group, if any.
@@ -109,6 +146,22 @@ impl SyncController {
         Some(entry)
     }
 
+    /// Forget a whole group: every output leaves it. Any playing member
+    /// sessions must be stopped by the caller first
+    /// ([`SyncController::take_playing`]).
+    pub fn dissolve_group(&self, group_id: u64) -> Option<Arc<SyncGroup>> {
+        let mut registry = self.registry.lock();
+        let row = registry
+            .groups
+            .iter()
+            .position(|row| row.group.id() == group_id)?;
+        let row = registry.groups.remove(row);
+        registry
+            .membership
+            .retain(|_, (group, _)| group.id() != group_id);
+        Some(row.group)
+    }
+
     /// The group one output belongs to, if any.
     pub fn group_of(&self, key: &OutputKey) -> Option<Arc<SyncGroup>> {
         self.registry
@@ -116,6 +169,51 @@ impl SyncController {
             .membership
             .get(key)
             .map(|(group, _)| group.clone())
+    }
+
+    /// The group with this id, if any.
+    pub fn group_by_id(&self, group_id: u64) -> Option<Arc<SyncGroup>> {
+        self.registry
+            .lock()
+            .groups
+            .iter()
+            .find(|row| row.group.id() == group_id)
+            .map(|row| row.group.clone())
+    }
+
+    /// The display name of the group with this id, if any.
+    pub fn group_name(&self, group_id: u64) -> Option<String> {
+        self.registry
+            .lock()
+            .groups
+            .iter()
+            .find(|row| row.group.id() == group_id)
+            .map(|row| row.name.clone())
+    }
+
+    /// Register the member session a group's `start` created. The entry
+    /// claims the receiver (see [`SyncController::uses_receiver`]) until it
+    /// is taken back.
+    pub fn set_playing(&self, key: &OutputKey, session: OutputSession) {
+        self.registry.lock().playing.insert(key.clone(), session);
+    }
+
+    /// Take back one member's claim, returning its session so the caller
+    /// can stop it.
+    pub fn take_playing(&self, key: &OutputKey) -> Option<OutputSession> {
+        self.registry.lock().playing.remove(key)
+    }
+
+    /// The session currently playing this output as a sync-group member.
+    pub fn playing_session(&self, key: &OutputKey) -> Option<OutputSession> {
+        self.registry.lock().playing.get(key).cloned()
+    }
+
+    /// Whether a sync-group member session currently drives this receiver.
+    /// Two sessions claiming one receiver is a hard refusal.
+    pub fn uses_receiver(&self, transport: &str, device_id: &str) -> bool {
+        self.playing_session(&OutputKey::new(transport, device_id))
+            .is_some()
     }
 
     /// Explicit re-entry into sync after one output's transport restarted
@@ -186,6 +284,16 @@ impl SyncController {
         }
     }
 
+    /// The last display name seen for one output, if any.
+    pub fn display_name(&self, key: &OutputKey) -> Option<String> {
+        self.registry
+            .lock()
+            .outputs
+            .get(key)
+            .map(|row| row.name.clone())
+            .filter(|name| !name.is_empty())
+    }
+
     /// The effective latency (default plus trim) for one output.
     pub fn effective_latency(&self, transport: &str, key: &OutputKey) -> LatencyEstimate {
         latency::effective_latency(transport, self.trim_ms(key))
@@ -228,6 +336,94 @@ impl SyncController {
     pub fn is_synchronized(&self, output: &on_air_api::ActiveOutput) -> bool {
         self.group_of(&OutputKey::new(&output.transport, &output.device_id))
             .is_some()
+    }
+
+    /// Every named group with its members and playing state, for the wire.
+    pub fn group_views(&self) -> Vec<SyncGroupView> {
+        let registry = self.registry.lock();
+        registry
+            .groups
+            .iter()
+            .map(|row| {
+                let members = row
+                    .group
+                    .members()
+                    .into_iter()
+                    .map(|(_member, key, _latency)| {
+                        let name = registry
+                            .outputs
+                            .get(&key)
+                            .map(|row| row.name.clone())
+                            .unwrap_or_default();
+                        let snapshot = registry.playing.get(&key).map(|s| s.snapshot());
+                        let playing = matches!(
+                            snapshot.as_ref().map(|s| s.phase),
+                            Some(OutputPhase::Starting | OutputPhase::Live)
+                        );
+                        let error = snapshot.and_then(|s| s.error);
+                        SyncGroupMember {
+                            transport: key.transport.clone(),
+                            device_id: key.device_id.clone(),
+                            device_name: name,
+                            playing,
+                            error,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                let playing = members.iter().any(|member| member.playing);
+                SyncGroupView {
+                    id: row.group.id(),
+                    name: row.name.clone(),
+                    members,
+                    playing,
+                }
+            })
+            .collect()
+    }
+
+    /// Groups and members for `settings.json`, in creation order.
+    pub fn saved_groups(&self) -> Vec<SavedSyncGroup> {
+        let registry = self.registry.lock();
+        registry
+            .groups
+            .iter()
+            .map(|row| SavedSyncGroup {
+                name: row.name.clone(),
+                members: row
+                    .group
+                    .members()
+                    .into_iter()
+                    .map(|(_member, key, _latency)| {
+                        let device_name = registry
+                            .outputs
+                            .get(&key)
+                            .map(|row| row.name.clone())
+                            .unwrap_or_default();
+                        SavedSyncGroupMember {
+                            transport: key.transport,
+                            device_id: key.device_id,
+                            device_name,
+                        }
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
+    /// Put one persisted group back: created and stopped, exactly as the
+    /// user left it in configuration (playback never survives a restart).
+    pub fn restore_group(self: &Arc<Self>, saved: &SavedSyncGroup) {
+        let group = self.create_group(saved.name.clone());
+        for member in &saved.members {
+            let _ = self.join(
+                &group,
+                &on_air_api::ActiveOutput {
+                    transport: member.transport.clone(),
+                    device_id: member.device_id.clone(),
+                    device_name: member.device_name.clone(),
+                },
+            );
+        }
     }
 
     /// Per-output sync status: one row per output this core knows about,
@@ -283,6 +479,10 @@ impl SyncController {
                     .get(key)
                     .and_then(|(group, _)| group.delay_frames(key, rate_hz))
                     .unwrap_or_default();
+                let group_id = registry
+                    .membership
+                    .get(key)
+                    .map(|(group, _)| group.id());
                 OutputSyncStatus {
                     transport: key.transport.clone(),
                     device_id: key.device_id.clone(),
@@ -295,6 +495,7 @@ impl SyncController {
                     delay_frames,
                     output_sample_rate_hz: rate_hz,
                     drift_ppm,
+                    group_id,
                 }
             })
             .collect()

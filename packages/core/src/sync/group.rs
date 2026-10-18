@@ -32,7 +32,7 @@ impl OutputKey {
 }
 
 /// A sync group member handle, valid until [`SyncGroup::leave`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemberId(u64);
 
 /// The common start instant every member of a sync group works toward.

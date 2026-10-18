@@ -190,8 +190,8 @@ async fn sync_member_recovery_holds_to_the_group_epoch_and_reports_syncing() {
 
     // The output is in a sync group whose coordinated start is still
     // pending, and its drift servo had locked before the stall.
-    let group = state.sync.create_group();
-    state.sync.join(&group, &identity);
+    let group = state.sync.create_group("Recovery");
+    state.sync.join(&group, &identity).unwrap();
     let epoch = Instant::now() + Duration::from_millis(4500);
     group.schedule_start(epoch);
     state.sync.report_drift(

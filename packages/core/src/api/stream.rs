@@ -181,8 +181,13 @@ pub async fn stream_audio(
 ) -> Result<Response, ApiError> {
     let state = if radio_stream_is_live(&state, &nonce) {
         state
+    } else if let Some(child) = state.patchbay.stream_state(&nonce).await {
+        child
+    } else if let Some(child) = state.group_stream_state(&nonce).await {
+        // A playing sync-group member's own radio stream.
+        child
     } else {
-        state.patchbay.stream_state(&nonce).await.unwrap_or(state)
+        state
     };
     if !state.service_enabled.load(Ordering::Acquire) {
         return Err(ApiError::service_paused());
