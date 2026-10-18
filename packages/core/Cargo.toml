@@ -39,6 +39,9 @@ if-addrs = "0.15"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+# MPRIS bridge: pure-Rust D-Bus on the tokio runtime (no async-io, no C
+# libraries), Linux-only like MPRIS itself. See `src/mpris/mod.rs`.
+zbus = { version = "6", default-features = false, features = ["service", "tokio"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-audio = "0.3.2"
