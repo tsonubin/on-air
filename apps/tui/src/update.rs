@@ -988,7 +988,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::Trim => {
             if let Some(entry) = model.selected_dest() {
                 let current = model
-                    .sync_row(&entry.transport, &entry.id)
+                    .sync_row(entry.transport, &entry.id)
                     .map(|row| row.trim_ms)
                     .unwrap_or(0);
                 model.modal = Modal::TrimPrompt {
