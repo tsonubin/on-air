@@ -54,6 +54,23 @@ longer the recommended Linux path.
 
 ## Non-goals
 
+> **Revision, 2026-10-18.** Two entries below were written as *follow-ups once the
+> TUI path is in use* and are now active work, so the deferral has been called in.
+> The TUI path shipped, and the roadmap in
+> [2026-10-18-roadmap](2026-10-18-roadmap.md) makes them goals:
+>
+> - **MPRIS and desktop notifications** (roadmap D5, D6) — media-widget presence
+>   and toasts for output connected/disconnected/failed, audio paused/resumed and
+>   a new pairing PIN. Not yet started at the time of this revision; the decision
+>   to do them is what changed, not their scope.
+> - **Omarchy shell config** — still a non-goal for *editing* the user's config,
+>   and unchanged. What has changed is that the panel's own discoverability is now
+>   in scope (roadmap D7), because the shipped widget proved confusing to use.
+>
+> The other entries stand. In particular the audio pipeline is still out of scope
+> *for this design record*; the pipeline changes live in their own records
+> (2026-10-17-stereo-pipeline, 2026-10-18-roadmap).
+
 - Removing the Linux Tauri bundles or the `on-air-bin` AUR recipe. They stay
   and are demoted in the docs.
 - A native GTK or Qt window. The TUI is the Linux GUI; a native window is a
