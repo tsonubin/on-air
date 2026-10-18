@@ -115,6 +115,16 @@ grep -q "^sha256sums_x86_64=('$core_sum' '" "$fake/bin/PKGBUILD" || fail "instal
 grep -q "SKIP" "$fake/bin/PKGBUILD" && fail "install.sh left a SKIP checksum"
 bash -n "$fake/bin/PKGBUILD" || fail "staged on-air-bin PKGBUILD syntax"
 [ -f "$fake/bin/on-air.install" ] || fail "install.sh did not stage on-air-bin's on-air.install"
+# A recipe whose checksum arrays are renamed: sed matches nothing, exits 0
+# and leaves the placeholders behind. The installer must refuse to stage an
+# unverifiable package rather than silently fall back to SKIP.
+sed -i 's/^sha256sums_aarch64=/sha256sums_riscv=/' \
+  "$fake/raw/v9.0.0/packaging/aur/on-air-bin/PKGBUILD"
+ON_AIR_RAW_URL="file://$fake/raw" ON_AIR_RELEASE_URL="file://$fake/releases" \
+  sh "$dir/install.sh" --version 9.0.0 --prepare-only "$fake/drift" >/dev/null 2>&1 &&
+  fail "install.sh staged an unverifiable package after the recipe's checksum arrays drifted"
+sed -i 's/^sha256sums_riscv=/sha256sums_aarch64=/' \
+  "$fake/raw/v9.0.0/packaging/aur/on-air-bin/PKGBUILD"
 sed -i '/on-air-tui-linux-aarch64/d' "$fake/releases/download/v9.0.0/SHA256SUMS"
 ON_AIR_RAW_URL="file://$fake/raw" ON_AIR_RELEASE_URL="file://$fake/releases" \
   sh "$dir/install.sh" --version 9.0.0 --prepare-only "$fake/bad" >/dev/null 2>&1 &&

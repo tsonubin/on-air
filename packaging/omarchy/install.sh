@@ -84,6 +84,19 @@ stage_release_bin() {
   sed -e "s|^sha256sums_x86_64=.*|sha256sums_x86_64=('$core_x86' '$tui_x86')|" \
     -e "s|^sha256sums_aarch64=.*|sha256sums_aarch64=('$core_arm' '$tui_arm')|" \
     "$build/PKGBUILD" > "$build/PKGBUILD.new"
+  # sed exits 0 whether or not a pattern matched anything, so if the tag's
+  # recipe ever renames or reformats these arrays the substitution silently
+  # does nothing and the placeholder sums survive. Those placeholders are
+  # 'SKIP', which tells makepkg to verify nothing at all — leaving this
+  # unchecked would mean installing whatever the download produced. Pinning
+  # is only real if it demonstrably happened.
+  grep -Fq "sha256sums_x86_64=('$core_x86'" "$build/PKGBUILD.new" ||
+    die "the v$version on-air-bin recipe has no sha256sums_x86_64 to pin; refusing to install unverified binaries"
+  grep -Fq "sha256sums_aarch64=('$core_arm'" "$build/PKGBUILD.new" ||
+    die "the v$version on-air-bin recipe has no sha256sums_aarch64 to pin; refusing to install unverified binaries"
+  if grep -Eq "^sha256sums_(x86_64|aarch64)=.*SKIP" "$build/PKGBUILD.new"; then
+    die "the v$version on-air-bin recipe still carries a SKIP checksum after pinning; refusing to install unverified binaries"
+  fi
   mv "$build/PKGBUILD.new" "$build/PKGBUILD"
   rm -f "$sums"
 }
