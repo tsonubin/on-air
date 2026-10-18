@@ -2,7 +2,7 @@ use super::*;
 use crate::api::{
     ActiveOutput, ActiveOutputView, AudioQualityResponse, BluetoothDeviceInfo, CdStatus, DspQuality,
     OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
-    SyncState,
+    SyncGroupMember, SyncGroupView, SyncState,
 };
 use crate::client::Connection;
 use crate::keys::KEYS;
@@ -87,6 +87,7 @@ fn model() -> Model {
         bluetooth: None,
         audio_quality: None,
         sync: None,
+        sync_groups: None,
     };
     model
 }
@@ -900,6 +901,7 @@ fn sync_status(transport: &str, device_id: &str, state: SyncState, trim_ms: i32)
         delay_frames: 0,
         output_sample_rate_hz: 48000,
         drift_ppm: None,
+        group_id: None,
     }
 }
 
@@ -940,6 +942,95 @@ fn the_trim_overlay_calls_the_trim_manual_and_shows_the_current_value() {
     ] {
         assert!(t.contains(needle), "{needle} missing:\n{t}");
     }
+}
+
+fn member(device_name: &str, error: bool) -> SyncGroupMember {
+    SyncGroupMember {
+        transport: "sonos".into(),
+        device_id: device_name.to_lowercase().replace(' ', "-"),
+        device_name: device_name.into(),
+        playing: false,
+        error: error.then(|| "did not start".into()),
+    }
+}
+
+fn group(id: u64, name: &str, members: Vec<SyncGroupMember>, playing: bool) -> SyncGroupView {
+    SyncGroupView {
+        id,
+        name: name.into(),
+        members,
+        playing,
+    }
+}
+
+#[test]
+fn destination_rows_show_the_sync_group_they_play_with() {
+    let mut m = model();
+    let mut row = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, 0);
+    row.group_id = Some(1);
+    m.snapshot.sync = Some(vec![row]);
+    m.snapshot.sync_groups = Some(vec![group(
+        1,
+        "downstairs",
+        vec![member("Mock Sonos", false)],
+        true,
+    )]);
+    let t = text(&render(&m, 100, 30));
+    assert!(t.contains("together: downstairs"), "{t}");
+}
+
+#[test]
+fn the_group_overlay_says_several_speakers_and_lists_the_groups() {
+    let mut m = model();
+    let mut row = sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, 0);
+    row.group_id = Some(1);
+    m.snapshot.sync = Some(vec![row]);
+    m.snapshot.sync_groups = Some(vec![
+        group(
+            1,
+            "downstairs",
+            vec![member("Kitchen", false), member("Study", true)],
+            true,
+        ),
+        group(2, "upstairs", vec![member("Bedroom", false)], false),
+    ]);
+    m.modal = Modal::GroupPrompt {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        name: "Mock Sonos".into(),
+        index: 0,
+        input: String::new(),
+        naming: false,
+        error: None,
+    };
+    let t = text(&render(&m, 100, 30));
+    for needle in [
+        "not one merged device",
+        "typed by ear",
+        "measured or calibrated",
+        "This output: Mock Sonos",
+        "in \"downstairs\"",
+        "playing together",
+        "stopped",
+        "(this output)",
+        "✗ Study",
+        "join or take out",
+        "play together / stop",
+        "n: new group",
+        "x: remove the group",
+        "Removing a group stops its speakers",
+    ] {
+        assert!(t.contains(needle), "{needle} missing:\n{t}");
+    }
+    // Naming a group types its name into the same overlay.
+    let Modal::GroupPrompt { naming, input, .. } = &mut m.modal else {
+        panic!("expected the group prompt, got {:?}", m.modal);
+    };
+    *naming = true;
+    *input = "kitchen".into();
+    let t = text(&render(&m, 100, 30));
+    assert!(t.contains("New group name: kitchen"), "{t}");
+    assert!(t.contains("put Mock Sonos in it"), "{t}");
 }
 
 #[test]

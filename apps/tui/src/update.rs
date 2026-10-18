@@ -72,6 +72,31 @@ pub enum Cmd {
         device_id: String,
         trim_ms: i32,
     },
+    /// Create a sync group and put one output in it, in one round.
+    CreateSyncGroup {
+        name: String,
+        transport: String,
+        device_id: String,
+    },
+    /// Put one output in a sync group, leaving `from` first when it plays
+    /// with another group: an output is in at most one group.
+    JoinSyncGroup {
+        group_id: u64,
+        from: Option<u64>,
+        transport: String,
+        device_id: String,
+    },
+    /// Take one output out of a sync group.
+    LeaveSyncGroup {
+        group_id: u64,
+        transport: String,
+        device_id: String,
+    },
+    /// Play every member from one presentation epoch, or stop them.
+    StartSyncGroup(u64),
+    StopSyncGroup(u64),
+    /// Stop the members and forget the group.
+    DissolveSyncGroup { group_id: u64 },
     ActivateInput(String),
     ActivateOutput {
         transport: String,
@@ -138,6 +163,8 @@ pub const LABEL_BENCHMARK: &str = "Checking audio performance";
 pub const LABEL_BUFFER: &str = "Changing capture buffer";
 pub const LABEL_QUALITY: &str = "Changing DSP quality";
 pub const LABEL_TRIM: &str = "Changing latency trim";
+pub const LABEL_GROUP: &str = "Changing sync group";
+pub const LABEL_DISSOLVE_GROUP: &str = "Dissolving the sync group";
 pub const LABEL_AUTOSTART: &str = "Changing autostart";
 pub const LABEL_SETTINGS: &str = "Opening Bluetooth settings";
 pub const LABEL_CD: &str = "Disc";
@@ -147,6 +174,9 @@ pub const CD_SEEK_MS: i64 = 10_000;
 /// The manual latency trim stays inside ±10 s, the core's own limit
 /// (`on-air-core` `sync::latency::TRIM_LIMIT_MS`).
 pub const TRIM_LIMIT_MS: i32 = 10_000;
+
+/// A sync group's name is 1..=64 characters (`CreateSyncGroupRequest`).
+pub const GROUP_NAME_MAX: usize = 64;
 
 /// The quality profiles in selector order, cheapest first.
 const QUALITIES: [DspQuality; 3] = [DspQuality::Economy, DspQuality::Balanced, DspQuality::High];
@@ -385,7 +415,7 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
             if label == LABEL_FIREWALL {
                 model.modal = Modal::None;
             }
-            if label == LABEL_TRIM {
+            if matches!(label, LABEL_TRIM | LABEL_GROUP | LABEL_DISSOLVE_GROUP) {
                 model.modal = Modal::None;
             }
             if chain_step.is_some() {
@@ -434,6 +464,16 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
                     *error = Some(copy);
                     input.clear();
                     return vec![];
+                }
+            }
+            if matches!(label, LABEL_GROUP | LABEL_DISSOLVE_GROUP) {
+                if let Modal::GroupPrompt { error, .. } = &mut model.modal {
+                    // The prompt stays open for another try. The write may
+                    // have half-applied — a move leaves its old group
+                    // before it joins the new one — so membership is
+                    // re-read underneath it.
+                    *error = Some(copy);
+                    return vec![Cmd::Refresh];
                 }
             }
             if chain_step.is_some() {
@@ -578,6 +618,9 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
         WsEvent::OutputStateChanged { .. } | WsEvent::InputStateChanged { .. } => {
             schedule_refresh(model)
         }
+        // Groups were created, reshaped, started or stopped: the sync rows
+        // and group badges are all re-read.
+        WsEvent::SyncGroupChanged { .. } => schedule_refresh(model),
         WsEvent::DeviceJoined {
             transport,
             id,
@@ -852,6 +895,117 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                 _ => vec![],
             };
         }
+        Modal::GroupPrompt {
+            transport,
+            device_id,
+            index,
+            input,
+            naming,
+            error,
+            ..
+        } => {
+            let groups = model.snapshot.sync_groups.as_deref().unwrap_or_default();
+            // This output's own group, from its sync row: an output is in
+            // at most one group at a time.
+            let current = model
+                .snapshot
+                .sync
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .find(|row| row.transport == *transport && row.device_id == *device_id)
+                .and_then(|row| row.group_id);
+            return match key.code {
+                KeyCode::Esc => {
+                    model.modal = Modal::None;
+                    vec![]
+                }
+                KeyCode::Up | KeyCode::Down if !*naming && !groups.is_empty() => {
+                    let delta = if key.code == KeyCode::Down { 1 } else { -1 };
+                    *index = step(*index, delta, groups.len());
+                    *error = None;
+                    vec![]
+                }
+                // `n` starts naming a new group; while the name is typed,
+                // every character belongs to it.
+                KeyCode::Char('n') if !*naming && model.pending.is_none() => {
+                    *naming = true;
+                    input.clear();
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Char('p') if !*naming && model.pending.is_none() => {
+                    let Some(group) = groups.get(*index) else {
+                        return vec![];
+                    };
+                    let cmd = if group.playing {
+                        Cmd::StopSyncGroup(group.id)
+                    } else {
+                        Cmd::StartSyncGroup(group.id)
+                    };
+                    pending(model, LABEL_GROUP, vec![cmd])
+                }
+                // `x` removes the highlighted group entirely; with none
+                // highlighted there is nothing to remove.
+                KeyCode::Char('x') if !*naming && model.pending.is_none() => {
+                    let Some(group) = groups.get(*index) else {
+                        return vec![];
+                    };
+                    pending(
+                        model,
+                        LABEL_DISSOLVE_GROUP,
+                        vec![Cmd::DissolveSyncGroup { group_id: group.id }],
+                    )
+                }
+                KeyCode::Backspace if *naming => {
+                    input.pop();
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Char(c) if *naming && input.chars().count() < GROUP_NAME_MAX => {
+                    input.push(c);
+                    *error = None;
+                    vec![]
+                }
+                KeyCode::Enter if model.pending.is_none() && *naming => {
+                    let name = input.trim().to_string();
+                    if name.is_empty() || name.chars().count() > GROUP_NAME_MAX {
+                        *error = Some("Name the group with 1 to 64 characters.".into());
+                        return vec![];
+                    }
+                    let cmd = Cmd::CreateSyncGroup {
+                        name,
+                        transport: transport.clone(),
+                        device_id: device_id.clone(),
+                    };
+                    pending(model, LABEL_GROUP, vec![cmd])
+                }
+                // Enter joins the highlighted group, takes the output out
+                // of its own, or — already in another group — moves it:
+                // leave first, then join.
+                KeyCode::Enter if model.pending.is_none() => {
+                    let Some(group) = groups.get(*index) else {
+                        return vec![];
+                    };
+                    let cmd = if current == Some(group.id) {
+                        Cmd::LeaveSyncGroup {
+                            group_id: group.id,
+                            transport: transport.clone(),
+                            device_id: device_id.clone(),
+                        }
+                    } else {
+                        Cmd::JoinSyncGroup {
+                            group_id: group.id,
+                            from: current,
+                            transport: transport.clone(),
+                            device_id: device_id.clone(),
+                        }
+                    };
+                    pending(model, LABEL_GROUP, vec![cmd])
+                }
+                _ => vec![],
+            };
+        }
         Modal::ConfirmEject => {
             return match key.code {
                 KeyCode::Char('y') => {
@@ -970,7 +1124,34 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::PlayPause => play_pause(model),
         Action::SeekBack => cd_seek(model, -CD_SEEK_MS),
         Action::SeekForward => cd_seek(model, CD_SEEK_MS),
-        Action::GotoTrack => {
+        // `g` is contextual: on a Destination row it forms sync groups,
+        // and anywhere else it keeps cliamp's CD go to track.
+        Action::Group => {
+            if model.pane == Pane::Outputs {
+                if let Some(entry) = model.selected_dest() {
+                    let current = model
+                        .sync_row(entry.transport, &entry.id)
+                        .and_then(|row| row.group_id);
+                    let index = model
+                        .snapshot
+                        .sync_groups
+                        .as_ref()
+                        .and_then(|groups| {
+                            groups.iter().position(|group| Some(group.id) == current)
+                        })
+                        .unwrap_or(0);
+                    model.modal = Modal::GroupPrompt {
+                        transport: entry.transport.to_string(),
+                        device_id: entry.id,
+                        name: entry.name,
+                        index,
+                        input: String::new(),
+                        naming: false,
+                        error: None,
+                    };
+                    return vec![];
+                }
+            }
             if has_disc(model) {
                 model.modal = Modal::TrackPrompt {
                     input: String::new(),

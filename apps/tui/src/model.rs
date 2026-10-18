@@ -4,7 +4,7 @@
 
 use crate::api::{
     ActiveOutputView, BluetoothDeviceInfo, CdStatus, DspQuality, OutputInfo, OutputPhase,
-    OutputSyncStatus, SampleRateResponse, StatusResponse, SyncState,
+    OutputSyncStatus, SampleRateResponse, StatusResponse, SyncGroupView, SyncState,
 };
 use crate::client::Connection;
 use crate::update::Cmd;
@@ -99,6 +99,19 @@ pub enum Modal {
         input: String,
         error: Option<String>,
     },
+    /// Sync-group formation for one output: the highlighted group in
+    /// `Snapshot.sync_groups`, or a new group's name being typed.
+    GroupPrompt {
+        transport: String,
+        device_id: String,
+        name: String,
+        /// Highlighted row in the group list.
+        index: usize,
+        input: String,
+        /// Typing a new group's name (`n`) instead of picking one.
+        naming: bool,
+        error: Option<String>,
+    },
     ConfirmEject,
     /// The `i` info overlay.
     Status,
@@ -128,6 +141,9 @@ pub struct Snapshot {
     pub audio_quality: Option<crate::api::AudioQualityResponse>,
     /// Per-output latency trim and sync state; `None` on an older core.
     pub sync: Option<Vec<OutputSyncStatus>>,
+    /// The sync groups with their members; `None` on an older core whose
+    /// sync response carried no groups.
+    pub sync_groups: Option<Vec<SyncGroupView>>,
     pub cd: Option<CdStatus>,
     pub airplay_mode: Option<String>,
     /// Known Bluetooth devices; `None` when the list failed to load.
@@ -161,6 +177,8 @@ pub struct DestEntry {
     pub placeholder: bool,
     /// Its latency trim and sync state, when the core reports them.
     pub sync: Option<SyncBadge>,
+    /// The name of the sync group it plays with, when it is in one.
+    pub group: Option<String>,
 }
 
 /// A row of the Destination pane: a transport header, a device or the
@@ -373,6 +391,7 @@ impl Model {
                     state: self.dest_state(transport, &output.id, Some(output), device),
                     placeholder: false,
                     sync: self.sync_badge(transport, &output.id),
+                    group: self.sync_group_name(transport, &output.id),
                 }));
             }
             if transport == "bluetooth" {
@@ -388,6 +407,7 @@ impl Model {
                         state: self.dest_state(transport, &device.id, None, Some(device)),
                         placeholder: false,
                         sync: self.sync_badge(transport, &device.id),
+                        group: self.sync_group_name(transport, &device.id),
                     }));
                 }
                 self.push_placeholders(transport, &mut rows);
@@ -445,6 +465,21 @@ impl Model {
         })
     }
 
+    /// The name of the sync group this output plays with, when its group
+    /// is one the core has listed.
+    fn sync_group_name(&self, transport: &str, id: &str) -> Option<String> {
+        let group_id = self.sync_row(transport, id)?.group_id?;
+        Some(
+            self.snapshot
+                .sync_groups
+                .as_ref()?
+                .iter()
+                .find(|group| group.id == group_id)?
+                .name
+                .clone(),
+        )
+    }
+
     /// Devices announced by the core before the next snapshot lists them.
     fn push_placeholders(&self, transport: &'static str, rows: &mut Vec<DestRow>) {
         let listed = |id: &str| {
@@ -467,6 +502,7 @@ impl Model {
                 state: DestState::Idle,
                 placeholder: true,
                 sync: None,
+                group: None,
             }));
         }
     }

@@ -6,8 +6,8 @@ use crate::api::WsEvent;
 use crate::api::{
     ActiveInputResponse, ActiveOutputResponse, ActiveOutputView, AirPlayModeResponse, ApiErrorBody,
     AudioQualityResponse, BluetoothDeviceInfo, BluetoothListResponse, CdAction, CdStatus,
-    DspQuality, EqResponse, InputsResponse, OutputInfo, OutputSyncStatus, OutputVolumeResponse,
-    OutputsResponse, PinResponse, SampleRateResponse, ServiceResponse, StatusResponse, SyncResponse,
+    DspQuality, EqResponse, InputsResponse, OutputInfo, OutputVolumeResponse, OutputsResponse,
+    PinResponse, SampleRateResponse, ServiceResponse, StatusResponse, SyncGroupView, SyncResponse,
     SyncTrimResponse,
 };
 use crate::error_copy;
@@ -165,10 +165,16 @@ impl Client {
             self.airplay_mode(),
             self.bluetooth_devices(),
             self.audio_quality(),
-            self.sync_status(),
+            self.sync(),
         );
         let mut failures: Vec<String> = Vec::new();
         let paused = matches!(&status, Ok(status) if !status.service_enabled);
+        // A core older than sync groups leaves them out of the response;
+        // the UI reads that as "no groups".
+        let (sync, sync_groups) = match sync {
+            Ok(sync) => (Some(sync.outputs), sync.groups),
+            Err(_) => (None, None),
+        };
         let snapshot = Snapshot {
             status: take_part(status, paused, &mut failures),
             pin: take_part(pin, paused, &mut failures),
@@ -185,7 +191,8 @@ impl Client {
             bluetooth: bluetooth.ok(),
             // Newer cores only: a failure shows as controls left hidden.
             audio_quality: audio_quality.ok(),
-            sync: sync.ok(),
+            sync,
+            sync_groups,
         };
         (snapshot, failures)
     }
@@ -227,6 +234,82 @@ impl Client {
             } => done(
                 update::LABEL_TRIM,
                 self.set_sync_trim(&transport, &device_id, trim_ms).await,
+            ),
+            // One round for the user: create the group and put the output
+            // in it. If the join is refused the group survives as an empty
+            // row the prompt lists on the next refresh.
+            Cmd::CreateSyncGroup {
+                name,
+                transport,
+                device_id,
+            } => match self.create_sync_group(&name).await {
+                Ok(group) => match self
+                    .add_sync_group_member(group.id, &transport, &device_id)
+                    .await
+                {
+                    Ok(()) => done(update::LABEL_GROUP, Ok(())),
+                    Err(error) => vec![Msg::Done {
+                        label: update::LABEL_GROUP.to_string(),
+                        result: Err(format!(
+                            "Group {name} was created, but the output did not join: {}",
+                            error_copy::copy(&error)
+                        )),
+                    }],
+                },
+                Err(error) => done(update::LABEL_GROUP, Err(error)),
+            },
+            // A move leaves the old group before joining the new one, so
+            // one output is never in two groups.
+            Cmd::JoinSyncGroup {
+                group_id,
+                from,
+                transport,
+                device_id,
+            } => {
+                if let Some(from) = from {
+                    if let Err(error) = self
+                        .leave_sync_group_member(from, &transport, &device_id)
+                        .await
+                    {
+                        return done(update::LABEL_GROUP, Err(error));
+                    }
+                }
+                match self
+                    .add_sync_group_member(group_id, &transport, &device_id)
+                    .await
+                {
+                    Ok(()) => done(update::LABEL_GROUP, Ok(())),
+                    Err(error) => {
+                        let copy = error_copy::copy(&error);
+                        vec![Msg::Done {
+                            label: update::LABEL_GROUP.to_string(),
+                            result: Err(if from.is_some() {
+                                format!("Left the old group, but did not join the new one: {copy}")
+                            } else {
+                                copy
+                            }),
+                        }]
+                    }
+                }
+            }
+            Cmd::LeaveSyncGroup {
+                group_id,
+                transport,
+                device_id,
+            } => done(
+                update::LABEL_GROUP,
+                self.leave_sync_group_member(group_id, &transport, &device_id)
+                    .await,
+            ),
+            Cmd::StartSyncGroup(group_id) => {
+                done(update::LABEL_GROUP, self.start_sync_group(group_id).await)
+            }
+            Cmd::StopSyncGroup(group_id) => {
+                done(update::LABEL_GROUP, self.stop_sync_group(group_id).await)
+            }
+            Cmd::DissolveSyncGroup { group_id } => done(
+                update::LABEL_DISSOLVE_GROUP,
+                self.dissolve_sync_group(group_id).await,
             ),
             Cmd::RepairFirewall => {
                 let result = self.repair_firewall().await;
@@ -514,9 +597,9 @@ impl Client {
         .await
     }
 
-    /// Every output's latency trim and sync state.
-    pub async fn sync_status(&self) -> Result<Vec<OutputSyncStatus>, ClientError> {
-        self.get::<SyncResponse>("/api/sync").await.map(|r| r.outputs)
+    /// Every output's latency trim and sync state, plus the sync groups.
+    pub async fn sync(&self) -> Result<SyncResponse, ClientError> {
+        self.get("/api/sync").await
     }
 
     /// One output's manual latency trim in milliseconds.
@@ -534,6 +617,85 @@ impl Client {
         )
         .await
         .map(|_| ())
+    }
+
+    /// Create an empty named sync group; the reply carries its id.
+    pub async fn create_sync_group(&self, name: &str) -> Result<SyncGroupView, ClientError> {
+        self.send_json(
+            Method::POST,
+            "/api/sync/groups",
+            json!({"name": name}),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Put one output into a sync group. Membership is configuration: it
+    /// never disturbs playback and joins at the group's next start.
+    pub async fn add_sync_group_member(
+        &self,
+        group_id: u64,
+        transport: &str,
+        device_id: &str,
+    ) -> Result<(), ClientError> {
+        self.send_json::<()>(
+            Method::POST,
+            &format!("/api/sync/groups/{group_id}/members"),
+            json!({"transport": transport, "device_id": device_id}),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Take one output out of a sync group. It stops cleanly if it was
+    /// playing with the group; the other members keep playing.
+    pub async fn leave_sync_group_member(
+        &self,
+        group_id: u64,
+        transport: &str,
+        device_id: &str,
+    ) -> Result<(), ClientError> {
+        self.send_json::<()>(
+            Method::POST,
+            &format!("/api/sync/groups/{group_id}/leave"),
+            json!({"transport": transport, "device_id": device_id}),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Start every member at one shared presentation epoch. Slow: the
+    /// reply waits for that epoch.
+    pub async fn start_sync_group(&self, group_id: u64) -> Result<(), ClientError> {
+        self.send_json::<()>(
+            Method::POST,
+            &format!("/api/sync/groups/{group_id}/start"),
+            json!({}),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Stop every member cleanly; the group stays configured.
+    pub async fn stop_sync_group(&self, group_id: u64) -> Result<(), ClientError> {
+        self.send_json::<()>(
+            Method::POST,
+            &format!("/api/sync/groups/{group_id}/stop"),
+            json!({}),
+            SLOW_TIMEOUT,
+        )
+        .await
+    }
+
+    /// Stop the members and forget the group.
+    pub async fn dissolve_sync_group(&self, group_id: u64) -> Result<(), ClientError> {
+        self.request(
+            Method::DELETE,
+            &format!("/api/sync/groups/{group_id}"),
+            None::<()>,
+            SLOW_TIMEOUT,
+        )
+        .await
     }
 
     pub async fn pin(&self) -> Result<String, ClientError> {
