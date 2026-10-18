@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Build log — on-air</title>
+    <meta
+      name="description"
+      content="The dated build log of on-air: every commit on the main branch since 2026-08-26, grouped by milestone, plus the work currently in review."
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="theme.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="index.html">on-air <span class="brand-tag">build log</span></a>
+        <nav class="site-nav" aria-label="Sections of this page">
+          <ul>
+            <li><a href="index.html">Project site</a></li>
+            <li><a href="#milestone-quality-overhaul">Quality overhaul</a></li>
+            <li><a href="#milestone-omarchy-tui">Omarchy TUI</a></li>
+            <li><a href="#milestone-tui-parity">TUI/GUI parity</a></li>
+            <li><a href="#milestone-patchbay">Patchbay</a></li>
+            <li><a href="#milestone-stereo">Stereo</a></li>
+            <li><a href="#in-review">In review</a></li>
+          </ul>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button">Switch to dark theme</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="log-title">
+        <h1 id="log-title">Build log</h1>
+        <p class="tagline">
+          The things we have done, in the order we did them. Snapshot taken 2026-10-18 from
+          <code>git log --oneline --date=short --pretty='%ad %s'</code> on
+          <code>main</code>.
+        </p>
+      </section>
+
+      <section aria-labelledby="how-derived-title">
+        <div class="wrap">
+          <h2 id="how-derived-title">How this log is derived</h2>
+          <div class="section-intro">
+            <p>
+              Every entry below is a commit subject and date exactly as they appear in the git
+              history of the <code>main</code> branch — the output of
+              <code>git log --oneline --date=short --pretty='%ad %s'</code> as of 2026-10-18. None
+              of the entries are rewritten, summarised or invented; the only editorial text is the
+              group headings and the short context paragraph under each one.
+            </p>
+            <p>
+              Groups follow the milestones named in the design records under
+              <a href="https://github.com/tsonubin/on-air/tree/main/docs/design">docs/design</a>:
+              the quality overhaul, the Omarchy-first TUI, TUI/GUI parity, the Quickshell patchbay
+              and the stereo pipeline. The two earlier groups cover the foundation and the
+              client work that predate those records, and one group covers the contributor
+              reorganisation between them. Milestone one-liners come from the merge commit titles
+              and <a href="https://github.com/tsonubin/on-air/blob/main/CHANGELOG.md">CHANGELOG.md</a>.
+            </p>
+            <p>
+              Work that is still an open pull request is listed at the end under
+              <a href="#in-review">In review</a>. None of it has landed on <code>main</code>. This
+              page is a static snapshot dated 2026-10-18 and is meant to be extended as the project
+              moves.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="wrap log-group" id="era-foundation" aria-labelledby="era-foundation-title">
+        <h2 id="era-foundation-title">Design and the Linux audio path</h2>
+        <p class="when">2026-08-26 → 2026-08-27 · 41 commits</p>
+        <div class="context">
+          <p>
+            From the first design spec to the v0.1.0 release: the monorepo scaffold, the core's
+            capture pipeline, the five-band EQ, the resampler, the Sonos, AirPlay and Bluetooth
+            senders, the HTTP/WebSocket control plane, the desktop and phone scaffolds, INSTALL.md
+            and the first distro packaging. Design records:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-08-26-on-air-design.md">on-air design (2026-08-26)</a>,
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-08-27-m1-linux-audio-path.md">M1 Linux audio path (2026-08-27)</a>.
+            This ends with the <strong>v0.1.0</strong> release — still the latest published release
+            today.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-08-26">2026-08-26</time> Add design spec for on-air multi-protocol audio casting app</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> Revise on-air design spec per review feedback</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> Add M0 scaffold implementation plan</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> Ignore .worktrees/ directory used for isolated task worktrees</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> feat(core): scaffold monorepo root and add status endpoint</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> fix(core): restore worktree gitignore entry, wire core into pnpm/turbo</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> feat(core): serve the status API over a real HTTP listener</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> feat(api-types): add shared StatusResponse type</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> feat(desktop): scaffold Tauri app wired to core status API</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> feat(mobile): scaffold RN remote shell wired to core status API</li>
+          <li><time datetime="2026-08-26">2026-08-26</time> Fix 4 Important findings from M0 whole-branch review</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> docs: add M1 (Linux audio path) design spec</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> docs: add M1 (Linux audio path) implementation plan</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add 5-band graphic EQ (biquad peaking filters)</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix(core): widen EQ passthrough test tolerance with real margin + explanation</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add mono resampler wrapper around rubato</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix(core): relax resampler identity test for rubato warm-up buffering</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> chore(core): commit Cargo.lock for rubato/audioadapter-buffers</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add CoreState, AudioSender trait, NullSender, sender exclusivity</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add ring buffer + async EQ/resample processing pipeline</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add /stream/audio.wav chunked L16 PCM endpoint</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): wire cpal capture into pipeline, add /api/inputs endpoints</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix(core): start cpal capture on the blocking pool</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add Sonos SSDP discovery with TTL expiry, /api/outputs</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix(core): fetch Sonos names before locking the output registry</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add hand-rolled Sonos UPnP/SOAP control client</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add SonosSender and /api/outputs/active[,/volume] endpoints</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add /api/eq and /api/sample-rate endpoints</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat(core): add /api/ws with output-state, level-meter, device join/leave events</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix(core): keep /api/ws alive across broadcast lag</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix(core): start Sonos discovery from serve, keep PCM stream alive on lag</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> feat: land M2–M5 core APIs, desktop/mobile remotes, and mocked E2E suites</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix: pairing auth, Bluetooth PCM sinks, production catalogs, tray/autostart</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> fix: attach AVRoutePickerView to a window; require tokens off loopback</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> ci: run tests on PRs and publish desktop installers as GitHub Releases</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> docs: add INSTALL.md and distro packaging</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> ci: ship dual-arch installers (dmg, msi, nsis, deb, rpm, AppImage)</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> ci: install xdg-utils on Linux ARM so Tauri can bundle</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> chore: pin installer checksums and upload extras with gh</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> ci: stop PATCHing GitHub Releases from matrix jobs</li>
+          <li><time datetime="2026-08-27">2026-08-27</time> chore: retarget CI and Homebrew head at main</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="era-clients" aria-labelledby="era-clients-title">
+        <h2 id="era-clients-title">Desktop mixer, phone remote and streaming hardening</h2>
+        <p class="when">2026-08-28 → 2026-09-30 · 21 commits</p>
+        <div class="context">
+          <p>
+            The LAN mixer with stereo pairs and an AirPlay catalog, the desktop mixer chrome, the
+            Expo phone remote with the shared control client and pyatv AirPlay, streaming fixes
+            (live Sonos radio, live AirPlay volume, bursty reads), CD autoplay and transport, and
+            native desktop controls that own the Bluetooth playback lifecycle (PR&nbsp;#2). Notes
+            from the period:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/history/2026-09-mobile-redesign-qa.md">mobile redesign QA</a>,
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/history/2026-09-16-platform-device-support.md">speaker setup and platform support</a>.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-08-28">2026-08-28</time> fix(core): make live Sonos HTTP radio actually play</li>
+          <li><time datetime="2026-08-29">2026-08-29</time> feat: exclusive LAN mixer with stereo pairs, rate bridge, and AirPlay catalog</li>
+          <li><time datetime="2026-08-29">2026-08-29</time> feat(desktop): studio ONAIR lightbox and Tailwind mixer chrome</li>
+          <li><time datetime="2026-08-31">2026-08-31</time> feat: Expo LAN remote, shared control-client, and pyatv AirPlay</li>
+          <li><time datetime="2026-08-31">2026-08-31</time> test(mobile): companion UT/E2E and Expo SDK 57 deps</li>
+          <li><time datetime="2026-08-31">2026-08-31</time> Harden streaming and adopt native Expo UI</li>
+          <li><time datetime="2026-08-31">2026-08-31</time> Fix live AirPlay volume control</li>
+          <li><time datetime="2026-08-31">2026-08-31</time> Buffer Sonos streams through bursty reads</li>
+          <li><time datetime="2026-09-01">2026-09-01</time> Rebuild native mobile controls and harden streaming</li>
+          <li><time datetime="2026-09-02">2026-09-02</time> (feat): redesign mobile audio controller interface</li>
+          <li><time datetime="2026-09-15">2026-09-15</time> feat: autoplay audio CDs with a compact transport</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> feat: wire iOS 26 layered AppIcon and TestFlight profile</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> fix: keep Icon Composer JSON out of Biome</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> fix: pin json 2.x so CocoaPods can install on Xcode 26 CI</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> feat(app): improve native controls and own Bluetooth playback lifecycle</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> fix(core): scope optical drive helpers to supported platforms</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> merge(mobile): integrate TestFlight setup with current Live Dial branding</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> fix(core): restore Linux and Windows build compatibility</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> fix(core): use typed PCM chunks for current Clippy</li>
+          <li><time datetime="2026-09-16">2026-09-16</time> feat(app): improve native controls, shared icons, and Bluetooth playback (#2)</li>
+          <li><time datetime="2026-09-30">2026-09-30</time> fix(app): open a loaded window from the tray and toggle login start</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-quality-overhaul" aria-labelledby="milestone-quality-overhaul-title">
+        <h2 id="milestone-quality-overhaul-title">Quality overhaul</h2>
+        <p class="when">2026-10-08 · PR #3</p>
+        <div class="context">
+          <p>
+            "Core correctness, shared client, desktop and mobile restructure, CI gating" — the
+            squash of a branch that followed four parallel audits. Design record:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-10-07-quality-overhaul.md">quality overhaul (2026-10-07)</a>.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-08">2026-10-08</time> Quality overhaul: core correctness, shared client, desktop and mobile restructure, CI gating (#3)</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-omarchy-tui" aria-labelledby="milestone-omarchy-tui-title">
+        <h2 id="milestone-omarchy-tui-title">Omarchy-first TUI</h2>
+        <p class="when">2026-10-13 · PRs #4 and #5</p>
+        <div class="context">
+          <p>
+            PR&nbsp;#4 lands the terminal UI over a systemd user service: the core owns the sleep
+            inhibitor and the service transition, the <code>on-air</code> ratatui client controls
+            it, and the Omarchy unit, launcher entry and snippets install it. PR&nbsp;#5 prepares
+            the <strong>v0.2.0</strong> release — MIT licence and AUR packages
+            (<code>yay -S on-air-bin</code>). The 0.2.0 tag is <em>not</em> published yet:
+            v0.1.0 remains the latest published release. Design record:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-10-13-omarchy-first-tui.md">Omarchy-first TUI (2026-10-13)</a>.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-13">2026-10-13</time> Omarchy-first Linux: terminal UI over a systemd user service (#4)</li>
+          <li><time datetime="2026-10-13">2026-10-13</time> Release v0.2.0: MIT license and AUR packages (yay -S on-air-bin) (#5)</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-tui-parity" aria-labelledby="milestone-tui-parity-title">
+        <h2 id="milestone-tui-parity-title">TUI/GUI parity</h2>
+        <p class="when">2026-10-14 (plus one 2026-10-17 follow-up) · 31 commits</p>
+        <div class="context">
+          <p>
+            The TUI redesign for GUI parity: console layout, lamp states, friendly input labels, a
+            vertical mixer with faders and a level meter, mouse support with a hit map, a Bluetooth
+            device list, a CD transport strip, a status overlay, core-down handling, and the
+            <code>monitor</code> and <code>service</code> subcommands. The Omarchy installer learns
+            incremental builds in the same batch. Design records:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-10-14-tui-gui-parity.md">TUI redesign (2026-10-14)</a>
+            and its implementation plan.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(omarchy): build off tmpfs and keep the TUI client off HTTP_PROXY</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> test(core): keep local HTTP test clients off HTTP_PROXY</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> docs: install on Omarchy with the script; mark AUR as TODO</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): `on-air monitor` for audio on/off, `on-air service` for systemd</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> build(omarchy): incremental installer builds, --clean for a full rebuild</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> docs(spec): TUI redesign for GUI parity, console layout and mouse</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> docs(plan): TUI GUI-parity implementation plan</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): friendly input labels ported from the GUI</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): Bluetooth device list and per-row destination state</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> refactor(tui): split view into modules and add the hit map</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): console layout, lamp states and destination tags</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): vertical mixer, level meter and frame tick</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): show the focused EQ band's dB in full at the range extremes</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): latest-value mixer writes, fine steps, rate reload</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): one-at-a-time activation with Bluetooth pair and connect</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): CD seek, go to track and eject with a clickable strip</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): status overlay, monitor-off panel and core-down handling</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): keep refresh working with the core down, wrap the monitor-off panel, dim the meter</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> test(tui): assert the whole monitor-off copy at 80x24 and a dimmed meter cell</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): debounced and background refresh, device placeholders</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> feat(tui): mouse support, frame tick and throttled redraw</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): drags stay on the fader they started on; resolve clicks against a fresh frame</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> docs: TUI keys, mouse and status overlay</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): the PIN modal ignores Enter while pairing and says so</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): route Done replies to their own chain; only pairing errors go into the PIN modal</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): probe the core when the event socket drops; header says unreachable while it is down</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): taller faders from 30 rows; the first click on a fader only focuses it</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): the status overlay shows the core's real port</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): the destination cursor stays on its device when rows come and go</li>
+          <li><time datetime="2026-10-14">2026-10-14</time> fix(tui): final-review minors; document fader focus, port and Ctrl-C</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(tui): gate Linux-only service helpers so macOS and Windows clippy pass</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-reorg" aria-labelledby="milestone-reorg-title">
+        <h2 id="milestone-reorg-title">Contributor reorganisation and shared clients</h2>
+        <p class="when">2026-10-15 · 9 commits</p>
+        <div class="context">
+          <p>
+            The repository reorganised for contributors (design records under
+            <code>docs/design</code>, a domain glossary, CONTRIBUTING, SECURITY and a CHANGELOG),
+            one <code>on-air-api</code> crate for the Rust wire types, one snapshot engine and
+            write queue shared by the desktop and the phone, one packaging recipe per package, and
+            the dependency upgrades (axum 0.8, Vite 8, Jest 30, TypeScript 7).
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-15">2026-10-15</time> feat(packaging): add desktop installers and preserve sudo authentication</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> chore(packaging): one recipe per package, one desktop entry, one unit everywhere</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> refactor(ts): share input labels, error copy and test doubles between the apps</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> refactor(rust): shared test harness, test modules out of source, fewer dead paths</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> refactor(rust): one on-air-api crate for the wire types</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> docs: reorganise for contributors; README, INSTALL, CONTRIBUTING, SECURITY, CHANGELOG</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> test(control-client): tolerate scheduler latency in the backoff timing tests</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> chore(deps): axum 0.8, reqwest 0.13, mdns-sd 0.21, Vite 8, Jest 30, TypeScript 7</li>
+          <li><time datetime="2026-10-15">2026-10-15</time> refactor(ts): one snapshot engine and write queue for the desktop and the phone</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-patchbay" aria-labelledby="milestone-patchbay-title">
+        <h2 id="milestone-patchbay-title">Quickshell patchbay</h2>
+        <p class="when">2026-10-17 · 6 commits</p>
+        <div class="context">
+          <p>
+            The native Omarchy 4 patchbay: a compact QML popup with input mixes, output groups and
+            hanging cables simulated with Verlet integration, plus the Omarchy install fixes around
+            it and a stable, name-sorted network sink list. Design record:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-10-17-quickshell-patchbay.md">compact Quickshell patchbay (2026-10-17)</a>.
+            The last entry in this group landed inside PR&nbsp;#9.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-17">2026-10-17</time> feat(omarchy): add compact QML patchbay with hanging cables</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(ci): skip setup-node's pnpm cache in the Quickshell job</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(omarchy): use a valid default bar section and move the widget beside the clock</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(omarchy): rescan plugins before enabling the freshly installed widget</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(omarchy): mount the patchbay as KeyboardPanel's default child</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(patchbay): list network sinks in a stable, name-sorted order</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-devices" aria-labelledby="milestone-devices-title">
+        <h2 id="milestone-devices-title">Curated devices, the audio check and the mobile pairing fix</h2>
+        <p class="when">2026-10-17 · PRs #8 and #9</p>
+        <div class="context">
+          <p>
+            PR&nbsp;#9 curates the input list and adds "This computer" outputs, and adds the audio
+            check: an on-device benchmark that recommends a capture buffer, capture-buffer tuning
+            that survives restarts, and a UFW firewall warning with repair. PR&nbsp;#8 keeps the
+            phone's pairing fields above the keyboard.
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-17">2026-10-17</time> feat(core): curated input list and "This computer" outputs</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(mobile): keep the pairing fields above the keyboard (#8)</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> feat: audio check, capture buffer, and UFW firewall warning with repair</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> Merge pull request #9 from tsonubin/feat/curated-audio-devices</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="milestone-stereo" aria-labelledby="milestone-stereo-title">
+        <h2 id="milestone-stereo-title">Stereo pipeline</h2>
+        <p class="when">2026-10-17 → 2026-10-18 · PR #10</p>
+        <div class="context">
+          <p>
+            Stereo end to end: a channel-aware resampler and EQ (each channel keeps its own filter
+            state), frame-safe stereo helpers for capture, CD and bridge, and stereo to every
+            speaker stream. Mono destinations get an <code>(L+R)/2</code> downmix; destinations
+            with more than two channels get their extra channels silent. Design record:
+            <a href="https://github.com/tsonubin/on-air/blob/main/docs/design/2026-10-17-stereo-pipeline.md">stereo pipeline (2026-10-17)</a>,
+            which supersedes "network PCM remains mono".
+          </p>
+        </div>
+        <ol class="log">
+          <li><time datetime="2026-10-17">2026-10-17</time> refactor(core): channel-aware resampler and EQ</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> feat(core): frame-safe stereo helpers for capture, CD and bridge</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> feat(core): stream stereo to every speaker</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(core): keep Bluetooth output frames whole</li>
+          <li><time datetime="2026-10-17">2026-10-17</time> fix(core): use as_chunks for fixed-size frames (clippy 1.99)</li>
+          <li><time datetime="2026-10-18">2026-10-18</time> Merge pull request #10 from tsonubin/feat/stereo-pipeline</li>
+        </ol>
+      </section>
+
+      <section class="wrap log-group" id="in-review" aria-labelledby="in-review-title">
+        <h2 id="in-review-title">In review</h2>
+        <p class="when">Opened 2026-10-18 · not merged</p>
+        <div class="context">
+          <p>
+            Pull requests that are open right now. Nothing here has landed on
+            <code>main</code>; each line is the PR's own title and commit subject.
+          </p>
+        </div>
+        <ol class="log">
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              feat(core): dither L16 quantization and round instead of truncating —
+              <a href="https://github.com/tsonubin/on-air/pull/11">PR #11</a>,
+              <span class="tag tag-review">in review</span>. First half of the cleaner-audio
+              roadmap item: the L16 encode rounds to nearest with TPDF dither instead of truncating
+              toward zero.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              One-line Omarchy installer; AUR recipes follow the submission guidelines (revives #6) —
+              <a href="https://github.com/tsonubin/on-air/pull/12">PR #12</a>,
+              <span class="tag tag-review">in review</span>. Turns
+              <code>packaging/omarchy/install.sh</code> into a one-line installer of the release's
+              prebuilt binaries with pinned checksums, and brings the AUR recipes in line with the
+              submission guidelines.
+            </span>
+          </li>
+          <li>
+            <time datetime="2026-10-18">2026-10-18</time>
+            <span class="subject">
+              docs: roadmap action plan with dependencies —
+              <a href="https://github.com/tsonubin/on-air/pull/13">PR #13</a>,
+              <span class="tag tag-review">in review</span>. The action plan behind the roadmap
+              items on the site.
+            </span>
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>
+          Snapshot dated 2026-10-18. Extended by hand from the git history and the changelog as
+          work lands; corrections belong in
+          <a href="https://github.com/tsonubin/on-air/blob/main/CHANGELOG.md">CHANGELOG.md</a>
+          and here together.
+        </p>
+        <ul>
+          <li><a href="index.html">Project site</a></li>
+          <li><a href="https://github.com/tsonubin/on-air">Repository</a></li>
+          <li><a href="https://github.com/tsonubin/on-air/blob/main/CHANGELOG.md">CHANGELOG.md</a></li>
+          <li><a href="https://github.com/tsonubin/on-air/tree/main/docs/design">Design records</a></li>
+        </ul>
+      </div>
+    </footer>
+  </body>
+</html>

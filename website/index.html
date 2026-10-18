@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>on-air — your computer's audio, on your speakers, on your LAN</title>
+    <meta
+      name="description"
+      content="on-air is a local audio router for Linux, macOS and Windows. It sends system audio, microphones, USB interfaces and audio CDs to AirPlay, Sonos, Bluetooth and this computer's own speakers. No account, no cloud."
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="theme.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="wrap">
+        <a class="brand" href="index.html">on-air <span class="brand-tag">project site</span></a>
+        <nav class="site-nav" aria-label="Sections of this page">
+          <ul>
+            <li><a href="#about">What it is</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#how">How it works</a></li>
+            <li><a href="#install">Install</a></li>
+            <li><a href="#build-log">Build log</a></li>
+            <li><a href="#roadmap">Roadmap</a></li>
+          </ul>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button">Switch to dark theme</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero wrap" aria-labelledby="hero-title">
+        <h1 id="hero-title">on-air</h1>
+        <p class="tagline">
+          Stream your computer's audio to AirPlay, Sonos, Bluetooth and this computer's own
+          speakers. Everything stays on your LAN: there is no account and no cloud.
+        </p>
+        <ul class="facts">
+          <li>Local audio router for modern Linux, also macOS and Windows</li>
+          <li>One Rust core, four clients</li>
+          <li>MIT licensed</li>
+          <li>Packaged for Arch, APT, RPM, Homebrew, winget, Flatpak and Nix</li>
+        </ul>
+      </section>
+
+      <section id="about" aria-labelledby="about-title">
+        <div class="wrap">
+          <h2 id="about-title">What it is and why</h2>
+          <div class="section-intro">
+            <p class="lede">
+              on-air takes what your computer is playing — system audio, a microphone, a USB audio
+              interface, or an audio CD — and sends it to the speakers you already own: AirPlay,
+              Sonos, Bluetooth, or this computer's own speakers and headphone jack.
+            </p>
+            <p>
+              Good speakers already sit on the network or on the desk, yet playing a video call, a
+              record or a CD through them usually means accounts, cloud relays or heavyweight
+              mirroring tools. on-air is the opposite: one Rust process on your machine, a LAN-only
+              control plane, and a direct path from your audio to your speakers. Nothing is
+              uploaded, nothing phones home, and there is no login to create.
+            </p>
+            <p>
+              Everything that has a screen is a client of that one core — the terminal UI on Linux,
+              the tray app on macOS and Windows, the phone remote, and the Omarchy 4 patchbay panel.
+              They own no playback. If every UI is closed, audio keeps streaming; if the core is
+              stopped, nothing plays. That single owner is what keeps routing predictable.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <h2 id="features-title">What ships today</h2>
+          <div class="section-intro">
+            <p>
+              Everything on this page is in the repository today. Where something is still in
+              flight, it is labelled — the honest list of what is not there yet is in the
+              <a href="#roadmap">roadmap</a>.
+            </p>
+          </div>
+          <ul class="cards">
+            <li>
+              <h3>One core, many clients</h3>
+              <p>
+                The core is one Rust process (<code>packages/core</code>, binary
+                <code>on-air-core</code>) exposing an HTTP + WebSocket control plane on port
+                <code>47990</code>. The terminal UI, tray app and phone remote are all clients of it
+                and own no playback.
+              </p>
+            </li>
+            <li>
+              <h3>Every source</h3>
+              <p>
+                System audio (what the computer is playing), microphones, USB audio interfaces, or
+                an audio CD with a transport that can seek and eject.
+              </p>
+            </li>
+            <li>
+              <h3>Every speaker</h3>
+              <p>
+                AirPlay, Sonos, Bluetooth and this computer's own speakers. Streaming to Sonos and
+                AirPlay points the speaker at a WAV stream the core serves under a per-activation
+                nonce; Bluetooth writes to the OS audio sink. The terminal, tray and phone clients
+                play to one output at a time; the Omarchy patchbay routes to groups of outputs.
+              </p>
+            </li>
+            <li>
+              <h3>Stereo end to end</h3>
+              <p>
+                Stereo is carried as interleaved L16 stereo through capture, the EQ (per-channel
+                filter state), the resampler and the radio WAV. Mono destinations get an
+                <code>(L+R)/2</code> downmix; destinations with more than two channels get their
+                extra channels silent.
+              </p>
+            </li>
+            <li>
+              <h3>Omarchy 4 patchbay panel</h3>
+              <p>
+                A native Qt Quick patchbay panel with input mixes, output groups and hanging physics
+                cables. Cables are simulated with Verlet integration and gravity; the panel owns no
+                audio and can close or reload during playback.
+              </p>
+            </li>
+            <li>
+              <h3>Phone remote</h3>
+              <p>
+                The phone remote pairs over the LAN with a PIN and a bearer token; pairing survives
+                restarts on both ends. It finds the host on the subnet or takes an address you type,
+                and shows the same mixer as the desktop.
+              </p>
+            </li>
+            <li>
+              <h3>Mixer and tuning</h3>
+              <p>
+                Five-band EQ, per-direction sample-rate selection, a level meter, CD transport,
+                capture-buffer tuning, and an on-device audio benchmark that recommends a capture
+                buffer.
+              </p>
+            </li>
+            <li>
+              <h3>Packaged everywhere</h3>
+              <p>
+                Arch and AUR, APT, RPM, a Homebrew tap, winget, Flatpak, Nix (with a NixOS module),
+                and an Omarchy installer that builds and enables the service.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="how" aria-labelledby="how-title">
+        <div class="wrap">
+          <h2 id="how-title">How it works</h2>
+          <div class="section-intro">
+            <p>
+              The core owns the whole audio path. An exclusive session captures audio, runs it
+              through the EQ and a resampler, publishes interleaved stereo L16 PCM on an in-process
+              bus, and owns exactly one sender at a time. Sonos and AirPlay senders point the
+              speaker at a WAV stream the core serves under a fresh nonce per activation, so a URL
+              from an earlier activation goes dead; the Bluetooth sender writes to the OS audio
+              sink.
+            </p>
+            <p>
+              The only way in is the control plane: HTTP and WebSocket on port
+              <code>47990</code>. Remote clients pair with a PIN and then use a bearer token. The
+              clients read state, subscribe to events, and ask for changes — they never touch audio
+              devices themselves.
+            </p>
+          </div>
+
+          <figure class="diagram">
+            <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable (WAI-ARIA) -->
+            <section class="diagram-scroll" tabindex="0" aria-label="Audio flow diagram, scrollable">
+              <svg
+                viewBox="0 0 960 520"
+                role="img"
+                aria-labelledby="flow-title flow-desc"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <title id="flow-title">Audio flow: sources to the on-air core to speakers</title>
+                <desc id="flow-desc">
+                  Three sources — system audio, microphones and USB audio interfaces, and audio CDs
+                  — feed the on-air-core process, which captures, equalises and resamples audio into
+                  an interleaved stereo L16 bus, serves a WAV radio stream under a per-activation
+                  nonce, and exposes an HTTP and WebSocket control plane on port 47990. Four
+                  destinations — AirPlay, Sonos, Bluetooth and this computer's own speakers — pull
+                  or receive that audio. Clients — the terminal UI, the tray app, the phone remote
+                  and the Omarchy patchbay panel — connect to the control plane only and own no
+                  playback.
+                </desc>
+                <defs>
+                  <marker
+                    id="arrow"
+                    viewBox="0 0 10 10"
+                    refX="9"
+                    refY="5"
+                    markerWidth="7"
+                    markerHeight="7"
+                    orient="auto-start-reverse"
+                  >
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+                  </marker>
+                </defs>
+
+                <!-- Sources -->
+                <text class="diagram-note" x="115" y="34" text-anchor="middle">Sources</text>
+                <rect class="diagram-box" x="20" y="64" width="190" height="48" rx="10"></rect>
+                <text class="diagram-text" x="115" y="93" text-anchor="middle">System audio</text>
+                <rect class="diagram-box" x="20" y="150" width="190" height="68" rx="10"></rect>
+                <text class="diagram-text" x="115" y="178" text-anchor="middle">Microphones &amp; USB</text>
+                <text class="diagram-text" x="115" y="200" text-anchor="middle">audio interfaces</text>
+                <rect class="diagram-box" x="20" y="256" width="190" height="48" rx="10"></rect>
+                <text class="diagram-text" x="115" y="285" text-anchor="middle">Audio CD</text>
+
+                <!-- Core -->
+                <rect class="diagram-box" x="330" y="40" width="300" height="280" rx="12"></rect>
+                <text class="diagram-text-strong" x="480" y="78" text-anchor="middle">on-air-core</text>
+                <text class="diagram-note" x="480" y="100" text-anchor="middle">one Rust process</text>
+                <line class="diagram-line" x1="352" y1="114" x2="608" y2="114" opacity="0.4"></line>
+                <text class="diagram-text" x="480" y="144" text-anchor="middle">capture → EQ → resampler</text>
+                <text class="diagram-text" x="480" y="168" text-anchor="middle">interleaved stereo L16 bus</text>
+                <text class="diagram-text" x="480" y="210" text-anchor="middle">HTTP + WebSocket control plane</text>
+                <text class="diagram-note" x="480" y="232" text-anchor="middle">port 47990</text>
+                <text class="diagram-text" x="480" y="272" text-anchor="middle">WAV radio stream</text>
+                <text class="diagram-note" x="480" y="294" text-anchor="middle">/stream/&lt;nonce&gt;/audio.wav</text>
+
+                <!-- Sources to core -->
+                <line class="diagram-line" x1="214" y1="88" x2="322" y2="88" marker-end="url(#arrow)"></line>
+                <line class="diagram-line" x1="214" y1="184" x2="322" y2="184" marker-end="url(#arrow)"></line>
+                <line class="diagram-line" x1="214" y1="280" x2="322" y2="280" marker-end="url(#arrow)"></line>
+
+                <!-- Core to destinations -->
+                <line class="diagram-line" x1="638" y1="72" x2="742" y2="72" marker-end="url(#arrow)"></line>
+                <line class="diagram-line" x1="638" y1="168" x2="742" y2="168" marker-end="url(#arrow)"></line>
+                <line class="diagram-line" x1="638" y1="264" x2="742" y2="264" marker-end="url(#arrow)"></line>
+                <line class="diagram-line" x1="638" y1="367" x2="742" y2="367" marker-end="url(#arrow)"></line>
+
+                <!-- Destinations -->
+                <text class="diagram-note" x="845" y="26" text-anchor="middle">Speakers</text>
+                <rect class="diagram-box" x="750" y="40" width="190" height="64" rx="10"></rect>
+                <text class="diagram-text" x="845" y="66" text-anchor="middle">AirPlay</text>
+                <text class="diagram-note" x="845" y="90" text-anchor="middle">pulls the WAV stream</text>
+                <rect class="diagram-box" x="750" y="136" width="190" height="64" rx="10"></rect>
+                <text class="diagram-text" x="845" y="162" text-anchor="middle">Sonos</text>
+                <text class="diagram-note" x="845" y="186" text-anchor="middle">pulls the WAV stream</text>
+                <rect class="diagram-box" x="750" y="232" width="190" height="64" rx="10"></rect>
+                <text class="diagram-text" x="845" y="258" text-anchor="middle">Bluetooth</text>
+                <text class="diagram-note" x="845" y="282" text-anchor="middle">writes to the OS audio sink</text>
+                <rect class="diagram-box" x="750" y="328" width="190" height="78" rx="10"></rect>
+                <text class="diagram-text" x="845" y="356" text-anchor="middle">This computer's</text>
+                <text class="diagram-text" x="845" y="378" text-anchor="middle">own speakers</text>
+                <text class="diagram-note" x="845" y="400" text-anchor="middle">local output on Linux</text>
+
+                <!-- Clients -->
+                <rect class="diagram-box" x="330" y="420" width="300" height="90" rx="12"></rect>
+                <text class="diagram-text-strong" x="480" y="452" text-anchor="middle">Clients — own no playback</text>
+                <text class="diagram-note" x="480" y="476" text-anchor="middle">Terminal UI · Tray app · Phone remote</text>
+                <text class="diagram-note" x="480" y="496" text-anchor="middle">Omarchy patchbay panel</text>
+                <line
+                  class="diagram-line diagram-dashed"
+                  x1="480"
+                  y1="412"
+                  x2="480"
+                  y2="330"
+                  marker-end="url(#arrow)"
+                ></line>
+                <text class="diagram-note" x="496" y="372">control only</text>
+              </svg>
+            </section>
+            <figcaption>
+              One core, one audio path. Clients talk to the control plane; speakers receive audio
+              from the core.
+            </figcaption>
+          </figure>
+
+          <ol class="flow">
+            <li>
+              <strong>Capture</strong> — system audio, a microphone or USB interface, or an audio CD
+              is captured as interleaved stereo frames.
+            </li>
+            <li>
+              <strong>DSP</strong> — a five-band EQ with per-channel filter state and a
+              channel-aware resampler shape the signal; left and right stay apart all the way
+              through.
+            </li>
+            <li>
+              <strong>Send</strong> — one sender at a time. Sonos and AirPlay pull
+              <code>/stream/&lt;nonce&gt;/audio.wav</code>, a WAV stream served only while that
+              activation is live; Bluetooth writes to the OS audio sink.
+            </li>
+            <li>
+              <strong>Control</strong> — clients pair with a PIN and then a bearer token and drive
+              the core over HTTP and WebSocket on port <code>47990</code>.
+            </li>
+            <li>
+              <strong>Patchbay (Linux)</strong> — the Omarchy panel adds a separate graph over
+              PipeWire/PulseAudio buses: input mixes and output groups fan out independently, with
+              their own timing. Synchronised playback across protocols is on the
+              <a href="#roadmap">roadmap</a>.
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="install" aria-labelledby="install-title">
+        <div class="wrap">
+          <h2 id="install-title">Install</h2>
+          <div class="callout">
+            <p>
+              <strong>Release status.</strong> Only <strong>v0.1.0</strong> is published today.
+              The commands below that build from a clone work now; the channels that download
+              release assets (the Homebrew cask, the APT <code>.deb</code>, the RPM URL, the winget
+              installer) refer to <code>0.2.0</code> assets and await the published v0.2.0 release.
+              This is exactly the note in <a href="https://github.com/tsonubin/on-air/blob/main/INSTALL.md">INSTALL.md</a>;
+              until that release exists, build from a clone or from source.
+            </p>
+          </div>
+
+          <div class="install-step">
+            <h3>Omarchy / Arch — recommended on Linux</h3>
+            <p>
+              From a clone, with Rust and <code>base-devel</code> installed. The installer builds
+              your working tree, installs it as a pacman package, enables the systemd user service
+              and prints the Omarchy snippets.
+            </p>
+            <pre><code>git clone https://github.com/tsonubin/on-air.git &amp;&amp; cd on-air
+packaging/omarchy/install.sh      # makepkg, sudo pacman -U, enable the service, print the snippets
+on-air                            # the terminal UI; `on-air --help` for the subcommands</code></pre>
+            <p class="install-note">
+              On Omarchy 4 an optional native patchbay panel can be enabled with
+              <code>sh packaging/omarchy/install-plugin.sh --enable</code>.
+            </p>
+          </div>
+
+          <div class="install-step">
+            <h3>Desktop app on Linux</h3>
+            <pre><code>packaging/install.sh            # Arch: a pacman package. Otherwise Flatpak, else ~/.local
+packaging/install.sh yay        # build and install a pacman package (on-air-desktop)
+packaging/install.sh flatpak    # per-user Flatpak, com.shay.on-air
+packaging/install.sh user       # ~/.local/bin and ~/.local/share, no package manager</code></pre>
+          </div>
+
+          <div class="install-step">
+            <h3>Nix</h3>
+            <pre><code>nix run github:tsonubin/on-air            # on-air-core
+nix build github:tsonubin/on-air          # ./result/bin/on-air-core
+nix develop github:tsonubin/on-air        # rustc, cargo, pnpm, Linux GUI deps</code></pre>
+            <p class="install-note">
+              A NixOS module is exported as <code>nixosModules.default</code>
+              (<code>services.on-air-core.enable = true;</code>, with <code>port</code> and
+              <code>mock</code> options).
+            </p>
+          </div>
+
+          <div class="install-step">
+            <h3>Build from source — any platform</h3>
+            <pre><code>pnpm install
+cargo run --locked --release -p on-air-core --bin on-air-core   # headless core
+cargo build --locked --release -p on-air-tui                    # target/release/on-air (Linux UI)
+pnpm --dir apps/desktop tauri build                             # desktop app bundles</code></pre>
+          </div>
+
+          <div class="install-step">
+            <h3>Release-asset channels — awaiting v0.2.0</h3>
+            <p>These commands are real today but expect assets from the next release.</p>
+            <p>macOS, Homebrew tap:</p>
+            <pre><code>brew tap tsonubin/on-air https://github.com/tsonubin/on-air.git
+brew install --cask on-air        # the tray app, from the release .dmg
+brew install on-air-core          # the headless core, built from source</code></pre>
+            <p>Windows, winget (from a clone, once the NSIS installer is on the release):</p>
+            <pre><code>winget install --manifest packaging/winget</code></pre>
+            <p>Debian / Ubuntu, APT (downloads the desktop <code>.deb</code> from the release):</p>
+            <pre><code>packaging/apt/install.sh          # downloads and apt-installs for this architecture</code></pre>
+            <p>Fedora / RHEL, RPM (from the release):</p>
+            <pre><code>VERSION=0.2.0
+sudo dnf install "https://github.com/tsonubin/on-air/releases/download/v${VERSION}/on-air-desktop-${VERSION}-1.x86_64.rpm"</code></pre>
+            <p class="install-note">
+              The full asset list, checksums and every other channel (Flatpak, winget manifests,
+              AUR recipes) are documented in
+              <a href="https://github.com/tsonubin/on-air/blob/main/INSTALL.md">INSTALL.md</a>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="build-log" aria-labelledby="build-log-title">
+        <div class="wrap">
+          <h2 id="build-log-title">Build log</h2>
+          <div class="section-intro">
+            <p>
+              The full, dated log of what has been built is on
+              <a href="build-log.html">the build log page</a>: every commit on
+              <code>main</code> since 2026-08-26, grouped by the milestones named in the design
+              records, plus what is in review right now. Entries are verbatim commit subjects and
+              dates from the git history — nothing is invented or rounded.
+            </p>
+          </div>
+          <ul class="milestones">
+            <li>
+              <h3>Quality overhaul</h3>
+              <p class="when">2026-10-08 · <a href="build-log.html#milestone-quality-overhaul">log</a></p>
+              <p>
+                Core correctness, shared client, desktop and mobile restructure, CI gating
+                (PR&nbsp;#3).
+              </p>
+            </li>
+            <li>
+              <h3>Omarchy-first TUI</h3>
+              <p class="when">2026-10-13 · <a href="build-log.html#milestone-omarchy-tui">log</a></p>
+              <p>
+                The terminal UI over a systemd user service (PR&nbsp;#4); MIT licence and AUR
+                packages prepared for v0.2.0 (PR&nbsp;#5).
+              </p>
+            </li>
+            <li>
+              <h3>TUI/GUI parity</h3>
+              <p class="when">2026-10-14 · <a href="build-log.html#milestone-tui-parity">log</a></p>
+              <p>
+                Console layout, mouse support, faders, meters, CD transport strip, Bluetooth list
+                and status overlay.
+              </p>
+            </li>
+            <li>
+              <h3>Quickshell patchbay</h3>
+              <p class="when">2026-10-17 · <a href="build-log.html#milestone-patchbay">log</a></p>
+              <p>The native Omarchy 4 panel with input mixes, output groups and hanging cables.</p>
+            </li>
+            <li>
+              <h3>Stereo pipeline</h3>
+              <p class="when">2026-10-17 → 2026-10-18 · <a href="build-log.html#milestone-stereo">log</a></p>
+              <p>
+                Interleaved L16 stereo through capture, EQ, resampler and every speaker stream
+                (PR&nbsp;#10).
+              </p>
+            </li>
+            <li>
+              <h3>In review <span class="tag tag-review">open PRs</span></h3>
+              <p class="when">2026-10-18 · <a href="build-log.html#in-review">log</a></p>
+              <p>
+                L16 dither (PR&nbsp;#11) and a one-line Omarchy installer (PR&nbsp;#12) are open
+                pull requests and have not landed; a roadmap action plan (PR&nbsp;#13) is open as
+                well.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="roadmap" aria-labelledby="roadmap-title">
+        <div class="wrap">
+          <h2 id="roadmap-title">Roadmap</h2>
+          <div class="section-intro">
+            <p>
+              Direction, not promises — each item below is work that is happening now or is planned.
+              None of it is shipped; nothing on this list should be read as a feature of the current
+              release.
+            </p>
+          </div>
+          <ul class="roadmap">
+            <li>
+              <span class="tag tag-progress">In progress</span>
+              <div>
+                <h3>True stereo across every client</h3>
+                <p>
+                  The core streams true stereo to speakers today (PR&nbsp;#10); the remaining work
+                  is carrying left and right apart through every client surface.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span class="tag tag-planned">Planned</span>
+              <div>
+                <h3>Mixed-protocol synchronised playback</h3>
+                <p>
+                  Playing to AirPlay, Sonos, Bluetooth and local outputs at the same time, aligned
+                  at fine granularity. Today's patchbay groups run on independent timing and do not
+                  promise synchronised playback.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span class="tag tag-progress">In progress</span>
+              <div>
+                <h3>Cleaner audio</h3>
+                <p>
+                  Dither on the L16 quantisation is in review (PR&nbsp;#11, rounds to nearest with
+                  TPDF dither instead of truncating). Higher-quality resampling and
+                  benchmark-driven quality presets are planned.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span class="tag tag-planned">Planned</span>
+              <div>
+                <h3>Drag-only cable patchbay</h3>
+                <p>
+                  Connecting patchbay cables by dragging only, in the Omarchy panel.
+                </p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <p>
+          on-air is free software under the MIT licence. This site is plain HTML, CSS and a few
+          lines of JavaScript in the repository — no build step, no external resources, no
+          tracking.
+        </p>
+        <ul>
+          <li><a href="https://github.com/tsonubin/on-air">Repository</a></li>
+          <li><a href="https://github.com/tsonubin/on-air/blob/main/INSTALL.md">INSTALL.md</a></li>
+          <li><a href="https://github.com/tsonubin/on-air/blob/main/CHANGELOG.md">CHANGELOG.md</a></li>
+          <li><a href="https://github.com/tsonubin/on-air/tree/main/docs/design">Design records</a></li>
+          <li><a href="build-log.html">Build log</a></li>
+        </ul>
+      </div>
+    </footer>
+  </body>
+</html>

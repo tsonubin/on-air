@@ -10,9 +10,22 @@ Notable changes to on-air. The format follows
 - Stereo: capture, the Audio CD, the EQ and every speaker stream keep left
   and right apart, so Sonos and HomePod stereo pairs play true stereo. A
   radio stream now uses about 1.5 Mbit/s at 48 kHz.
+- A project site with a build log under `website/`: static HTML, CSS and a
+  little vanilla JavaScript — no build step, no external resources and no
+  tracking. The build log groups the real commit history by the milestones
+  in `docs/design`, and the site states plainly which release channels await
+  a published v0.2.0.
+- Omarchy: a one-line installer (PR #12, in review). `packaging/omarchy/install.sh`
+  installs the latest release's prebuilt binaries through the `on-air-bin`
+  recipe with checksums pinned from that release, or builds a clone with
+  `--checkout`; re-running updates.
 
 ### Changed
 
+- L16 quantization rounds to nearest with TPDF dither instead of truncating
+  toward zero, so the quantization error is noise rather than
+  signal-correlated distortion on quiet passages (PR #11, in review). The
+  encode and decode are exact inverses now that both scale by 32768.
 - Repository reorganised for contributors: design records live in
   `docs/design`, the domain glossary in `docs/glossary.md`; added
   `CONTRIBUTING.md`, `SECURITY.md` and this changelog.
@@ -42,6 +55,14 @@ Notable changes to on-air. The format follows
 
 - The phone's pairing screen scrolls up when the keyboard opens, so the
   address and code fields are no longer hidden behind it on iOS or Android.
+
+### Roadmap
+
+Direction only — in progress or planned, not shipped: true stereo across
+every client; mixed-protocol synchronized playback to AirPlay, Sonos,
+Bluetooth and local outputs at fine granularity; cleaner audio (dither,
+higher-quality resampling, benchmark-driven quality presets); and a
+drag-only cable patchbay.
 
 ## [0.2.0] - unreleased
 

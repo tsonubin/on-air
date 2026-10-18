@@ -9,6 +9,8 @@ audio to groups of local and network outputs. The terminal, tray app and
 phone remote retain their single-output controls. Everything stays on your
 LAN: there is no account and no cloud.
 
+Project site and build log: [website/](website/).
+
 - **Sources:** System audio (what the computer plays), microphones and USB
   audio interfaces, or an audio CD. On Linux the list comes from PipeWire, so
   ALSA aliases and on-air's own buses never show up.
