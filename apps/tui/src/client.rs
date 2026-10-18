@@ -228,6 +228,11 @@ impl Client {
                 update::LABEL_TRIM,
                 self.set_sync_trim(&transport, &device_id, trim_ms).await,
             ),
+            Cmd::FetchTuning => vec![Msg::Tuning(
+                self.tuning_status()
+                    .await
+                    .map_err(|error| error_copy::copy(&error)),
+            )],
             Cmd::RepairFirewall => {
                 let result = self.repair_firewall().await;
                 let mut messages = done(update::LABEL_FIREWALL, result);
@@ -478,6 +483,10 @@ impl Client {
             Duration::from_secs(15),
         )
         .await
+    }
+
+    pub async fn tuning_status(&self) -> Result<crate::api::TuningStatus, ClientError> {
+        self.get("/api/audio/tuning").await
     }
 
     pub async fn repair_firewall(&self) -> Result<(), ClientError> {

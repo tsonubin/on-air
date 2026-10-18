@@ -113,7 +113,7 @@ async fn switching_sonos_airplay_bluetooth_stops_the_previous_sender() {
                 pipeline_hz: 44_100,
                 output_hz: 44_100,
                 volume: 100,
-                quality: on_air_core::dsp::DspQuality::Economy,
+                dsp_quality: on_air_core::dsp::DspQuality::Economy,
                 sync: None,
             },
         )))
@@ -330,7 +330,7 @@ async fn sonos_and_bluetooth_play_simultaneously_in_one_sync_group() {
                 pipeline_hz: 44_100,
                 output_hz: 44_100,
                 volume: 100,
-                quality: on_air_core::dsp::DspQuality::Economy,
+                dsp_quality: on_air_core::dsp::DspQuality::Economy,
                 sync: state.sync.feed_for(&bt_identity, 44_100),
             },
         )),

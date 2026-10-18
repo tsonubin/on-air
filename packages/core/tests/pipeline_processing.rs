@@ -1,4 +1,4 @@
-use on_air_core::dsp::bridge::l16_le_to_f32;
+use on_air_core::dsp::bridge::l16_le_to_f32_into;
 use on_air_core::dsp::DspQuality;
 use on_air_core::pipeline::{new_ring_buffer, push_frames, spawn_processing_task};
 use parking_lot::Mutex;
@@ -6,6 +6,13 @@ use ringbuf::traits::Producer;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
+
+/// Decode pipeline L16 to f32 (test-side, not a hot path).
+fn decode(pcm: &[u8]) -> Vec<f32> {
+    let mut out = Vec::new();
+    l16_le_to_f32_into(pcm, &mut out);
+    out
+}
 
 #[tokio::test]
 async fn processes_synthetic_frames_into_broadcast_pcm() {
@@ -110,7 +117,7 @@ async fn through_the_pipeline(
     tokio::task::spawn_blocking(move || handle.stop())
         .await
         .unwrap();
-    l16_le_to_f32(&pcm)
+    decode(&pcm)
 }
 
 #[tokio::test]

@@ -41,6 +41,8 @@ pub enum Msg {
     /// The 50 ms frame tick that animates the level meter.
     Frame,
     Benchmark(Result<crate::api::AudioBenchmark, String>),
+    /// The first-run tuning status behind the audio-check surface.
+    Tuning(Result<crate::api::TuningStatus, String>),
     Ws(Incoming),
     Snapshot(Result<Box<Snapshot>, String>),
     Done {
@@ -72,6 +74,8 @@ pub enum Cmd {
         device_id: String,
         trim_ms: i32,
     },
+    /// Read the first-run tuning status for the audio-check surface.
+    FetchTuning,
     ActivateInput(String),
     ActivateOutput {
         transport: String,
@@ -204,6 +208,21 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
                     model.quality_choice = report.recommended_quality;
                     model.benchmark = Some(report);
                     model.error = None;
+                    // A completed check marks the machine as tuned: the
+                    // audio-check surface's tuning line must catch up.
+                    vec![Cmd::FetchTuning]
+                }
+                Err(error) => {
+                    model.error = Some(error);
+                    vec![]
+                }
+            }
+        }
+        Msg::Tuning(result) => {
+            match result {
+                Ok(tuning) => {
+                    model.quality_choice = tuning.quality;
+                    model.tuning = Some(tuning);
                 }
                 Err(error) => model.error = Some(error),
             }
@@ -415,7 +434,11 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
             if label == LABEL_SETTINGS {
                 vec![]
             } else {
-                vec![Cmd::Refresh]
+                let mut cmds = vec![Cmd::Refresh];
+                if matches!(label, LABEL_BUFFER | LABEL_QUALITY) {
+                    cmds.push(Cmd::FetchTuning);
+                }
+                cmds
             }
         }
         Err(copy) => {
@@ -1155,14 +1178,18 @@ fn open_audio_check(model: &mut Model) -> Vec<Cmd> {
         .as_ref()
         .and_then(|s| s.capture_buffer_ms)
         .unwrap_or(0);
-    model.quality_choice = model
-        .snapshot
-        .audio_quality
-        .as_ref()
-        .map(|quality| quality.quality)
-        .unwrap_or(DspQuality::Balanced);
+    if let Some(tuning) = model.tuning.as_ref() {
+        model.quality_choice = tuning.quality;
+    } else {
+        model.quality_choice = model
+            .snapshot
+            .audio_quality
+            .as_ref()
+            .map(|quality| quality.quality)
+            .unwrap_or(DspQuality::Balanced);
+    }
     model.modal = Modal::AudioCheck;
-    vec![]
+    vec![Cmd::FetchTuning]
 }
 
 /// What Esc does to an open overlay.

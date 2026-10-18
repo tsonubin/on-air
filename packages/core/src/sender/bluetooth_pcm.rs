@@ -170,6 +170,9 @@ impl PcmOutput for SystemPcmOutput {
 struct CpalPcmSink {
     producer: Mutex<HeapProd<f32>>,
     bridge: Mutex<RateBridge>,
+    /// The bridge's output scratch, so `write` allocates nothing per chunk
+    /// in steady state.
+    converted: Mutex<Vec<f32>>,
     volume: Arc<AtomicU8>,
     stream: Mutex<Option<cpal::Stream>>,
     rate_control: Option<RateControl>,
@@ -350,6 +353,7 @@ impl CpalPcmSink {
             sink: Arc::new(Self {
                 producer: Mutex::new(producer),
                 bridge: Mutex::new(bridge),
+                converted: Mutex::new(Vec::new()),
                 volume,
                 stream: Mutex::new(Some(stream)),
                 rate_control,
@@ -365,9 +369,11 @@ impl CpalPcmSink {
 
 impl PcmSink for CpalPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let (converted, channels) = {
+        let mut converted = self.converted.lock();
+        let channels = {
             let mut bridge = self.bridge.lock();
-            (bridge.process_l16(pcm), bridge.channels())
+            bridge.process_l16_into(pcm, &mut converted);
+            bridge.channels()
         };
         // Bound latency and memory: a slow device drops new frames, whole.
         push_frames(&mut self.producer.lock(), &converted, channels);
@@ -447,6 +453,9 @@ where
 
 struct PacatPcmSink {
     bridge: Mutex<RateBridge>,
+    /// The bridge's L16 output scratch, so `write` allocates nothing per
+    /// chunk in steady state.
+    bytes: Mutex<Vec<u8>>,
     stdin: Mutex<std::process::ChildStdin>,
     child: Mutex<std::process::Child>,
     volume: AtomicU8,
@@ -489,6 +498,7 @@ impl PacatPcmSink {
         };
         Ok(Self {
             bridge: Mutex::new(bridge),
+            bytes: Mutex::new(Vec::new()),
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             volume: AtomicU8::new(100),
@@ -500,7 +510,10 @@ impl PacatPcmSink {
 }
 impl PcmSink for PacatPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
-        let mut bytes = self.bridge.lock().process_l16_to_l16(pcm);
+        let mut bytes = self.bytes.lock();
+        self.bridge
+            .lock()
+            .process_l16_to_l16_into(pcm, &mut bytes);
         scale_l16(&mut bytes, self.volume.load(Ordering::Acquire));
         use std::io::Write;
         self.stdin
@@ -567,25 +580,27 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    fn l16(samples: &[f32]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut dither = crate::dsp::bridge::TpdfDither::new(1);
+        crate::dsp::bridge::f32_to_l16_le_into(samples, &mut dither, &mut out);
+        out
+    }
+
     #[test]
     fn a_full_output_queue_drops_whole_frames() {
-        use crate::dsp::bridge::{f32_to_l16_le, TpdfDither};
         use ringbuf::traits::Observer;
         let (producer, consumer) = HeapRb::<f32>::new(5).split();
         let sink = CpalPcmSink {
             producer: Mutex::new(producer),
             bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2, DspQuality::Economy)),
+            converted: Mutex::new(Vec::new()),
             volume: Arc::new(AtomicU8::new(100)),
             stream: Mutex::new(None),
             rate_control: None,
             delivered: Arc::new(AtomicU64::new(0)),
         };
-        let mut dither = TpdfDither::new(1);
-        sink.write(&f32_to_l16_le(
-            &[0.1, -0.1, 0.2, -0.2, 0.3, -0.3],
-            &mut dither,
-        ))
-        .unwrap();
+        sink.write(&l16(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3])).unwrap();
         assert_eq!(consumer.occupied_len(), 4, "a frame was split");
     }
 
@@ -621,6 +636,7 @@ mod tests {
         let stdin = child.stdin.take().unwrap();
         let sink = Arc::new(PacatPcmSink {
             bridge: Mutex::new(RateBridge::new(44_100, 44_100, 2, DspQuality::Economy)),
+            bytes: Mutex::new(Vec::new()),
             stdin: Mutex::new(stdin),
             child: Mutex::new(child),
             volume: AtomicU8::new(100),

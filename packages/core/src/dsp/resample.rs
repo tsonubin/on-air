@@ -19,7 +19,8 @@ const MAX_CORRECTION_PPM: f64 = 20_000.0;
 /// (44.1→48 kHz, release, dev host; see `report_per_profile_resampler_costs`
 /// in `tests/dsp_resample.rs`): ~0.5 ms, about 20× the cubic Farrow below —
 /// an order of magnitude, not a rounding error, which is why the audio
-/// check measures the ladder on the machine that will run it.
+/// check measures the ladder on the machine that will run it instead of
+/// trusting these numbers.
 const BALANCED_SINC_LEN: usize = 128;
 /// Sinc length of the `high` profile: ~0.8 ms per chunk on the same run,
 /// about 1.5× `balanced`, for a filter table twice the size (worse cache
@@ -92,6 +93,10 @@ impl RateControl {
 /// Resamples fixed-size chunks of interleaved PCM with `channels` samples
 /// per frame. `quality` selects the interpolation profile at construction
 /// ([`DspQuality::Economy`] is the historical cubic Farrow path).
+///
+/// [`PcmResampler::process_into`] allocates nothing per call in steady
+/// state (the C7 allocation guard proves it): the output buffer is owned
+/// by the caller and the internal scratch by the resampler.
 pub struct PcmResampler {
     inner: Async<f32>,
     channels: usize,
@@ -128,23 +133,19 @@ impl PcmResampler {
         self.inner.cutoff()
     }
 
-    /// Frames (not samples) the next `process` call needs.
+    /// Frames (not samples) the next `process_into` call needs.
     pub fn input_frames_next(&self) -> usize {
         self.inner.input_frames_next()
     }
 
-    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
-        let mut output = Vec::with_capacity(self.output_data.len());
-        self.process_into(input, &mut output);
-        output
-    }
-
+    /// Resamples exactly `input_frames_next() * channels` samples into
+    /// `output`, which is cleared and filled with this call's output.
     pub fn process_into(&mut self, input: &[f32], output: &mut Vec<f32>) {
         let frames = self.inner.input_frames_next();
         assert_eq!(
             input.len(),
             frames * self.channels,
-            "PcmResampler::process requires exactly input_frames_next() * channels samples"
+            "PcmResampler::process_into requires exactly input_frames_next() * channels samples"
         );
         let out_capacity = self.inner.output_frames_max();
 
@@ -166,11 +167,17 @@ impl PcmResampler {
 
 /// Buffers arbitrary whole-frame chunks into `PcmResampler`'s fixed input
 /// size. Same-rate I/O is a lossless passthrough (no rubato delay).
+///
+/// [`StreamingResampler::process_into`] allocates nothing per call in
+/// steady state when `output` is reused across calls (the C7 allocation
+/// guard proves it).
 pub struct StreamingResampler {
     input_rate_hz: u32,
     output_rate_hz: u32,
     inner: Option<PcmResampler>,
     pending: Vec<f32>,
+    /// One fixed chunk of resampled output, reused across calls.
+    scratch: Vec<f32>,
 }
 
 impl StreamingResampler {
@@ -183,18 +190,14 @@ impl StreamingResampler {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(PcmResampler::new(
-                input_rate_hz,
-                output_rate_hz,
-                channels,
-                quality,
-            ))
+            Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels, quality))
         };
         StreamingResampler {
             input_rate_hz,
             output_rate_hz,
             inner,
             pending: Vec::new(),
+            scratch: Vec::new(),
         }
     }
 
@@ -206,27 +209,30 @@ impl StreamingResampler {
         self.output_rate_hz
     }
 
-    pub fn process(&mut self, input: &[f32]) -> Vec<f32> {
+    /// Resamples `input` into `output`, which is cleared and filled with
+    /// the PCM this call produced (empty until enough input has arrived to
+    /// fill a fixed chunk). `output` must not alias `input`.
+    pub fn process_into(&mut self, input: &[f32], output: &mut Vec<f32>) {
         let Some(resampler) = self.inner.as_mut() else {
-            return input.to_vec();
+            output.clear();
+            output.extend_from_slice(input);
+            return;
         };
         self.pending.extend_from_slice(input);
-        let mut output = Vec::new();
-        let mut resampled = Vec::new();
+        output.clear();
         let mut consumed = 0;
         loop {
             let need = resampler.input_frames_next() * resampler.channels();
             if self.pending.len() - consumed < need {
                 break;
             }
-            resampler.process_into(&self.pending[consumed..consumed + need], &mut resampled);
-            output.extend_from_slice(&resampled);
+            resampler.process_into(&self.pending[consumed..consumed + need], &mut self.scratch);
+            output.extend_from_slice(&self.scratch);
             consumed += need;
         }
         if consumed > 0 {
             self.pending.drain(..consumed);
         }
-        output
     }
 }
 

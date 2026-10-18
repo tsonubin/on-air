@@ -18,6 +18,20 @@ const SAFETY_FACTOR: f64 = 3.0;
 /// Steady-state probe chunks per profile when costing the rate bridge.
 const COST_PROBES: usize = 16;
 
+/// One audio check's full verdict: the wire report `POST
+/// /api/audio/benchmark` returns, plus the measured per-profile DSP costs
+/// the first-run tuning needs (`profile_costs_ms` is measurement detail,
+/// not wire) and the recommendation both carry.
+#[derive(Debug, Clone)]
+pub struct BenchmarkOutcome {
+    pub report: AudioBenchmark,
+    /// Worst observed steady-state cost, in milliseconds, of converting one
+    /// chunk of L16 through the rate bridge at each [`DspQuality::ALL`]
+    /// profile.
+    pub profile_costs_ms: [f64; 3],
+    pub recommended_quality: DspQuality,
+}
+
 fn p95(values: &mut [f64]) -> f64 {
     values.sort_by(f64::total_cmp);
     values[(values.len() * 95).div_ceil(100).saturating_sub(1)]
@@ -72,17 +86,18 @@ pub fn recommend_quality(
 }
 
 /// Worst observed steady-state cost, in milliseconds, of converting one
-/// chunk of L16 through the rate bridge at each profile (`DspQuality::ALL`
+/// chunk of L16 through the rate bridge at each profile ([`DspQuality::ALL`]
 /// order). One warm-up chunk per bridge, then [`COST_PROBES`] timed ones —
 /// the same per-chunk work the round-trip timing includes, isolated.
 fn profile_costs_ms(input_hz: u32, output_hz: u32, pcm: &[u8]) -> [f64; 3] {
     let mut costs = [0.0f64; 3];
+    let mut converted = Vec::new();
     for (index, quality) in DspQuality::ALL.iter().enumerate() {
         let mut bridge = RateBridge::new(input_hz, output_hz, PIPELINE_CHANNELS, *quality);
-        std::hint::black_box(bridge.process_l16(pcm));
+        bridge.process_l16_into(pcm, &mut converted);
         for _ in 0..COST_PROBES {
             let started = Instant::now();
-            std::hint::black_box(bridge.process_l16(pcm));
+            bridge.process_l16_into(pcm, &mut converted);
             costs[index] = costs[index].max(started.elapsed().as_secs_f64() * 1000.0);
         }
     }
@@ -97,7 +112,7 @@ pub fn run(
     gains: [f32; 5],
     iterations: usize,
     quality: DspQuality,
-) -> Result<AudioBenchmark, String> {
+) -> Result<BenchmarkOutcome, String> {
     if input_hz == 0 || output_hz == 0 || iterations < 8 {
         return Err("invalid audio benchmark configuration".into());
     }
@@ -118,11 +133,12 @@ pub fn run(
             .flat_map(|i| [(i as f32 * 0.05).sin() * 0.3; PIPELINE_CHANNELS])
             .collect();
         let mut bridge = RateBridge::new(input_hz, output_hz, 2, quality);
+        let mut converted = Vec::new();
         let quantum = Duration::from_secs_f64(CHUNK_FRAMES as f64 / f64::from(input_hz));
         let started = Instant::now();
         let mut deadline = started;
         let mut timings = Vec::with_capacity(iterations);
-        let mut last_chunk = bytes::Bytes::new();
+        let mut last_chunk = Vec::new();
         for index in 0..iterations + 4 {
             if index >= 12 && started.elapsed() >= Duration::from_secs(3) {
                 break;
@@ -153,12 +169,14 @@ pub fn run(
                     }
                 }
             };
-            std::hint::black_box(bridge.process_l16(&chunk));
+            bridge.process_l16_into(&chunk, &mut converted);
+            std::hint::black_box(&converted);
             let pipeline = dispatched.elapsed().as_secs_f64() * 1000.0;
             if index >= 4 {
                 timings.push((pipeline, scheduler));
             }
-            last_chunk = chunk;
+            last_chunk.clear();
+            last_chunk.extend_from_slice(&chunk);
             // Do not compound a temporary missed deadline into every later
             // sample. Each iteration probes a fresh scheduling interval.
             deadline = Instant::now() + quantum.saturating_sub(dispatched.elapsed());
@@ -170,15 +188,19 @@ pub fn run(
         let recommended_quality = recommend_quality(worst, chunk_ms, quality, &bridge_costs_ms);
         let mut pipeline: Vec<_> = timings.iter().map(|(p, _)| *p).collect();
         let mut scheduler: Vec<_> = timings.iter().map(|(_, s)| *s).collect();
-        Ok(AudioBenchmark {
-            input_hz,
-            output_hz,
-            duration_ms: started.elapsed().as_millis() as u64,
-            pipeline_p95_ms: p95(&mut pipeline),
-            scheduler_p95_ms: p95(&mut scheduler),
-            worst_case_ms: worst,
-            recommended_buffer_ms: recommended,
-            within_buffer_budget,
+        Ok(BenchmarkOutcome {
+            report: AudioBenchmark {
+                input_hz,
+                output_hz,
+                duration_ms: started.elapsed().as_millis() as u64,
+                pipeline_p95_ms: p95(&mut pipeline),
+                scheduler_p95_ms: p95(&mut scheduler),
+                worst_case_ms: worst,
+                recommended_buffer_ms: recommended,
+                within_buffer_budget,
+                recommended_quality,
+            },
+            profile_costs_ms: bridge_costs_ms,
             recommended_quality,
         })
     })();

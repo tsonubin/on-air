@@ -164,6 +164,39 @@ pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) 
             label(model.buffer_choice_ms)
         )),
     ];
+    match model.tuning.as_ref() {
+        None => lines.push(Line::from("First-use tuning: status not loaded.")),
+        Some(tuning) => {
+            let recommend = |quality: Option<crate::api::DspQuality>| {
+                quality
+                    .map(|q| crate::cli::quality_label(q).to_string())
+                    .unwrap_or_else(|| "unmeasured".into())
+            };
+            match &tuning.automatic {
+                Some(record) => {
+                    let applied = match (record.applied_buffer, record.applied_quality) {
+                        (true, true) => "both settings were set",
+                        (true, false) => "the capture buffer was set; your quality choice was kept",
+                        (false, true) => "the DSP quality was set; your buffer choice was kept",
+                        (false, false) => "your own settings were kept",
+                    };
+                    lines.push(Line::from(format!(
+                        "First-use tuning: this machine was measured and recommends {} ms buffer, \
+                         {} quality; {applied}.",
+                        record.recommended_buffer_ms,
+                        recommend(tuning.recommended_quality),
+                    )));
+                }
+                None if tuning.tuned => lines.push(Line::from(format!(
+                    "An audio check ran here before (recommends {} quality); settings are yours.",
+                    recommend(tuning.recommended_quality),
+                ))),
+                None => lines.push(Line::from(
+                    "First-use tuning: not run yet — it runs automatically once audio is live.",
+                )),
+            }
+        }
+    }
     match &model.snapshot.audio_quality {
         Some(quality) => {
             let picked = crate::cli::quality_label(model.quality_choice);

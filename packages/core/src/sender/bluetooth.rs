@@ -215,7 +215,7 @@ pub struct BluetoothPlaybackConfig {
     pub output_hz: u32,
     pub volume: u8,
     /// The DSP quality profile the rate conversion is built with.
-    pub quality: crate::dsp::DspQuality,
+    pub dsp_quality: crate::dsp::DspQuality,
     /// Present when this output is a sync-group member: the feed holds the
     /// group's delay line and reports drift. Free-running outputs carry
     /// `None` and use the cheap fixed-rate path untouched.
@@ -303,7 +303,7 @@ impl AudioSender for BluetoothSender {
                 config.pipeline_hz,
                 config.output_hz,
                 steered,
-                config.quality,
+                config.dsp_quality,
             )
         })
         .await

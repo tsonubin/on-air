@@ -36,7 +36,7 @@ fn config(volume: u8) -> BluetoothPlaybackConfig {
         pipeline_hz: 44_100,
         output_hz: 44_100,
         volume,
-        quality: DspQuality::Economy,
+        dsp_quality: DspQuality::Economy,
         sync: None,
     }
 }

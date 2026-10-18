@@ -42,8 +42,19 @@ impl ProcessingTaskHandle {
     }
 }
 
+/// The chunk payload handed to `audio_tx` receivers — and the **one**
+/// allocation the processing thread makes per chunk in steady state (the
+/// C7 allocation guard pins it): a chunk is owned by asynchronous
+/// receivers (a radio-stream client, a speaker sink) for as long as they
+/// like, so the bytes must be handed over whole, and the `Bytes` bus type
+/// offers no reclamation hook — every handoff needs one fresh buffer
+/// (`Bytes::from(Vec)` itself allocates nothing on top). The allocation is
+/// one buffer of `chunk samples × 2` bytes per 1024-frame chunk, and
+/// nothing else on the thread allocates at all.
 fn f32_to_le_i16_bytes(samples: &[f32], dither: &mut TpdfDither) -> Bytes {
-    Bytes::from(crate::dsp::bridge::f32_to_l16_le(samples, dither))
+    let mut buf = Vec::with_capacity(samples.len() * 2);
+    crate::dsp::bridge::f32_to_l16_le_into(samples, dither, &mut buf);
+    Bytes::from(buf)
 }
 
 /// Called once, from the processing thread, if it panics. Receives the
@@ -73,7 +84,7 @@ pub fn spawn_processing_task(
             eq_gains_db,
             audio_tx,
             ws_tx,
-            dsp_quality: Arc::new(Mutex::new(quality)),
+            dsp_quality: quality,
         },
         None,
         None,
@@ -91,8 +102,9 @@ pub struct ProcessingOutputs {
     pub audio_tx: broadcast::Sender<PcmChunk>,
     pub ws_tx: broadcast::Sender<WsEvent>,
     /// The DSP quality profile the processing task's resampler is built
-    /// with, read once when the task spawns (every capture start).
-    pub dsp_quality: Arc<Mutex<DspQuality>>,
+    /// with. Read once at thread start; a settings change takes effect on
+    /// the next capture restart.
+    pub dsp_quality: DspQuality,
 }
 
 /// Like [`spawn_processing_task`], but a panic inside the thread is caught
@@ -178,9 +190,14 @@ fn process_until_stopped(
         dsp_quality,
     } = outputs;
     let mut eq = GraphicEq::new(rates.input_hz as f32, PIPELINE_CHANNELS);
-    let quality = *dsp_quality.lock();
-    let mut resampler = (rates.input_hz != rates.output_hz)
-        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS, quality));
+    let mut resampler = (rates.input_hz != rates.output_hz).then(|| {
+        PcmResampler::new(
+            rates.input_hz,
+            rates.output_hz,
+            PIPELINE_CHANNELS,
+            dsp_quality,
+        )
+    });
     let chunk_frames = resampler
         .as_ref()
         .map(PcmResampler::input_frames_next)
@@ -251,6 +268,9 @@ pub mod capture;
 pub mod input;
 pub mod local_sink;
 pub mod sources;
+
+#[cfg(test)]
+mod alloc_guard;
 
 pub use input::{InputError, InputSession, InputSnapshot, LOOPBACK_INPUT};
 

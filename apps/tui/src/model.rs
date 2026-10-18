@@ -244,9 +244,11 @@ pub struct SyncBadge {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Model {
     pub benchmark: Option<crate::api::AudioBenchmark>,
-    pub buffer_choice_ms: u32,
+    /// The first-run tuning status behind the audio-check surface.
+    pub tuning: Option<crate::api::TuningStatus>,
     /// The DSP quality profile the Audio performance overlay has selected.
     pub quality_choice: DspQuality,
+    pub buffer_choice_ms: u32,
     pub connection: Connection,
     pub snapshot: Snapshot,
     pub pane: Pane,
@@ -296,8 +298,9 @@ impl Model {
     pub fn new() -> Self {
         Model {
             benchmark: None,
-            buffer_choice_ms: 0,
+            tuning: None,
             quality_choice: DspQuality::Balanced,
+            buffer_choice_ms: 0,
             connection: Connection::Connecting,
             snapshot: Snapshot::default(),
             pane: Pane::Sources,

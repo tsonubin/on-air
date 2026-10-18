@@ -1010,7 +1010,7 @@ fn firewall_repair_requires_confirmation_and_only_runs_on_the_host() {
 #[test]
 fn audio_check_recommends_without_applying_and_manual_selection_requires_a() {
     let mut m = model_with_mock_snapshot();
-    assert!(update(&mut m, key('t')).is_empty());
+    assert_eq!(update(&mut m, key('t')), vec![Cmd::FetchTuning]);
     assert_eq!(m.modal, Modal::AudioCheck);
     assert_eq!(
         update(&mut m, code(KeyCode::Enter)),
@@ -1027,7 +1027,11 @@ fn audio_check_recommends_without_applying_and_manual_selection_requires_a() {
         within_buffer_budget: true,
         recommended_quality: DspQuality::High,
     };
-    assert!(update(&mut m, Msg::Benchmark(Ok(report))).is_empty());
+    assert_eq!(
+        update(&mut m, Msg::Benchmark(Ok(report))),
+        vec![Cmd::FetchTuning],
+        "a completed check marks the machine tuned: the surface re-reads it"
+    );
     assert_eq!(m.buffer_choice_ms, 100);
     assert_eq!(
         m.quality_choice,
@@ -1053,7 +1057,7 @@ fn audio_check_selects_quality_and_q_applies_the_selection() {
             DspQuality::High,
         ],
     });
-    assert!(update(&mut m, key('t')).is_empty());
+    assert_eq!(update(&mut m, key('t')), vec![Cmd::FetchTuning]);
     assert_eq!(
         m.quality_choice,
         DspQuality::Balanced,
@@ -1073,6 +1077,52 @@ fn audio_check_selects_quality_and_q_applies_the_selection() {
     update(&mut m, done(LABEL_QUALITY, Ok(())));
     assert_eq!(m.pending, None);
     assert_eq!(m.modal, Modal::AudioCheck, "the overlay stays for more checks");
+}
+
+#[test]
+fn the_audio_check_surface_shows_the_first_run_tuning_and_overrides_quality() {
+    let mut m = model_with_mock_snapshot();
+    assert_eq!(update(&mut m, key('t')), vec![Cmd::FetchTuning]);
+    let tuning = crate::api::TuningStatus {
+        tuned: true,
+        automatic: Some(crate::api::FirstRunTuningRecord {
+            ran_at_unix_s: 1_760_000_000,
+            recommended_buffer_ms: 100,
+            applied_buffer: true,
+            applied_quality: false,
+        }),
+        quality: crate::api::DspQuality::High,
+        quality_override: Some(crate::api::DspQuality::High),
+        recommended_quality: Some(crate::api::DspQuality::Balanced),
+        capture_buffer_ms: 100,
+        profiles: crate::api::DspQuality::ALL.to_vec(),
+    };
+    update(&mut m, Msg::Tuning(Ok(tuning.clone())));
+    assert_eq!(m.tuning, Some(tuning));
+    // The choice starts at the profile in effect...
+    assert_eq!(m.quality_choice, crate::api::DspQuality::High);
+    // ...the arrows cycle it without applying anything...
+    assert!(update(&mut m, code(KeyCode::Up)).is_empty());
+    assert_eq!(m.quality_choice, crate::api::DspQuality::Balanced);
+    assert!(update(&mut m, code(KeyCode::Up)).is_empty());
+    assert_eq!(m.quality_choice, crate::api::DspQuality::Economy);
+    // ...and `q` applies the selected profile.
+    assert_eq!(
+        update(&mut m, key('q')),
+        vec![Cmd::SetQuality(DspQuality::Economy)]
+    );
+    assert_eq!(m.pending, Some(Pending { label: LABEL_QUALITY.into() }));
+    update(&mut m, done(LABEL_QUALITY, Ok(())));
+    // While the current quality is unknown (no tuning loaded yet), `a`
+    // applies the buffer only: a setting is never clobbered unseen.
+    let mut fresh = model_with_mock_snapshot();
+    update(&mut fresh, key('t'));
+    assert!(fresh.tuning.is_none());
+    let fresh_choice = fresh.buffer_choice_ms;
+    assert_eq!(
+        update(&mut fresh, key('a')),
+        vec![Cmd::SetCaptureBuffer(fresh_choice)]
+    );
 }
 
 #[test]

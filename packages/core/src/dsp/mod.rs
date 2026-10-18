@@ -6,5 +6,6 @@ pub use on_air_api::DspQuality;
 
 pub mod bridge;
 pub mod eq;
+pub mod quality;
 pub mod rates;
 pub mod resample;
