@@ -1,5 +1,5 @@
 use super::resample::{RateControl, SteerableResampler, StreamingResampler};
-use super::PIPELINE_CHANNELS;
+use super::{DspQuality, PIPELINE_CHANNELS};
 
 /// Decode pipeline stereo L16 LE, resample to the output rate, then fit it to
 /// the destination channel count. This is the sender-side half of the
@@ -24,12 +24,20 @@ enum RateCore {
 }
 
 impl RateBridge {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
+    /// The cheap fixed-ratio path used by free-running outputs. `quality`
+    /// selects the interpolation profile of the rate conversion.
+    pub fn new(
+        input_rate_hz: u32,
+        output_rate_hz: u32,
+        channels: usize,
+        quality: DspQuality,
+    ) -> Self {
         RateBridge {
             core: RateCore::Fixed(StreamingResampler::new(
                 input_rate_hz,
                 output_rate_hz,
                 PIPELINE_CHANNELS,
+                quality,
             )),
             channels: channels.max(1),
         }
@@ -41,6 +49,7 @@ impl RateBridge {
         input_rate_hz: u32,
         output_rate_hz: u32,
         channels: usize,
+        quality: DspQuality,
     ) -> (Self, RateControl) {
         let control = RateControl::default();
         let bridge = RateBridge {
@@ -49,6 +58,7 @@ impl RateBridge {
                     input_rate_hz,
                     output_rate_hz,
                     PIPELINE_CHANNELS,
+                    quality,
                 ),
                 control: control.clone(),
                 applied_ppm: 0.0,
@@ -147,7 +157,7 @@ mod tests {
 
     #[test]
     fn same_rate_bridge_keeps_left_and_right() {
-        let mut bridge = RateBridge::new(44_100, 44_100, 2);
+        let mut bridge = RateBridge::new(44_100, 44_100, 2, DspQuality::Economy);
         let out = bridge.process_l16(&f32_to_l16_le(&[0.25, -0.25]));
         assert_eq!(out.len(), 2);
         assert!((out[0] - 0.25).abs() < 0.01 && (out[1] + 0.25).abs() < 0.01);
@@ -155,7 +165,7 @@ mod tests {
 
     #[test]
     fn mono_destination_hears_both_sides() {
-        let mut bridge = RateBridge::new(44_100, 44_100, 1);
+        let mut bridge = RateBridge::new(44_100, 44_100, 1, DspQuality::Economy);
         let out = bridge.process_l16(&f32_to_l16_le(&[0.5, 0.0]));
         assert_eq!(out.len(), 1);
         assert!((out[0] - 0.25).abs() < 0.01);

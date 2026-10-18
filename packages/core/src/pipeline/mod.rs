@@ -1,8 +1,9 @@
 use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::PcmResampler;
-use crate::dsp::PIPELINE_CHANNELS;
+use crate::dsp::{DspQuality, PIPELINE_CHANNELS};
 use crate::events::WsEvent;
 use crate::timeline::{PcmChunk, FRAME_BYTES};
+use on_air_api::MeterLevel;
 use parking_lot::Mutex;
 use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,6 +59,7 @@ pub fn spawn_processing_task(
     eq_gains_db: Arc<Mutex<[f32; 5]>>,
     audio_tx: broadcast::Sender<PcmChunk>,
     ws_tx: broadcast::Sender<WsEvent>,
+    quality: DspQuality,
 ) -> ProcessingTaskHandle {
     spawn_processing_task_reporting(
         consumer,
@@ -69,6 +71,7 @@ pub fn spawn_processing_task(
             eq_gains_db,
             audio_tx,
             ws_tx,
+            dsp_quality: Arc::new(Mutex::new(quality)),
         },
         None,
         None,
@@ -85,6 +88,9 @@ pub struct ProcessingOutputs {
     pub eq_gains_db: Arc<Mutex<[f32; 5]>>,
     pub audio_tx: broadcast::Sender<PcmChunk>,
     pub ws_tx: broadcast::Sender<WsEvent>,
+    /// The DSP quality profile the processing task's resampler is built
+    /// with, read once when the task spawns (every capture start).
+    pub dsp_quality: Arc<Mutex<DspQuality>>,
 }
 
 /// Like [`spawn_processing_task`], but a panic inside the thread is caught
@@ -125,6 +131,37 @@ fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
     format!("audio processing stopped: {detail}")
 }
 
+/// Per-channel RMS and peak of one interleaved stereo chunk, one pass over
+/// the samples and no allocation. The pipeline carries interleaved
+/// `[left, right]` frames ([`PIPELINE_CHANNELS`]); a mono capture is
+/// duplicated into both sides upstream, so the meter then reports the same
+/// reading on both channels without a special case here.
+fn stereo_levels(samples: &[f32]) -> (MeterLevel, MeterLevel) {
+    let mut left_peak = 0.0f32;
+    let mut right_peak = 0.0f32;
+    let mut left_sq = 0.0f64;
+    let mut right_sq = 0.0f64;
+    let (frames, _) = samples.as_chunks::<PIPELINE_CHANNELS>();
+    for frame in frames {
+        let (left, right) = (frame[0], frame[1]);
+        left_peak = left_peak.max(left.abs());
+        right_peak = right_peak.max(right.abs());
+        left_sq += f64::from(left) * f64::from(left);
+        right_sq += f64::from(right) * f64::from(right);
+    }
+    let per_channel = frames.len().max(1) as f64;
+    (
+        MeterLevel {
+            rms: (left_sq / per_channel).sqrt() as f32,
+            peak: left_peak,
+        },
+        MeterLevel {
+            rms: (right_sq / per_channel).sqrt() as f32,
+            peak: right_peak,
+        },
+    )
+}
+
 fn process_until_stopped(
     mut consumer: HeapCons<f32>,
     rates: ProcessingRates,
@@ -136,10 +173,12 @@ fn process_until_stopped(
         eq_gains_db,
         audio_tx,
         ws_tx,
+        dsp_quality,
     } = outputs;
     let mut eq = GraphicEq::new(rates.input_hz as f32, PIPELINE_CHANNELS);
+    let quality = *dsp_quality.lock();
     let mut resampler = (rates.input_hz != rates.output_hz)
-        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS));
+        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS, quality));
     let chunk_frames = resampler
         .as_ref()
         .map(PcmResampler::input_frames_next)
@@ -175,9 +214,8 @@ fn process_until_stopped(
         eq.process(&mut chunk);
 
         if meter_receivers > 0 {
-            let peak = chunk.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
-            let rms = (chunk.iter().map(|s| s * s).sum::<f32>() / chunk.len() as f32).sqrt();
-            let _ = ws_tx.send(WsEvent::LevelMeter { rms, peak });
+            let (left, right) = stereo_levels(&chunk);
+            let _ = ws_tx.send(WsEvent::LevelMeter { left, right });
         }
 
         if audio_receivers > 0 {

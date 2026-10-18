@@ -22,8 +22,14 @@ async fn ws_forwards_published_events_as_json() {
     let (mut ws_stream, _) = connect_async(format!("ws://{addr}/api/ws")).await.unwrap();
 
     let event = WsEvent::LevelMeter {
-        rms: 0.5,
-        peak: 0.9,
+        left: on_air_api::MeterLevel {
+            rms: 0.5,
+            peak: 0.9,
+        },
+        right: on_air_api::MeterLevel {
+            rms: 0.25,
+            peak: 0.4,
+        },
     };
     // keep publishing until a subscriber (the websocket handler) exists
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
@@ -48,7 +54,14 @@ async fn ws_forwards_published_events_as_json() {
     };
     let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["type"], "LevelMeter");
-    assert_eq!(parsed["rms"], 0.5);
+    assert_eq!(
+        parsed,
+        serde_json::json!({
+            "type": "LevelMeter",
+            "left": {"rms": 0.5, "peak": 0.9},
+            "right": {"rms": 0.25, "peak": 0.4},
+        })
+    );
 
     let _ = ws_stream.close(None).await;
 }

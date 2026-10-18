@@ -78,14 +78,15 @@ impl SyncController {
 
     /// Join `output` to `group` at its effective latency (documented default
     /// plus the user's trim). The previous group, if any, is left behind.
-    pub fn join(self: &Arc<Self>, group: &Arc<SyncGroup>, output: &on_air_api::ActiveOutput) -> MemberId {
+    pub fn join(
+        self: &Arc<Self>,
+        group: &Arc<SyncGroup>,
+        output: &on_air_api::ActiveOutput,
+    ) -> MemberId {
         let key = OutputKey::new(&output.transport, &output.device_id);
         let latency = {
             let mut registry = self.registry.lock();
-            let row = registry
-                .outputs
-                .entry(key.clone())
-                .or_default();
+            let row = registry.outputs.entry(key.clone()).or_default();
             row.name = output.device_name.clone();
             let trim_ms = row.trim_ms;
             latency::effective_latency(&output.transport, trim_ms)
@@ -117,6 +118,41 @@ impl SyncController {
             .map(|(group, _)| group.clone())
     }
 
+    /// Explicit re-entry into sync after one output's transport restarted
+    /// mid-flight (roadmap B9: the Sonos stall recovery must not resume
+    /// playback at a wall-clock instant of its own choosing). Returns the
+    /// member's [`StartPlan`]: when the group's own presentation epoch is
+    /// still pending that epoch, so the restart joins the coordinated start
+    /// instead of racing it; otherwise the plan for `at`, whose delay and
+    /// latency are the same presentation contract the member's feed
+    /// (delay-line pre-fill) already applies. The stale drift report is
+    /// dropped first, so [`SyncController::sync_status`] reports
+    /// [`SyncState::Syncing`] from this moment until the drift servo
+    /// re-locks — the restart is visible as re-synchronizing, never as
+    /// still-locked. `None` means the output is free-running: no epoch to
+    /// re-enter, so the restart may fire immediately.
+    pub fn plan_resync(
+        &self,
+        output: &on_air_api::ActiveOutput,
+        at: std::time::Instant,
+    ) -> Option<StartPlan> {
+        let key = OutputKey::new(&output.transport, &output.device_id);
+        let group = {
+            let mut registry = self.registry.lock();
+            let group = registry.membership.get(&key)?.0.clone();
+            if let Some(row) = registry.outputs.get_mut(&key) {
+                row.report = None;
+            }
+            group
+        };
+        let epoch = group
+            .epoch()
+            .map(|epoch| epoch.start_at)
+            .filter(|start| *start > at)
+            .unwrap_or(at);
+        group.start_plan(&key, epoch)
+    }
+
     /// The user's latency trim for one output, in milliseconds (0 default).
     pub fn trim_ms(&self, key: &OutputKey) -> i32 {
         self.registry
@@ -130,12 +166,7 @@ impl SyncController {
     /// Set one output's latency trim. The change applies to that output's
     /// feed the next time it opens (the next activation or stream); a live
     /// delay line is not resized underneath a playing speaker.
-    pub fn set_trim_ms(
-        &self,
-        key: &OutputKey,
-        transport: &str,
-        trim_ms: i32,
-    ) -> LatencyEstimate {
+    pub fn set_trim_ms(&self, key: &OutputKey, transport: &str, trim_ms: i32) -> LatencyEstimate {
         let estimate = latency::effective_latency(transport, trim_ms);
         let mut registry = self.registry.lock();
         let row = registry.outputs.entry(key.clone()).or_default();
@@ -216,15 +247,19 @@ impl SyncController {
                 let row = registry.outputs.get(key);
                 let live_rate = live
                     .iter()
-                    .find(|(output, _)| output.transport == key.transport && output.device_id == key.device_id)
+                    .find(|(output, _)| {
+                        output.transport == key.transport && output.device_id == key.device_id
+                    })
                     .map(|(_, rate)| *rate);
                 let name = row
                     .map(|row| row.name.clone())
                     .or_else(|| {
-                        live.iter().find(|(output, _)| {
-                            output.transport == key.transport && output.device_id == key.device_id
-                        })
-                        .map(|(output, _)| output.device_name.clone())
+                        live.iter()
+                            .find(|(output, _)| {
+                                output.transport == key.transport
+                                    && output.device_id == key.device_id
+                            })
+                            .map(|(output, _)| output.device_name.clone())
                     })
                     .unwrap_or_default();
                 let trim_ms = row.map(|row| row.trim_ms).unwrap_or_default();
