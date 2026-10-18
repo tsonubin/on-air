@@ -827,6 +827,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         }
         Modal::Help => {
             model.modal = Modal::None;
+            model.help_scroll = 0;
             return vec![];
         }
         Modal::Pin {
@@ -1374,6 +1375,17 @@ fn on_mouse(
         MouseKind::ScrollDown => 1,
         MouseKind::Down | MouseKind::Drag => 0,
     };
+    // The help overlay scrolls rather than closing: the key table is
+    // longer than a 30-row terminal, and "any key closes" would make the
+    // wheel unusable as well as the keyboard.
+    if matches!(model.modal, Modal::Help) {
+        if wheel < 0 {
+            model.help_scroll = model.help_scroll.saturating_sub(1);
+        } else if wheel > 0 {
+            model.help_scroll = model.help_scroll.saturating_add(1);
+        }
+        return vec![];
+    }
     match target {
         Target::SourceRow(index) | Target::DestRow(index) => {
             if kind == MouseKind::Drag {

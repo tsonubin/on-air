@@ -108,7 +108,7 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
 
     let overlay = match &model.modal {
         Modal::None => None,
-        Modal::Help => Some(help_overlay(frame, area, model.mouse)),
+        Modal::Help => Some(help_overlay(frame, area, model.mouse, model.help_scroll)),
         Modal::Pin {
             target,
             input,

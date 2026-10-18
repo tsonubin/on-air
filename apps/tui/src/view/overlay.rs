@@ -48,8 +48,10 @@ fn overlay_height(lines: &[Line<'_>], width: u16, area: Rect) -> u16 {
     u16::try_from(rows + 4).unwrap_or(u16::MAX).min(area.height)
 }
 
-/// The key table, then the mouse rows, so the help still fits 100×30.
-pub(super) fn help_overlay(frame: &mut Frame, area: Rect, mouse: bool) -> Rect {
+/// The key table, then the mouse rows. The table has more rows than a
+/// 30-row terminal can show, so the content scrolls; `scroll` is the
+/// number of rows pushed off the top.
+pub(super) fn help_overlay(frame: &mut Frame, area: Rect, mouse: bool, scroll: u16) -> Rect {
     let row = |keys: &str, help: Span<'static>| {
         Line::from(vec![
             Span::styled(format!(" {keys:<16} "), Style::new().bold()),
@@ -83,7 +85,9 @@ pub(super) fn help_overlay(frame: &mut Frame, area: Rect, mouse: bool) -> Rect {
     let rect = centered(area, width, height);
     frame.render_widget(Clear, rect);
     frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" Keys ")),
+        Paragraph::new(lines)
+            .scroll((scroll, 0))
+            .block(Block::bordered().title(" Keys ")),
         rect,
     );
     rect

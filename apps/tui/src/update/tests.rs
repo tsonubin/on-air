@@ -1711,7 +1711,7 @@ fn calibration_run(
 fn c_opens_the_calibrate_prompt_and_enter_measures_the_output() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.active_input = Some("Built-in mic".into());
-    assert!(update(&mut m, key('c')).is_empty());
+    assert!(update(&mut m, key('C')).is_empty());
     let Modal::Calibrate {
         transport,
         device_id,
@@ -1767,7 +1767,7 @@ fn the_calibrate_prompt_refuses_monitor_sources_and_empty_names() {
     // A monitor/loopback source cannot hear a probe, so it is never the
     // pre-filled microphone.
     m.snapshot.active_input = Some("alsa_output.pci.analog-stereo.monitor".into());
-    update(&mut m, key('c'));
+    update(&mut m, key('C'));
     let Modal::Calibrate { input, .. } = &m.modal else {
         panic!("expected the calibrate prompt, got {:?}", m.modal);
     };
@@ -1789,7 +1789,7 @@ fn the_calibrate_prompt_refuses_monitor_sources_and_empty_names() {
 fn a_refused_calibration_run_reports_into_the_prompt() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.active_input = Some("Built-in mic".into());
-    update(&mut m, key('c'));
+    update(&mut m, key('C'));
     assert_eq!(update(&mut m, code(KeyCode::Enter)).len(), 1);
     assert!(update(&mut m, Msg::Calibration(Err("nope".into()))).is_empty());
     assert_eq!(m.pending, None);

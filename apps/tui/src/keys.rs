@@ -273,20 +273,63 @@ mod tests {
         assert_eq!(action_for(&press(KeyCode::Char('d'))), Some(Action::Trim));
         assert_eq!(
             action_for(&press(KeyCode::Char('c'))),
+            Some(Action::CycleChannel)
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('C'))),
             Some(Action::Calibrate)
         );
         assert_eq!(action_for(&press(KeyCode::Char('g'))), Some(Action::Group));
-        assert_eq!(
-            action_for(&press(KeyCode::Char('c'))),
-            Some(Action::CycleChannel)
-        );
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 26);
+        assert_eq!(KEYS.len(), 27);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),
             Some(Action::FineDown)
         );
+    }
+
+    /// Every action the help table advertises must actually be reachable
+    /// from some key.
+    ///
+    /// A binding can be lost without any compile error: two features can
+    /// both claim a key (clippy flags that as an unreachable pattern, but
+    /// only if the arms are literally duplicated), or an arm can be deleted
+    /// while its help row is left behind. Either way the symptom is a
+    /// documented shortcut that silently does nothing — which is how
+    /// channel-mode cycling lost `c` when calibration landed on the same
+    /// key. The help table is what the user is told, so it must not
+    /// advertise a dead key.
+    #[test]
+    fn every_action_in_the_help_table_is_reachable() {
+        let mut reachable: Vec<Action> = Vec::new();
+        for byte in b' '..=b'~' {
+            if let Some(action) = action_for(&press(KeyCode::Char(byte as char))) {
+                reachable.push(action);
+            }
+        }
+        for code in [
+            KeyCode::Tab,
+            KeyCode::BackTab,
+            KeyCode::Enter,
+            KeyCode::Esc,
+            KeyCode::Left,
+            KeyCode::Right,
+            KeyCode::Up,
+            KeyCode::Down,
+        ] {
+            if let Some(action) = action_for(&press(code)) {
+                reachable.push(action);
+            }
+        }
+        for binding in KEYS {
+            assert!(
+                reachable.contains(&binding.action),
+                "{:?} is advertised in the help table as `{}` but no key reaches it",
+                binding.action,
+                binding.keys
+            );
+        }
     }
 }

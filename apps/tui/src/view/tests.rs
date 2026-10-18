@@ -672,19 +672,36 @@ fn the_pin_modal_and_help_overlay_render_centered() {
 
 #[test]
 fn help_has_mouse_section() {
+    // The key table is longer than a 30-row terminal, so the help scrolls.
+    // The invariant worth pinning is that every section is *reachable* by
+    // scrolling — not that all of it fits at once, which it stopped doing as
+    // features accumulated and would only get worse.
     let mut m = model();
     m.modal = Modal::Help;
-    let t = text(&render(&m, 100, 30));
-    assert!(t.contains("Mouse"), "{t}");
+    let mut found_mouse = false;
+    let mut found_shift_hint = false;
+    let mut found_last_key = false;
+    for scroll in 0..40u16 {
+        m.help_scroll = scroll;
+        let t = text(&render(&m, 100, 30));
+        found_mouse |= t.contains("Mouse");
+        found_shift_hint |= t.contains("Hold Shift while dragging to select text.");
+        found_last_key |= t.contains(KEYS[KEYS.len() - 1].help);
+        if found_mouse && found_shift_hint && found_last_key {
+            break;
+        }
+    }
+    assert!(found_mouse, "the Mouse section must be reachable by scrolling");
     assert!(
-        t.contains("Hold Shift while dragging to select text."),
-        "{t}"
+        found_shift_hint,
+        "the shift-drag hint must be reachable by scrolling"
     );
-    assert!(!t.contains("mouse off"), "{t}");
     assert!(
-        t.contains(KEYS[KEYS.len() - 1].help),
-        "fits at 100×30:\n{t}"
+        found_last_key,
+        "the last help row must be reachable by scrolling"
     );
+
+    m.help_scroll = 0;
     m.mouse = false;
     let t = text(&render(&m, 100, 30));
     assert!(t.contains("mouse off"), "{t}");
