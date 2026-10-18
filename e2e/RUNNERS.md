@@ -10,8 +10,8 @@ root after `pnpm install`.
 | Suite | Command | What it covers |
 |---|---|---|
 | Phone (headless) | `pnpm test:mobile:e2e` | The shared control client as the Expo app uses it: status probe, PIN pairing, source, destination, volume, EQ, sample rates, AirPlay/Bluetooth pairing, latency trim, sync groups, DSP quality, discovery of a known desktop address |
-| Desktop API | `pnpm --filter @on-air/e2e test:desktop:api` | HTTP golden paths (`e2e/shared/scenarios.ts`) through the control client, and the newer surface: sync trim and the sync read model, sync-group lifecycle (one epoch, the 409 conflict, leaving), DSP quality and the audio check's verdict, first-use tuning status, and the one error envelope every refusal carries |
-| Desktop UI | `pnpm --filter @on-air/e2e test:desktop:ui` | The desktop frontend in Chromium, served by Vite on `127.0.0.1:1420` |
+| Desktop API | `pnpm --filter @on-air/e2e test:desktop:api` | HTTP golden paths (`e2e/shared/scenarios.ts`) through the control client, and the newer surface: sync trim and the sync read model, sync-group lifecycle (one epoch, the 409 conflict, leaving), DSP quality and the audio check's verdict, first-use tuning status (including that a tuned machine stays tuned across a restart), channel modes (the 400 refusal at selection and at open, mono as a genuine mono radio stream, auto byte-identical), the stereo `LevelMeter` WS shape, and the one error envelope every refusal carries |
+| Desktop UI | `pnpm --filter @on-air/e2e test:desktop:ui` | The desktop frontend in Chromium, served by Vite on `127.0.0.1:1420`, including the refused-channel-mode explanation the window must carry |
 | Both desktop projects | `pnpm test:desktop:e2e` | `api` then `ui` |
 | Typecheck | `pnpm --filter @on-air/e2e typecheck` | Every `e2e/**/*.ts`, fixtures checked against `@on-air/api-types` |
 

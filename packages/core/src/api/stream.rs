@@ -82,6 +82,33 @@ pub fn radio_stream_is_live(state: &CoreState, nonce: &str) -> bool {
     state.output().snapshot().serves_radio(nonce)
 }
 
+/// Mock only (routed like `/api/mock/cd`, never on a production core): the
+/// radio URL the speaker would have been handed at activation. In
+/// production the nonce is a secret the speaker receives out of band; with
+/// no speaker playing, an e2e client could not otherwise reach the WAV
+/// surface whose channel fit it must verify (a mono mode is a genuine mono
+/// stream, `auto` the historical stereo one).
+#[derive(serde::Serialize)]
+pub struct MockRadioUrl {
+    pub url: String,
+}
+
+pub async fn mock_radio_url(
+    State(state): State<CoreState>,
+) -> Result<axum::Json<MockRadioUrl>, ApiError> {
+    let snapshot = state.output().snapshot();
+    let nonce = snapshot
+        .nonce
+        .clone()
+        .filter(|nonce| snapshot.serves_radio(nonce));
+    match nonce {
+        Some(nonce) => Ok(axum::Json(MockRadioUrl {
+            url: format!("/stream/{nonce}/audio.wav"),
+        })),
+        None => Err(ApiError::no_active_output()),
+    }
+}
+
 /// One receiver's rate stage.
 ///
 /// Free-running outputs keep the cheap path: pure passthrough at equal

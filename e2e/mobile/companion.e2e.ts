@@ -78,10 +78,12 @@ describe("expo companion against mock core", { concurrency: 1 }, () => {
     assert.equal(chosen.name, "Mock Monitor");
   });
 
-  test("companion lists every exclusive transport and can switch them", async () => {
+  test("companion lists every transport and can switch the exclusive ones", async () => {
     const outputs = await listOutputs(BASE, token);
     const transports = [...new Set(outputs.map((o) => o.transport))].sort();
-    assert.deepEqual(transports, ["airplay", "bluetooth", "sonos"]);
+    // The catalog also carries "This computer" outputs (one known-mono
+    // speaker in mock mode); switching still covers the exclusive ones.
+    assert.deepEqual(transports, ["airplay", "bluetooth", "local", "sonos"]);
     const switched = await switchTransports(BASE, token);
     assert.deepEqual(switched, ["sonos", "airplay", "bluetooth"]);
     const active = await getActiveOutput(BASE, token);

@@ -153,8 +153,11 @@ pub fn build_router(state: CoreState) -> Router {
             post(api::bluetooth::open_settings),
         );
     if state.mock {
-        // The disc simulator never exists on a production core.
-        router = router.route("/api/mock/cd", post(api::cd::simulate_cd));
+        // The disc simulator and the radio-URL introspection never exist on
+        // a production core.
+        router = router
+            .route("/api/mock/cd", post(api::cd::simulate_cd))
+            .route("/api/mock/radio", get(api::stream::mock_radio_url));
     }
     router
         .fallback(api::error::route_not_found)

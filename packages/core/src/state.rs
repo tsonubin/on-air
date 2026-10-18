@@ -362,9 +362,38 @@ impl CoreState {
     }
 
     /// E2E / CI: fake inputs and transports, fixed pairing PIN, no hardware.
+    ///
+    /// # What mock mode does and does not simulate
+    ///
+    /// It simulates the CLIENT-VISIBLE contract so an e2e client can drive
+    /// every surface without hardware: the device catalog (including a
+    /// known-mono "This computer" output so the channel-count contract has
+    /// something to enforce), activation and playback state, the channel
+    /// fit at both points it is enforced (selection and open), and settings
+    /// persistence — but only when `ON_AIR_CONFIG_DIR` points at a scratch
+    /// directory, which only the e2e sets; a mock core started by hand
+    /// stays stateless exactly as before.
+    ///
+    /// It deliberately does NOT simulate hardware timing, acoustic
+    /// latency, real transport delivery, discovery, or audio content: the
+    /// mock input feeds the processing thread SILENCE, so `LevelMeter`
+    /// frames flow with honest zero levels instead of pretending a signal
+    /// exists. The contract code paths are never bypassed: a request mock
+    /// mode refuses is refused by the same code a real core runs.
     pub async fn new_mock() -> Self {
-        // The mock core must never start a real `systemd-inhibit` on CI.
-        let mut state = Self::new().with_keep_awake(KeepAwake::with_spawner(
+        let settings_path = crate::settings_path_from(
+            std::env::var_os("ON_AIR_CONFIG_DIR").map(Into::into),
+            None,
+            None,
+        );
+        let mut state = match settings_path {
+            // The loader is the production one: a corrupt or unreadable
+            // settings file behaves exactly as in real mode — safe defaults
+            // and a warning, never a silent fresh start.
+            Some(path) => Self::new_persistent(path),
+            None => Self::new(),
+        }
+        .with_keep_awake(KeepAwake::with_spawner(
             None,
             Box::new(crate::keep_awake::NoopSpawner),
             true,
@@ -372,6 +401,16 @@ impl CoreState {
         state.set_mock(true);
         state.pairing = Arc::new(StdMutex::new(PairingState::mock()));
         state.input.set_mock_inputs(vec!["Mock Monitor".into()]);
+        // A mono "This computer" output, as Pulse reports one: the only
+        // outputs whose channel count the core knows honestly.
+        state.set_mock_local_outputs(vec![crate::sender::local::LocalOutput {
+            id: "alsa#mono".into(),
+            name: "Mono Speaker".into(),
+            sink: "alsa".into(),
+            port: None,
+            target: "alsa".into(),
+            channels: Some(1),
+        }]);
         *state.airplay.lock() = vec![CatalogDevice {
             id: "ap-living".into(),
             name: "Living Room AirPlay".into(),

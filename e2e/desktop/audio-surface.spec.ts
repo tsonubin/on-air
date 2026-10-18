@@ -4,11 +4,13 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  activateInput,
   activateOutput,
   addSyncGroupMember,
   createSyncGroup,
   deactivateOutput,
   dissolveSyncGroup,
+  getActiveOutput,
   getAudioQuality,
   getSync,
   HttpError,
@@ -16,6 +18,7 @@ import {
   listOutputs,
   runAudioBenchmark,
   setAudioQuality,
+  setChannelMode,
   setSyncTrim,
   setVolume,
   startSyncGroup,
@@ -81,6 +84,46 @@ async function getTuning(base: string): Promise<TuningStatus> {
   return (await response.json()) as TuningStatus;
 }
 
+/** The WAV header of the live radio stream, as the speaker would pull it. */
+async function readWavHeader(base: string): Promise<{
+  /** The 44 raw header bytes, for byte-identity comparisons. */
+  bytes: Uint8Array;
+  channels: number;
+  sampleRate: number;
+  byteRate: number;
+  blockAlign: number;
+}> {
+  const radio = (await (await fetch(`${base}/api/mock/radio`)).json()) as { url: string };
+  const response = await fetch(`${base}${radio.url}`);
+  expect(response.status).toBe(200);
+  const reader = response.body?.getReader();
+  expect(reader).toBeTruthy();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < 44) {
+    const { value } = await reader!.read();
+    expect(value).toBeTruthy();
+    chunks.push(value!);
+    size += value!.length;
+  }
+  await reader!.cancel();
+  const buffered = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffered.set(chunk, offset);
+    offset += chunk.length;
+  }
+  const bytes = buffered.slice(0, 44);
+  const view = new DataView(bytes.buffer);
+  return {
+    bytes,
+    channels: view.getUint16(22, true),
+    sampleRate: view.getUint32(24, true),
+    byteRate: view.getUint32(28, true),
+    blockAlign: view.getUint16(32, true),
+  };
+}
+
 test("sync: a trim is per output, manual, and clamped at zero latency", { tag: "@api" }, async () => {
   const { trimmed, row } = await trimFirstOutput(API, "sonos", 250);
   expect(trimmed).toEqual({ trim_ms: 250, effective_latency_ms: 1250 });
@@ -127,8 +170,7 @@ test("sync groups: one start brings every member to one epoch", { tag: "@api" },
   await trimFirstOutput(API, "airplay", 0);
 
   const events: WsEvent[] = [];
-  let opened!: () => void;
-  const open = new Promise<void>((resolve) => (opened = resolve));
+  const { promise: open, resolve: opened } = Promise.withResolvers<void>();
   const subscription = subscribeEvents(API, undefined, {
     onEvent: (event) => events.push(event),
     onOpen: () => opened(),
@@ -360,4 +402,186 @@ test("error envelope: unknown routes, wrong methods and missing outputs", { tag:
 
   const missing = await expectRefusal(activateOutput(API, "sonos", "uuid:nope"), 404, "not_found");
   expect(missing.message).toContain("output device not found");
+});
+
+test("channel mode: stereo on a known-mono device is refused with an explanation", { tag: "@api" }, async () => {
+  // "This computer" outputs report their channel count honestly, so the
+  // core knows this one plays mono before anything is sent to it.
+  const outputs = await listOutputs(API);
+  const speaker = outputs.find((output) => output.id === "alsa#mono");
+  expect(speaker?.transport).toBe("local");
+  expect(speaker?.name).toBe("Mono Speaker");
+  expect(speaker?.channels).toBe(1);
+
+  // The refusal names what happened and what to do — never a silent
+  // downmix of the user's choice.
+  const refused = await expectRefusal(
+    setChannelMode(API, { transport: "local", device_id: "alsa#mono", mode: "stereo" }),
+    400,
+    "invalid_request",
+  );
+  expect((JSON.parse(refused.body) as ApiErrorBody).error).toBe(
+    "Mono Speaker plays mono only; stereo would drop the right channel. Choose Auto or Mono.",
+  );
+  // The refused selection was not saved.
+  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBeFalsy();
+
+  // mono fits a mono device and is saved per output; other outputs are
+  // untouched by one output's mode.
+  await setChannelMode(API, { transport: "local", device_id: "alsa#mono", mode: "mono" });
+  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBe("mono");
+  expect((await listOutputs(API)).find((output) => output.id === "uuid:mock-sonos")?.channel_mode).toBeFalsy();
+
+  // auto forgets the entry: the wire reports auto as absent.
+  await setChannelMode(API, { transport: "local", device_id: "alsa#mono", mode: "auto" });
+  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBeFalsy();
+
+  // A destination whose channel count the core cannot probe fits stereo:
+  // the radio surface is stereo by construction.
+  await setChannelMode(API, { transport: "sonos", device_id: "uuid:mock-sonos", mode: "stereo" });
+  expect((await listOutputs(API)).find((output) => output.id === "uuid:mock-sonos")?.channel_mode).toBe("stereo");
+  await setChannelMode(API, { transport: "sonos", device_id: "uuid:mock-sonos", mode: "auto" });
+});
+
+test("channel mode: open refuses stereo on a mono endpoint too, never collapsing it", { tag: "@api" }, async () => {
+  try {
+    // A Bluetooth endpoint's real channel count is known only when its sink
+    // opens, so the selection is accepted (the core cannot probe it here)...
+    await setChannelMode(API, { transport: "bluetooth", device_id: "bt-speaker", mode: "stereo" });
+    expect(
+      (await listOutputs(API)).find((output) => output.id === "bt-speaker")?.channel_mode,
+    ).toBe("stereo");
+
+    // ...and the open-time contract refuses with the same explanation rather
+    // than dropping the right channel on the way out.
+    const refused = await expectRefusal(
+      activateOutput(API, "bluetooth", "bt-speaker"),
+      400,
+      "invalid_request",
+    );
+    expect((JSON.parse(refused.body) as ApiErrorBody).error).toBe(
+      "Mock Bluetooth Speaker plays mono only; stereo would drop the right channel. Choose Auto or Mono.",
+    );
+
+    // Mono opens the very same endpoint fine.
+    await setChannelMode(API, { transport: "bluetooth", device_id: "bt-speaker", mode: "mono" });
+    await activateOutput(API, "bluetooth", "bt-speaker");
+    expect((await getActiveOutput(API))?.transport).toBe("bluetooth");
+  } finally {
+    // Restore the default so no later test inherits this output's mode.
+    await setChannelMode(API, { transport: "bluetooth", device_id: "bt-speaker", mode: "auto" });
+  }
+});
+
+test("channel mode: mono is a genuine mono stream; auto is byte-identical", { tag: "@api" }, async () => {
+  await activateOutput(API, "sonos", "uuid:mock-sonos");
+  // The radio stereo header is the historical behaviour...
+  const autoBefore = await readWavHeader(API);
+  expect(autoBefore.channels).toBe(2);
+  expect(autoBefore.blockAlign).toBe(4);
+  expect(autoBefore.byteRate).toBe(autoBefore.sampleRate * 4);
+
+  // ...and mono is a TRUE downmix to one sample per frame — a genuine mono
+  // stream, not a duplicated mono pair (bytes per frame halve).
+  await setChannelMode(API, { transport: "sonos", device_id: "uuid:mock-sonos", mode: "mono" });
+  const mono = await readWavHeader(API);
+  expect(mono.channels).toBe(1);
+  expect(mono.blockAlign).toBe(2);
+  expect(mono.byteRate).toBe(mono.sampleRate * 2);
+
+  // auto is byte-identical to what the stream served before any mode was
+  // chosen: the historical stereo radio, unchanged.
+  await setChannelMode(API, { transport: "sonos", device_id: "uuid:mock-sonos", mode: "auto" });
+  const autoAfter = await readWavHeader(API);
+  expect(autoAfter.channels).toBe(2);
+  expect(Array.from(autoAfter.bytes)).toEqual(Array.from(autoBefore.bytes));
+});
+
+test("stereo meter: one LevelMeter reading per channel reaches the client", { tag: "@api" }, async () => {
+  const events: WsEvent[] = [];
+  const { promise: open, resolve: opened } = Promise.withResolvers<void>();
+  const subscription = subscribeEvents(API, undefined, {
+    onEvent: (event) => events.push(event),
+    onOpen: () => opened(),
+  });
+  try {
+    await open;
+    // A live capture feeds the processing thread; the client sees the
+    // per-channel meter over its own WebSocket subscription.
+    await activateInput(API, "Mock Monitor");
+    const meters = () =>
+      events.filter((event): event is Extract<WsEvent, { type: "LevelMeter" }> => event.type === "LevelMeter");
+    await expect.poll(() => meters().length, { timeout: 15_000 }).toBeGreaterThan(3);
+    for (const event of meters()) {
+      // The per-channel shape: one reading per channel of the stereo
+      // stream, RMS and peak each a full-scale fraction in [0, 1].
+      for (const channel of [event.left, event.right]) {
+        expect(Number.isFinite(channel.rms)).toBe(true);
+        expect(Number.isFinite(channel.peak)).toBe(true);
+        expect(channel.rms).toBeGreaterThanOrEqual(0);
+        expect(channel.peak).toBeLessThanOrEqual(1);
+        expect(channel.rms).toBeLessThanOrEqual(channel.peak);
+      }
+    }
+    // The mock capture is silence by design (mock mode never invents audio
+    // content): honest zero levels on both channels.
+    for (const event of meters()) {
+      expect(event.left.peak).toBe(0);
+      expect(event.right.peak).toBe(0);
+    }
+  } finally {
+    subscription.close();
+  }
+});
+
+test("settings survive a restart: quality and the tuned-once signal", { tag: "@api" }, async () => {
+  const configDir = mkdtempSync(path.join(tmpdir(), "on-air-restart-"));
+  let verdict: string | undefined;
+  const first: MockCore = await startMockCore({
+    port: ISOLATED_PORT,
+    env: { ON_AIR_CONFIG_DIR: configDir },
+  });
+  try {
+    await setAudioQuality(first.base, "high");
+    const report = await runAudioBenchmark(first.base);
+    verdict = report.recommended_quality;
+    expect((await getTuning(first.base)).tuned).toBe(true);
+    // The settings writer debounces writes; let the last one land before
+    // the stop, exactly as a user would leave the machine.
+    const { promise: settle, resolve: settled } = Promise.withResolvers<void>();
+    setTimeout(settled, 500);
+    await settle;
+  } finally {
+    await first.stop();
+  }
+  // `cargo run` can take a moment to free the port with its binary; wait
+  // for it, so the second boot cannot race the first one's shutdown.
+  const firstBase = `http://127.0.0.1:${ISOLATED_PORT}`;
+  for (;;) {
+    const stillUp = await fetch(`${firstBase}/api/status`, { signal: AbortSignal.timeout(500) })
+      .then(() => true)
+      .catch(() => false);
+    if (!stillUp) break;
+    const { promise: pause, resolve: paused } = Promise.withResolvers<void>();
+    setTimeout(paused, 250);
+    await pause;
+  }
+
+  const second: MockCore = await startMockCore({
+    port: ISOLATED_PORT,
+    env: { ON_AIR_CONFIG_DIR: configDir },
+  });
+  try {
+    // The choice survived the restart...
+    expect((await getAudioQuality(second.base)).quality).toBe("high");
+    // ...and so did the once-per-machine signal: the second boot is no
+    // longer a first run, so first-use tuning can never fire again here.
+    const tuning = await getTuning(second.base);
+    expect(tuning.tuned).toBe(true);
+    expect(tuning.recommended_quality).toBe(verdict);
+    expect(tuning.quality_override).toBe("high");
+    expect(tuning.automatic).toBeNull();
+  } finally {
+    await second.stop();
+  }
 });

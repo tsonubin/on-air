@@ -121,6 +121,20 @@ impl PcmOutput for Arc<RecordingPcmSink> {
         _: &BluetoothEndpoint,
         config: &BluetoothPlaybackConfig,
     ) -> Result<OpenedPcmSink, SenderError> {
+        // The mock stand-in for an OS audio endpoint, which dictates its
+        // stream layout (roadmap A4): this fake endpoint plays mono — a
+        // mono headset — and re-checks the channel fit at open exactly as
+        // `CpalPcmSink::open` does against the real device report. `stereo`
+        // is refused here with the one explanation, never silently
+        // collapsed; unlike the real sinks the mock records the pipeline
+        // bytes unconverted, because conversion fidelity is not simulated.
+        let plan = SinkConstruction::CpalPcm
+            .plan(
+                config.channel_mode,
+                Destination::reported(config.destination.name.clone(), 1),
+            )
+            .map_err(|error| SenderError::ChannelMode(error.message()))?;
+        let _ = plan;
         Ok(OpenedPcmSink {
             sink: self.clone(),
             format: OutputFormat {

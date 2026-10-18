@@ -71,13 +71,57 @@ struct Capture {
     handle: CaptureHandle,
     /// Set for the Audio CD input: the deck attachment this capture owns.
     cd_producer: Option<ProducerGeneration>,
+    /// Set in mock mode: the silence feed standing in for the capture
+    /// device, stopped before the processing thread joins.
+    mock_feed: Option<MockFeed>,
     /// Identifies this capture in a processing-thread death report.
     id: u64,
 }
 
+/// Mock mode's capture device: a thread that pushes silence at the pipeline
+/// rate into the processing thread's ring, roughly in real time, and stops
+/// and joins like a hardware capture. It is deliberately SILENCE — mock
+/// mode simulates the client-visible contract, never audio content, so
+/// `LevelMeter` frames flow with honest zero levels instead of pretending a
+/// signal exists (see `CoreState::new_mock`).
+struct MockFeed {
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<()>>,
+}
+
+impl MockFeed {
+    fn start(mut producer: ringbuf::HeapProd<f32>, rate_hz: u32) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = stop.clone();
+        let join = std::thread::spawn(move || {
+            // Ten-millisecond interleaved stereo frames, allocated once
+            // here (feed threads are not what the allocation guard pins).
+            let frames = (rate_hz as usize / 100).max(1);
+            let silence = vec![0.0f32; frames * super::PIPELINE_CHANNELS];
+            while !thread_stop.load(Ordering::Relaxed) {
+                let _ = super::push_frames(&mut producer, &silence, super::PIPELINE_CHANNELS);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        });
+        MockFeed {
+            stop,
+            join: Some(join),
+        }
+    }
+
+    fn stop(mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
 enum InputState {
     Idle,
-    /// Capturing. `capture` is `None` in mock mode, where nothing runs.
+    /// Capturing. `capture` is `None` in mock mode for the Audio CD input,
+    /// where the deck plays silence and nothing runs; every other mock
+    /// input runs the real processing thread over a silence feed.
     Live {
         name: String,
         capture: Option<Box<Capture>>,
@@ -257,9 +301,14 @@ impl InputSession {
                 return Err(InputError::NotFound("input device not found"));
             }
             let mut state = self.inner.state.lock().await;
+            // Mock CD playback keeps its historical shape (the deck's
+            // sectors are silence and no capture runs); every other mock
+            // input runs the real processing thread over a silence feed —
+            // see `MockFeed` and `CoreState::new_mock`.
+            let capture = (!cd_ok).then(|| Box::new(self.start_mock_capture(requested.clone())));
             *state = InputState::Live {
                 name: requested.clone(),
-                capture: None,
+                capture,
                 supported_hz: self.snapshot().supported_hz,
             };
             self.publish(&state);
@@ -376,8 +425,14 @@ impl InputSession {
         let Capture {
             handle,
             cd_producer,
+            mock_feed,
             ..
         } = *capture;
+        // The mock feed stops first, so the processing thread drains and
+        // its join cannot wait on a producer that still pushes.
+        if let Some(feed) = mock_feed {
+            feed.stop();
+        }
         let _ = tokio::task::spawn_blocking(move || handle.stop()).await;
         if let Some(generation) = cd_producer {
             // A newer attachment (the replacement CD capture) is left alone.
@@ -403,6 +458,25 @@ impl InputSession {
             return Some(Box::new(fault));
         }
         None
+    }
+
+    /// Mock mode: one non-CD mock input's capture. The feed stands in for
+    /// the capture device and the processing thread runs for real, so the
+    /// pipeline's contract (EQ, resampling, per-channel `LevelMeter`
+    /// frames) is exercised without hardware. See `MockFeed`.
+    fn start_mock_capture(&self, label: String) -> Capture {
+        let rate = *self.inner.wiring.input_rate_hz.lock();
+        let ring_capacity = (rate as usize).saturating_mul(RING_BUFFER_DURATION_SECONDS);
+        let (producer, consumer) = new_ring_buffer(ring_capacity);
+        let id = self.inner.next_capture_id.fetch_add(1, Ordering::AcqRel);
+        let processing = self.spawn_processing(consumer, rate, rate, id);
+        let feed = MockFeed::start(producer, rate);
+        Capture {
+            handle: CaptureHandle::processing_only(processing, label),
+            cd_producer: None,
+            mock_feed: Some(feed),
+            id,
+        }
     }
 
     fn spawn_processing(
@@ -449,6 +523,7 @@ impl InputSession {
                 Capture {
                     handle: CaptureHandle::processing_only(processing, label),
                     cd_producer: Some(generation),
+                    mock_feed: None,
                     id,
                 },
                 rates::INPUT_RATES_HZ.to_vec(),
@@ -481,6 +556,7 @@ impl InputSession {
                 Capture {
                     handle: CaptureHandle::pulse(pulse, processing, label),
                     cd_producer: None,
+                    mock_feed: None,
                     id,
                 },
                 rates::INPUT_RATES_HZ.to_vec(),
@@ -512,6 +588,7 @@ impl InputSession {
             Capture {
                 handle: CaptureHandle::cpal(stream, processing, label),
                 cd_producer: None,
+                mock_feed: None,
                 id,
             },
             supported_hz,

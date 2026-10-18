@@ -47,3 +47,17 @@ test("desktop UI golden path against mock core", async ({ page }) => {
   await page.getByTestId("volume-slider").fill("20");
   await page.getByTestId("eq-band-0").fill("3");
 });
+
+test("desktop UI explains a refused channel mode instead of silently collapsing it", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByTestId("core-status")).toContainText("ok", { timeout: 15_000 });
+  // Clicking the badge cycles auto -> stereo. This "This computer" output
+  // plays mono only, so the core refuses the choice — and the window must
+  // carry the core's explanation, never quietly downmix the user's pick.
+  await page.getByTestId("channel-mode-local-alsa#mono").click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Mono Speaker plays mono only; stereo would drop the right channel. Choose Auto or Mono.",
+  );
+});
