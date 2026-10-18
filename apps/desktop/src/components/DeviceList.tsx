@@ -1,7 +1,18 @@
-import type { ActiveOutputView, AirPlayMode, OutputInfo } from "@on-air/api-types";
+import type {
+  ActiveOutputView,
+  AirPlayMode,
+  OutputInfo,
+  OutputSyncStatus,
+} from "@on-air/api-types";
 import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
-import { inputLabels } from "@on-air/control-client";
-import { useMemo } from "react";
+import {
+  inputLabels,
+  SYNC_DRIFT_DESCRIPTION,
+  SYNC_STATE_LABELS,
+  SYNC_TRIM_DESCRIPTION,
+  SYNC_TRIM_LIMIT_MS,
+} from "@on-air/control-client";
+import { useEffect, useMemo, useState } from "react";
 import { isPickerOnly, outputKey } from "../hooks/useOutputSelection";
 import { Button } from "../ui/Button";
 
@@ -32,17 +43,88 @@ function Skeleton() {
   );
 }
 
+const SYNC_STATE_CLASS: Record<OutputSyncStatus["state"], string> = {
+  free_running: "text-steel-dim",
+  syncing: "text-amber",
+  locked: "text-live",
+};
+
+/**
+ * One output's sync standing and its manual latency trim. The trim is a
+ * correction typed by ear: the copy never calls it calibrated.
+ */
+function SyncRow({
+  status,
+  disabled,
+  onSetTrim,
+}: {
+  status: OutputSyncStatus;
+  disabled: boolean;
+  onSetTrim(trimMs: number): Promise<void>;
+}) {
+  const [draft, setDraft] = useState(String(status.trim_ms));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    setDraft(String(status.trim_ms));
+  }, [status.trim_ms]);
+  const trimmed = draft.trim();
+  const parsed = Number(trimmed);
+  const valid =
+    trimmed !== "" &&
+    Number.isInteger(parsed) &&
+    Math.abs(parsed) <= SYNC_TRIM_LIMIT_MS &&
+    parsed !== status.trim_ms;
+  const drift = status.drift_ppm === undefined ? "" : ` · ${Math.round(status.drift_ppm)} ppm`;
+  return (
+    <div className="device-sync" data-testid={`sync-${status.transport}-${status.device_id}`}>
+      <span className={SYNC_STATE_CLASS[status.state]} title={SYNC_DRIFT_DESCRIPTION}>
+        {SYNC_STATE_LABELS[status.state]}
+        {drift}
+      </span>
+      <label title={SYNC_TRIM_DESCRIPTION}>
+        Latency trim
+        <input
+          type="number"
+          step={5}
+          min={-SYNC_TRIM_LIMIT_MS}
+          max={SYNC_TRIM_LIMIT_MS}
+          value={draft}
+          disabled={disabled || busy}
+          aria-label={`Latency trim for ${status.device_name} in milliseconds`}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        ms
+      </label>
+      <Button
+        data-testid={`set-trim-${status.transport}-${status.device_id}`}
+        disabled={disabled || busy || !valid}
+        aria-busy={busy}
+        onClick={() => {
+          setBusy(true);
+          void onSetTrim(parsed).finally(() => setBusy(false));
+        }}
+      >
+        Set trim
+      </Button>
+    </div>
+  );
+}
+
 export interface DeviceListProps {
   inputs: string[] | null;
   activeInput: string | null;
   outputs: OutputInfo[] | null;
   activeOutput: ActiveOutputView | null;
   airplayMode: AirPlayMode | null;
+  /** Per-output sync status rows; `null` on an older core. */
+  sync: OutputSyncStatus[] | null;
   connectingOutput: string | null;
   refreshing: boolean;
   disabled: boolean;
   onChooseInput(name: string): void;
   onChooseOutput(output: OutputInfo): void;
+  /** Applies one output's manual latency trim in milliseconds. */
+  onSetTrim(output: OutputInfo, trimMs: number): Promise<void>;
   onBluetoothSettings(): void;
   onAirplayInfo(): void;
   onRefresh(): void;
@@ -54,11 +136,13 @@ export function DeviceList({
   outputs,
   activeOutput,
   airplayMode,
+  sync,
   connectingOutput,
   refreshing,
   disabled,
   onChooseInput,
   onChooseOutput,
+  onSetTrim,
   onBluetoothSettings,
   onAirplayInfo,
   onRefresh,
@@ -150,6 +234,9 @@ export function DeviceList({
             const connecting = connectingOutput === key || (current && phase === "starting");
             const pair = output.member_count >= 2 || output.kind === "pair";
             const pickerOnly = isPickerOnly(output, airplayMode);
+            const syncStatus =
+              sync?.find((s) => s.transport === output.transport && s.device_id === output.id) ??
+              null;
             return (
               <li key={key}>
                 <button
@@ -183,6 +270,13 @@ export function DeviceList({
                         : TRANSPORT_LABELS[output.transport]}
                   </span>
                 </button>
+                {syncStatus && (
+                  <SyncRow
+                    status={syncStatus}
+                    disabled={disabled}
+                    onSetTrim={(trimMs) => onSetTrim(output, trimMs)}
+                  />
+                )}
               </li>
             );
           })}

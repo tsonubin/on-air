@@ -1,10 +1,11 @@
+import type { OutputSyncStatus } from "@on-air/api-types";
 import { DEFAULT_PORT } from "@on-air/api-types";
 import { HttpError, inputLabels } from "@on-air/control-client";
 import { Platform } from "react-native";
 import { formatDesktopTarget, parseDesktopTarget, targetBase } from "@/desktop-target";
 import { friendlyError } from "@/errors";
 import { digitsOnly, isForeground } from "@/remote-session";
-import { outputAction } from "@/sheets/output-sheet";
+import { outputAction, syncSummary } from "@/sheets/output-sheet";
 import { sheetProps } from "@/sheets/sheet-props";
 
 describe("sheetProps", () => {
@@ -23,8 +24,11 @@ describe("sheetProps", () => {
       { $type: "presentationBackground", color: "#171719" },
       { $type: "tint", color: "#ff453a" },
     ]);
-    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 316 }]);
+    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 352 }]);
     expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 300 }]);
+    expect(sheetProps({ kind: "output", count: 2, trim: true }).snapPoints).toEqual([
+      { height: 502 },
+    ]);
     expect(sheetProps({ kind: "output", count: 6 }).snapPoints).toEqual(["full"]);
     expect(sheetProps({ kind: "device-pair", transport: "airplay" }).snapPoints).toEqual([
       { height: 360 },
@@ -119,4 +123,24 @@ test("a speaker row reads its phase: starting connects, failed offers a retry", 
   expect(outputAction({ ...base, selected: true, phase: "starting" })).toBe("Connecting…");
   expect(outputAction({ ...base, selected: true, phase: "failed" })).toBe("Failed · Retry");
   expect(outputAction({ ...base, selected: false, phase: null })).toBe("Connect");
+});
+
+test("a sync line reads state, drift and the manual trim", () => {
+  const row: OutputSyncStatus = {
+    transport: "sonos",
+    device_id: "s",
+    device_name: "S",
+    state: "locked",
+    trim_ms: -100,
+    default_latency_ms: 1000,
+    effective_latency_ms: 900,
+    calibrated: false,
+    delay_frames: 0,
+    output_sample_rate_hz: 48000,
+    drift_ppm: 42.4,
+  };
+  expect(syncSummary(row)).toBe("Locked · 42 ppm · trim -100 ms");
+  expect(syncSummary({ ...row, state: "free_running", drift_ppm: undefined, trim_ms: 0 })).toBe(
+    "Free-running",
+  );
 });

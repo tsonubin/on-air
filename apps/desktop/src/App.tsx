@@ -69,18 +69,21 @@ function App() {
               outputs={snapshot.outputs}
               activeOutput={snapshot.activeOutput}
               airplayMode={snapshot.airplayMode}
+              sync={snapshot.sync?.outputs ?? null}
               connectingOutput={selection.connectingOutput}
               refreshing={selection.refreshingDevices}
               disabled={locked}
               onChooseInput={(name) => void selection.chooseInput(name)}
               onChooseOutput={(output) => void selection.chooseOutput(output)}
+              onSetTrim={(output, trimMs) => selection.setTrim(output, trimMs)}
               onBluetoothSettings={selection.openBluetoothSettings}
               onAirplayInfo={selection.showAirplayHelp}
               onRefresh={() => void selection.refreshDevices()}
             />
-            <MixerFooter mixer={mixer} disabled={locked} />
+            <MixerFooter mixer={mixer} levels={core.levels} disabled={locked} />
             <AudioPerformance
               bufferMs={snapshot.status?.capture_buffer_ms}
+              quality={snapshot.audioQuality}
               disabled={locked || connection !== "ok"}
               onApplied={() => core.refresh("all")}
             />

@@ -1,5 +1,6 @@
 import { Host, type IconName } from "@expo/ui";
 import type { CdStatus, FirewallWarning } from "@on-air/api-types";
+import type { StereoLevels } from "@on-air/control-client";
 import type React from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,6 +10,7 @@ import { Card } from "./ui/card";
 import { FirewallNotice } from "./ui/firewall-notice";
 import { IconTile } from "./ui/icon-tile";
 import { icons } from "./ui/icons";
+import { LevelMeter } from "./ui/level-meter";
 import { NativeIcon } from "./ui/native-icon";
 import { Notice } from "./ui/notice";
 
@@ -282,6 +284,7 @@ export function MixerHome({
   activeOutput,
   outputPhase,
   volume,
+  levels,
   status,
   error,
   firewallWarning,
@@ -303,6 +306,8 @@ export function MixerHome({
   /** Phase of the active output; absent means live (older desktops). */
   outputPhase?: "starting" | "live" | "failed";
   volume: number;
+  /** The latest stereo level reading, or `null` while none is arriving. */
+  levels: StereoLevels | null;
   status: HeaderStatus;
   error?: string | null;
   firewallWarning?: FirewallWarning | null;
@@ -495,6 +500,7 @@ export function MixerHome({
                   />
                 </Host>
               </View>
+              <LevelMeter levels={levels} disabled={volumeDisabled} />
             </Card>
 
             <Pressable

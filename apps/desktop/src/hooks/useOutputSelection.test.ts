@@ -42,4 +42,32 @@ describe("useOutputSelection", () => {
     expect(core.refresh).toHaveBeenCalledWith("devices");
     expect(hook.result.current.connectingOutput).toBeNull();
   });
+
+  it("sends a manual latency trim and refreshes the sync rows", async () => {
+    const { client, core, hook } = setup();
+    await act(() => hook.result.current.setTrim(sonos, -100));
+    expect(client.setSyncTrim).toHaveBeenCalledWith({
+      transport: "sonos",
+      device_id: sonos.id,
+      trim_ms: -100,
+    });
+    expect(core.refresh).toHaveBeenCalledWith("devices");
+    expect(core.reportError).not.toHaveBeenCalled();
+  });
+
+  it("reports a refused trim without leaving a write in flight", async () => {
+    const { client, core, hook } = setup();
+    const err = new HttpError(
+      "/api/sync/trim",
+      400,
+      JSON.stringify({
+        error: "trim_ms must be between -10000 and 10000",
+        code: "invalid_request",
+      }),
+    );
+    client.setSyncTrim.mockRejectedValueOnce(err);
+    await act(() => hook.result.current.setTrim(sonos, 99_999));
+    expect(core.reportError).toHaveBeenCalledWith(err);
+    expect(core.refresh).not.toHaveBeenCalled();
+  });
 });

@@ -15,6 +15,7 @@ const report = {
   worst_case_ms: 25,
   recommended_buffer_ms: 100,
   within_buffer_budget: true,
+  recommended_quality: "high" as const,
 };
 beforeEach(() => jest.clearAllMocks());
 

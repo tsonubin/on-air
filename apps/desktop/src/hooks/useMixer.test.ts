@@ -15,6 +15,8 @@ function snapshotWith(partial: Partial<CoreSnapshot>): CoreSnapshot {
     volume: 50,
     gains: [0, 0, 0, 0, 0],
     sampleRate,
+    audioQuality: null,
+    sync: null,
     pin: null,
     airplayMode: null,
     cd: null,

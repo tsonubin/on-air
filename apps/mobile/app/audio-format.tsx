@@ -1,10 +1,15 @@
 import { Button, FieldGroup, Picker, Row, Spacer, Text } from "@expo/ui";
+import type { DspQuality } from "@on-air/api-types";
 import {
   AUDIO_CHECK_DESCRIPTION,
   AUDIO_CHECK_OVER_BUDGET,
   audioBenchmarkSummary,
   CAPTURE_BUFFER_OPTIONS,
   captureBufferLabel,
+  DSP_QUALITY_COSTS,
+  DSP_QUALITY_DESCRIPTION,
+  DSP_QUALITY_LABELS,
+  DSP_QUALITY_OPTIONS,
 } from "@on-air/control-client";
 import { useRemoteSession } from "@/remote-session";
 import { SettingsForm } from "@/settings-form";
@@ -21,6 +26,8 @@ export default function AudioFormatScreen() {
     applyRate,
     captureBufferMs,
     audioPerformance,
+    audioQuality,
+    applyQuality,
   } = useRemoteSession();
   const report = audioPerformance.report;
   const rows = [
@@ -84,6 +91,30 @@ export default function AudioFormatScreen() {
             ))}
           </Picker>
         </Row>
+        <Row alignment="center">
+          <Text>DSP quality</Text>
+          <Spacer />
+          <Picker
+            selectedValue={audioQuality?.quality}
+            appearance="menu"
+            enabled={view.controlsEnabled && audioQuality !== null && !audioPerformance.busy}
+            onValueChange={(value) => void applyQuality(value as DspQuality)}
+            testID="dsp-quality-picker"
+          >
+            {DSP_QUALITY_OPTIONS.map((profile) => (
+              <Picker.Item
+                key={profile}
+                label={`${DSP_QUALITY_LABELS[profile]}${
+                  audioQuality?.recommended === profile ? " (recommended)" : ""
+                }`}
+                value={profile}
+              />
+            ))}
+          </Picker>
+        </Row>
+        <Text>
+          {DSP_QUALITY_DESCRIPTION} {DSP_QUALITY_COSTS[audioQuality?.quality ?? "balanced"]}
+        </Text>
         <Button
           label={audioPerformance.busy ? "Working…" : "Run audio check"}
           disabled={!view.controlsEnabled || captureBufferMs === undefined || audioPerformance.busy}
@@ -99,6 +130,14 @@ export default function AudioFormatScreen() {
               disabled={!view.controlsEnabled || audioPerformance.busy}
               onPress={() => void audioPerformance.apply(report.recommended_buffer_ms)}
               testID="apply-audio-buffer"
+            />
+            <Button
+              label={`Apply recommended quality (${
+                DSP_QUALITY_LABELS[report.recommended_quality]
+              })`}
+              disabled={!view.controlsEnabled || audioPerformance.busy}
+              onPress={() => void applyQuality(report.recommended_quality)}
+              testID="apply-dsp-quality"
             />
           </>
         )}

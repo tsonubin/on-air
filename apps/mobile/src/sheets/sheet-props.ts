@@ -5,7 +5,11 @@ import { colors } from "@/theme";
 
 export type SheetSpec =
   | { kind: "source" }
-  | { kind: "output"; count: number }
+  | {
+      kind: "output";
+      count: number /** A latency-trim editor is shown below the rows. */;
+      trim?: boolean;
+    }
   | { kind: "device-pair"; transport: string };
 
 type SheetProps = Pick<BottomSheetProps, "modifiers" | "snapPoints" | "showDragIndicator">;
@@ -15,7 +19,10 @@ function iosSnapPoints(spec: SheetSpec): NonNullable<BottomSheetProps["snapPoint
     case "source":
       return [{ height: 280 }];
     case "output":
-      return spec.count > 5 ? ["full"] : [{ height: Math.max(300, 160 + spec.count * 78) }];
+      // Rows carry a sync line; the trim editor adds its own block.
+      return spec.count > 5
+        ? ["full"]
+        : [{ height: Math.max(300, 160 + spec.count * 96 + (spec.trim ? 150 : 0)) }];
     case "device-pair":
       return [{ height: spec.transport === "airplay" ? 360 : 300 }];
   }
