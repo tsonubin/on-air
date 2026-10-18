@@ -7,6 +7,7 @@ pub use pcm::{
     BluetoothEndpoint, OpenedPcmSink, PcmOutput, PcmSink, RecordingPcmSink, SystemPcmOutput,
 };
 
+use crate::dsp::channel::{ChannelMode, Destination};
 use crate::sender::{AudioSender, OutputFormat, SenderError};
 use bytes::Bytes;
 use parking_lot::Mutex;
@@ -206,12 +207,18 @@ impl BluetoothAdapter for SystemBluetoothAdapter {
     }
 }
 
-/// Requested rates and initial app volume, retained across stop/start rollback.
-#[derive(Debug, Clone, Copy)]
+/// Requested rates, channel mode and initial app volume, retained across
+/// stop/start rollback.
+#[derive(Debug, Clone)]
 pub struct BluetoothPlaybackConfig {
     pub pipeline_hz: u32,
     pub output_hz: u32,
     pub volume: u8,
+    /// The user's per-output channel mode (roadmap A4).
+    pub channel_mode: ChannelMode,
+    /// What the destination reported for its channel count, for the A4
+    /// rejection ("stereo on a mono device").
+    pub destination: Destination,
 }
 
 struct LivePlayback {
@@ -286,10 +293,11 @@ impl AudioSender for BluetoothSender {
         let adapter = self.adapter.clone();
         let id = self.device.id.clone();
         let output = self.output.clone();
-        let config = self.config;
+        let config = self.config.clone();
+        let volume = config.volume;
         let opened = tokio::task::spawn_blocking(move || {
             let endpoint = adapter.connect(&id)?;
-            output.open(&endpoint, config.pipeline_hz, config.output_hz)
+            output.open(&endpoint, &config)
         })
         .await
         .map_err(|e| SenderError::internal(format!("Bluetooth preparation task failed: {e}")))??;
@@ -301,7 +309,7 @@ impl AudioSender for BluetoothSender {
         });
         // Apply retained volume before subscribing; rollback cannot emit a burst
         // at the default volume while the caller restores settings later.
-        self.set_volume(config.volume).await?;
+        self.set_volume(volume).await?;
         let live = self.live.as_mut().unwrap();
         let mut rx = self.audio_tx.subscribe();
         let (writer_tx, writer_rx) = sync_channel::<Bytes>(8);

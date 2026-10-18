@@ -1,4 +1,4 @@
-import type { AirPlayMode, OutputInfo, Transport } from "@on-air/api-types";
+import type { AirPlayMode, ChannelMode, OutputInfo, Transport } from "@on-air/api-types";
 import { useCallback, useRef, useState } from "react";
 import { type ClientLike, liveClient } from "../lib/client";
 import { invokeCommand } from "../lib/tauri";
@@ -26,6 +26,7 @@ export interface OutputSelectionHandle {
   refreshingDevices: boolean;
   chooseInput(name: string): Promise<void>;
   chooseOutput(output: OutputInfo): Promise<void>;
+  setChannelMode(output: OutputInfo, mode: ChannelMode): Promise<void>;
   submitPair(pin: string): Promise<void>;
   cancelPair(): void;
   openBluetoothSettings(): void;
@@ -129,6 +130,20 @@ export function useOutputSelection({
     [activate, snapshot.airplayMode],
   );
 
+  /**
+   * Saves one output's channel mode. The mode takes effect on the output's
+   * next activation; the refresh re-reads the saved value the core reports.
+   */
+  const setChannelMode = useCallback(
+    async (output: OutputInfo, mode: ChannelMode) => {
+      await perform(async () => {
+        await client.setChannelMode({ transport: output.transport, device_id: output.id, mode });
+        await refresh("devices");
+      });
+    },
+    [client, perform, refresh],
+  );
+
   const submitPair = useCallback(
     async (pin: string) => {
       if (!pairTarget || pairing) return;
@@ -180,6 +195,7 @@ export function useOutputSelection({
     refreshingDevices,
     chooseInput,
     chooseOutput,
+    setChannelMode,
     submitPair,
     cancelPair,
     openBluetoothSettings,

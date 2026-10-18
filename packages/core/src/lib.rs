@@ -73,6 +73,10 @@ pub fn build_router(state: CoreState) -> Router {
         )
         .route("/api/outputs", get(api::outputs::list_outputs))
         .route(
+            "/api/outputs/channel-mode",
+            put(api::outputs::set_channel_mode),
+        )
+        .route(
             "/api/outputs/active",
             post(api::outputs::activate_output)
                 .get(api::outputs::get_active_output)

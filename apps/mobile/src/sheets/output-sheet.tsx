@@ -1,9 +1,12 @@
 import { BottomSheet, Button, Column, Row, Spacer, Text } from "@expo/ui";
-import type { OutputInfo, OutputPhase } from "@on-air/api-types";
-import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
+import type { ChannelMode, OutputInfo, OutputPhase } from "@on-air/api-types";
+import { CHANNEL_MODE_LABELS, outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
 import { useRemoteSession } from "@/remote-session";
 import { theme } from "@/theme";
 import { sheetProps } from "./sheet-props";
+
+/** The modes a speaker offers, in the order the control lists them. */
+const CHANNEL_MODES: readonly ChannelMode[] = ["auto", "stereo", "mono"];
 
 /** The trailing word on a speaker row. */
 export function outputAction({
@@ -38,8 +41,16 @@ export function OutputSheet({
   /** The speaker needs a PIN or confirmation before it can play. */
   onPairRequest: (output: OutputInfo) => void;
 }) {
-  const { outputs, activeOutput, airplayMode, busyTarget, view, activate, openBluetoothSettings } =
-    useRemoteSession();
+  const {
+    outputs,
+    activeOutput,
+    airplayMode,
+    busyTarget,
+    view,
+    activate,
+    openBluetoothSettings,
+    applyChannelMode,
+  } = useRemoteSession();
 
   const choose = async (output: OutputInfo) => {
     if (output.needs_pair && !output.paired) {
@@ -62,6 +73,7 @@ export function OutputSheet({
           <Spacer />
           <Button label="Done" variant="text" onPress={onClose} />
         </Row>
+        <Text>Auto fits the speaker, Stereo never downmixes, and Mono mixes left and right.</Text>
         {outputs.length === 0 && <Text>Waiting for speakers on the LAN…</Text>}
         {airplayMode === "avroute-picker" && (
           <Text>AirPlay selection is available from the desktop picker on macOS.</Text>
@@ -80,23 +92,44 @@ export function OutputSheet({
           const desktopOnly = output.transport === "airplay" && airplayMode === "avroute-picker";
           const working = busyTarget === `${output.transport}:${output.id}`;
           const stereoPair = output.member_count >= 2 || output.kind === "pair";
+          // An absent saved mode is `auto`, the historical fit.
+          const mode = output.channel_mode ?? "auto";
           return (
-            <Button
-              key={`${output.transport}-${output.id}`}
-              variant={selected && phase === "live" ? "filled" : "outlined"}
-              disabled={!view.controlsEnabled || busyTarget !== null || desktopOnly}
-              onPress={() => void choose(output)}
-              testID={`output-${output.transport}-${output.id}`}
-            >
+            <Column key={`${output.transport}-${output.id}`} spacing={theme.spacing.xs}>
+              <Button
+                variant={selected && phase === "live" ? "filled" : "outlined"}
+                disabled={!view.controlsEnabled || busyTarget !== null || desktopOnly}
+                onPress={() => void choose(output)}
+                testID={`output-${output.transport}-${output.id}`}
+              >
+                <Row alignment="center" spacing={theme.spacing.sm}>
+                  <Column spacing={theme.spacing.xs}>
+                    <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
+                    <Text testID={`channel-mode-${output.transport}-${output.id}-badge`}>{`${
+                      stereoPair ? "Stereo pair · " : ""
+                    }${TRANSPORT_LABELS[output.transport]} · ${CHANNEL_MODE_LABELS[mode]}`}</Text>
+                  </Column>
+                  <Spacer />
+                  <Text>{outputAction({ desktopOnly, working, selected, phase, output })}</Text>
+                </Row>
+              </Button>
               <Row alignment="center" spacing={theme.spacing.sm}>
-                <Column spacing={theme.spacing.xs}>
-                  <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
-                  <Text>{`${stereoPair ? "Stereo pair · " : ""}${TRANSPORT_LABELS[output.transport]}`}</Text>
-                </Column>
+                <Text>Channel</Text>
                 <Spacer />
-                <Text>{outputAction({ desktopOnly, working, selected, phase, output })}</Text>
+                <Row spacing={theme.spacing.xs}>
+                  {CHANNEL_MODES.map((pick) => (
+                    <Button
+                      key={pick}
+                      label={CHANNEL_MODE_LABELS[pick]}
+                      variant={pick === mode ? "filled" : "text"}
+                      disabled={!view.controlsEnabled || busyTarget !== null}
+                      onPress={() => void applyChannelMode(output, pick)}
+                      testID={`channel-mode-${output.transport}-${output.id}-${pick}`}
+                    />
+                  ))}
+                </Row>
               </Row>
-            </Button>
+            </Column>
           );
         })}
       </Column>

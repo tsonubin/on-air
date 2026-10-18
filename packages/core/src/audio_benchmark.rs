@@ -1,6 +1,7 @@
 //! A small, isolated run of the real DSP pipeline. No samples are sent to a
 //! live output, and settings change only through the separate buffer action.
 use crate::dsp::bridge::RateBridge;
+use crate::dsp::channel::{Destination, SinkConstruction};
 use crate::dsp::PIPELINE_CHANNELS;
 use crate::pipeline::{new_ring_buffer, spawn_processing_task};
 use on_air_api::AudioBenchmark;
@@ -57,7 +58,11 @@ pub fn run(
         let samples: Vec<_> = (0..CHUNK_FRAMES)
             .flat_map(|i| [(i as f32 * 0.05).sin() * 0.3; PIPELINE_CHANNELS])
             .collect();
-        let mut bridge = RateBridge::new(input_hz, output_hz, 2);
+        let mut bridge = RateBridge::new(
+            input_hz,
+            output_hz,
+            &SinkConstruction::Benchmark.auto(Destination::stereo("benchmark")),
+        );
         let quantum = Duration::from_secs_f64(CHUNK_FRAMES as f64 / f64::from(input_hz));
         let started = Instant::now();
         let mut deadline = started;

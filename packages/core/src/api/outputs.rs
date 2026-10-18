@@ -7,8 +7,8 @@ use axum::http::StatusCode;
 use axum::Json;
 
 pub use on_air_api::{
-    ActivateOutputRequest, ActiveOutputResponse, ActiveOutputView, OutputVolumeResponse,
-    OutputsResponse, SetVolumeRequest,
+    ActivateOutputRequest, ActiveOutputResponse, ActiveOutputView, ChannelMode,
+    OutputVolumeResponse, OutputsResponse, SetChannelModeRequest, SetVolumeRequest,
 };
 
 pub async fn list_outputs(Paired: Paired, State(state): State<CoreState>) -> Json<OutputsResponse> {
@@ -77,5 +77,33 @@ pub async fn set_output_volume(
         return Err(ApiError::validation("volume must be between 0 and 100"));
     }
     session::set_volume(&state, req.volume).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `PUT /api/outputs/channel-mode`: how one output fits the pipeline stereo
+/// signal to its destination (roadmap A4). `stereo` on a destination the
+/// core knows plays mono is refused with an explanation of what to do,
+/// never silently collapsed; the mode is saved and takes effect the next
+/// time that output opens (its next activation or stream connection).
+pub async fn set_channel_mode(
+    Paired: Paired,
+    State(state): State<CoreState>,
+    JsonBody(req): JsonBody<SetChannelModeRequest>,
+) -> Result<StatusCode, ApiError> {
+    if req.mode == ChannelMode::Stereo {
+        let known = session::list(&state)
+            .await
+            .into_iter()
+            .find(|output| output.transport == req.transport && output.id == req.device_id);
+        if let Some(output) = known {
+            if output.channels == Some(1) {
+                return Err(ApiError::validation(
+                    crate::dsp::channel::ChannelModeError::StereoOnMono { name: output.name }
+                        .message(),
+                ));
+            }
+        }
+    }
+    state.remember_channel_mode(&req.transport, &req.device_id, req.mode);
     Ok(StatusCode::NO_CONTENT)
 }

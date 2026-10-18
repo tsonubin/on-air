@@ -1,5 +1,6 @@
 use crate::api::error::ApiError;
 use crate::dsp::bridge::RateBridge;
+use crate::dsp::channel::{ChannelMode, ChannelPlan, Destination, SinkConstruction};
 use crate::dsp::PIPELINE_CHANNELS;
 use crate::state::CoreState;
 use axum::body::Body;
@@ -23,9 +24,11 @@ impl Drop for StreamClientGuard {
     }
 }
 
-/// Streaming WAV header: 16-bit PCM stereo, unknown/very large data size so
-/// Sonos can treat the radio GET as a live HTTP source.
-fn wav_header(sample_rate: u32, channels: u16) -> Bytes {
+/// Streaming WAV header: 16-bit PCM, unknown/very large data size so Sonos
+/// can treat the radio GET as a live HTTP source. The channel count is the
+/// plan's, never a caller-spelled number (roadmap A6).
+fn wav_header(sample_rate: u32, plan: &ChannelPlan) -> Bytes {
+    let channels = plan.channels() as u16;
     let bits = 16u16;
     let byte_rate = sample_rate * u32::from(channels) * u32::from(bits) / 8;
     let block_align = channels * bits / 8;
@@ -47,10 +50,20 @@ fn wav_header(sample_rate: u32, channels: u16) -> Bytes {
     Bytes::from(h)
 }
 
-fn silence_chunk(sample_rate: u32) -> Bytes {
+fn silence_chunk(sample_rate: u32, plan: &ChannelPlan) -> Bytes {
     let frames =
         ((u64::from(sample_rate) * SILENCE_INTERVAL.as_millis() as u64) / 1_000).max(1) as usize;
-    Bytes::from(vec![0; frames.saturating_mul(PIPELINE_CHANNELS * 2)])
+    Bytes::from(vec![0; frames.saturating_mul(plan.channels() * 2)])
+}
+
+/// The radio WAV's channel fit: the construction site Sonos and AirPlay
+/// pull (walked by `tests/channel_construction.rs`, roadmap A6). The
+/// surface is stereo by construction, so every mode fits; `auto` keeps the
+/// historical stereo stream byte for byte (roadmap A4).
+pub fn radio_plan(mode: ChannelMode) -> ChannelPlan {
+    SinkConstruction::RadioWav
+        .plan(mode, Destination::stereo("the radio stream"))
+        .expect("the radio surface is stereo, so every mode but stereo-on-mono fits")
 }
 
 /// True while a Sonos or AirPlay output owns `nonce`, the path segment
@@ -87,16 +100,28 @@ pub async fn stream_audio(
     let rx = state.audio_tx.subscribe();
     let pipeline_hz = *state.target_sample_rate_hz.lock();
     let output_hz = *state.output_sample_rate_hz.lock();
-    let header = wav_header(output_hz, PIPELINE_CHANNELS as u16);
+    // The radio serves Sonos and AirPlay: a stereo WAV surface whose
+    // channel mode belongs to the active output (mono becomes a genuine
+    // mono WAV; `auto` is byte-identical to the historical stereo stream).
+    let plan = {
+        let identity = state.output().snapshot().identity;
+        let mode = identity
+            .as_ref()
+            .map(|output| state.channel_mode(&output.transport, &output.device_id))
+            .unwrap_or_default();
+        radio_plan(mode)
+    };
+    let header = wav_header(output_hz, &plan);
+    let stream_channels = plan.channels();
     let pcm = BroadcastStream::new(rx).filter_map({
-        let mut bridge = RateBridge::new(pipeline_hz, output_hz, PIPELINE_CHANNELS);
+        let mut bridge = RateBridge::new(pipeline_hz, output_hz, &plan);
         let _client_guard = client_guard;
         move |item| {
             let _ = &_client_guard;
             let Ok(chunk) = item else {
                 return None;
             };
-            if pipeline_hz == output_hz {
+            if pipeline_hz == output_hz && stream_channels == PIPELINE_CHANNELS {
                 return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
             }
             let resampled = bridge.process_l16_to_l16(&chunk);
@@ -106,7 +131,7 @@ pub async fn stream_audio(
             Some(Ok(Bytes::from(resampled)))
         }
     });
-    let silence = silence_chunk(output_hz);
+    let silence = silence_chunk(output_hz, &plan);
     let mut silence_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + SILENCE_INTERVAL,
         SILENCE_INTERVAL,
@@ -157,4 +182,28 @@ pub async fn stream_audio(
         body,
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The channels field of a RIFF header sits at byte offset 22.
+    fn header_channels(header: &Bytes) -> u16 {
+        u16::from_le_bytes([header[22], header[23]])
+    }
+
+    #[test]
+    fn the_wav_header_and_silence_follow_the_channel_plan() {
+        let auto = radio_plan(ChannelMode::Auto);
+        assert_eq!(u16::try_from(auto.channels()).unwrap(), PIPELINE_CHANNELS as u16);
+        assert_eq!(header_channels(&wav_header(44_100, &auto)), 2);
+        assert_eq!(silence_chunk(44_100, &auto).len() % 4, 0);
+        let mono = radio_plan(ChannelMode::Mono);
+        assert_eq!(mono.channels(), 1);
+        // A genuine mono WAV: one channel in the header, mono silence —
+        // never a duplicated mono pair.
+        assert_eq!(header_channels(&wav_header(44_100, &mono)), 1);
+        assert_eq!(silence_chunk(44_100, &mono).len() % 2, 0);
+    }
 }

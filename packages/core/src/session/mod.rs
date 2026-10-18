@@ -1,3 +1,4 @@
+use crate::dsp::channel::Destination;
 use crate::dsp::rates;
 use crate::net::{local_lan_ip, local_lan_ip_toward};
 use crate::sender::airplay::AirPlaySender;
@@ -7,6 +8,7 @@ use crate::sender::bluetooth::{
 use crate::sender::sonos::SonosSender;
 use crate::sender::{AudioSender, NullSender, SenderError};
 use crate::state::CoreState;
+use on_air_api::ChannelMode;
 use std::fmt::Write as _;
 
 mod output;
@@ -37,26 +39,45 @@ pub use on_air_api::OutputInfo;
 pub const FEEDBACK_LOOP: &str =
     "System audio already plays on this computer. Choose a capture input or another speaker.";
 
+/// One output's saved channel mode as the API reports it: absent when the
+/// output is on the historical `auto` fit.
+fn saved_channel_mode(state: &CoreState, transport: &str, device_id: &str) -> Option<ChannelMode> {
+    let mode = state.channel_mode(transport, device_id);
+    (mode != ChannelMode::Auto).then_some(mode)
+}
+
 pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     let mut outputs = Vec::new();
-    if !state.mock && !state.patchbay_endpoint {
-        let local = tokio::task::spawn_blocking(crate::sender::local::query)
+    let local = if state.mock {
+        state.mock_local_outputs.lock().clone()
+    } else if state.patchbay_endpoint {
+        Vec::new()
+    } else {
+        tokio::task::spawn_blocking(crate::sender::local::query)
             .await
-            .unwrap_or_default();
-        for d in local {
-            outputs.push(OutputInfo {
-                id: d.id,
-                name: d.name,
-                transport: crate::sender::local::TRANSPORT.into(),
-                kind: "solo".into(),
-                member_count: 1,
-                needs_pair: false,
-                paired: true,
-            });
-        }
+            .unwrap_or_default()
+    };
+    for d in local {
+        outputs.push(OutputInfo {
+            channel_mode: saved_channel_mode(
+                state,
+                crate::sender::local::TRANSPORT,
+                &d.id,
+            ),
+            channels: d.channels,
+            id: d.id,
+            name: d.name,
+            transport: crate::sender::local::TRANSPORT.into(),
+            kind: "solo".into(),
+            member_count: 1,
+            needs_pair: false,
+            paired: true,
+        });
     }
     for d in state.sonos.lock().await.list() {
         outputs.push(OutputInfo {
+            channel_mode: saved_channel_mode(state, "sonos", &d.usn),
+            channels: None,
             id: d.usn,
             name: d.friendly_name,
             transport: "sonos".into(),
@@ -68,6 +89,8 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     }
     for d in state.airplay.lock().iter() {
         outputs.push(OutputInfo {
+            channel_mode: saved_channel_mode(state, "airplay", &d.id),
+            channels: None,
             id: d.id.clone(),
             name: d.name.clone(),
             transport: "airplay".into(),
@@ -80,6 +103,8 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     let bluetooth_devices = state.bluetooth_devices().await.unwrap_or_default();
     for d in bluetooth_devices {
         outputs.push(OutputInfo {
+            channel_mode: saved_channel_mode(state, "bluetooth", &d.id),
+            channels: None,
             id: d.id,
             name: d.name,
             transport: "bluetooth".into(),
@@ -281,6 +306,7 @@ async fn build_local(state: &CoreState, device_id: &str) -> Result<Built, Activa
         .into_iter()
         .find(|o| o.id == device_id)
         .ok_or(ActivateError::NotFound)?;
+    let destination = output.destination();
     let adapter = crate::sender::local::LocalPortAdapter::new(output);
     let device = adapter.device();
     let identity = ActiveOutput {
@@ -292,6 +318,8 @@ async fn build_local(state: &CoreState, device_id: &str) -> Result<Built, Activa
         pipeline_hz: *state.target_sample_rate_hz.lock(),
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        channel_mode: state.channel_mode(crate::sender::local::TRANSPORT, &device.id),
+        destination,
     };
     Ok(Built {
         sender: Box::new(
@@ -333,6 +361,11 @@ async fn build_bluetooth(state: &CoreState, device_id: &str) -> Result<Built, Ac
         pipeline_hz: *state.target_sample_rate_hz.lock(),
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        channel_mode: state.channel_mode("bluetooth", &device.id),
+        // Bluetooth via Pulse plays to a sink the core cannot probe here;
+        // the Native (cpal) sink re-checks against the real device report
+        // when it opens and refuses `stereo` on a mono endpoint there.
+        destination: Destination::unknown(device.name.clone()),
     };
     Ok(Built {
         sender: Box::new(BluetoothSender::new(

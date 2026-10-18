@@ -74,6 +74,7 @@ function App() {
               disabled={locked}
               onChooseInput={(name) => void selection.chooseInput(name)}
               onChooseOutput={(output) => void selection.chooseOutput(output)}
+              onSetChannelMode={(output, mode) => void selection.setChannelMode(output, mode)}
               onBluetoothSettings={selection.openBluetoothSettings}
               onAirplayInfo={selection.showAirplayHelp}
               onRefresh={() => void selection.refreshDevices()}

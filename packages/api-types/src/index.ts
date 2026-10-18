@@ -153,6 +153,20 @@ export interface ActivateInputRequest {
 // Outputs
 // ---------------------------------------------------------------------------
 
+/**
+ * How one output's pipeline stereo signal is fitted to its destination.
+ * `auto` is the historical behaviour and never changes what a listener
+ * hears; `mono` is a true `(L + R) / 2` downmix into a genuinely mono
+ * stream; `stereo` is rejected with an explanation on a mono destination.
+ */
+export type ChannelMode = "auto" | "stereo" | "mono";
+
+export const CHANNEL_MODE_LABELS: Record<ChannelMode, string> = {
+  auto: "Auto",
+  stereo: "Stereo",
+  mono: "Mono",
+};
+
 export interface OutputInfo {
   id: string;
   name: string;
@@ -161,6 +175,16 @@ export interface OutputInfo {
   member_count: number;
   needs_pair: boolean;
   paired: boolean;
+  /** Saved channel mode; absent means `auto`. */
+  channel_mode?: ChannelMode;
+  /** Destination channel count when the core can probe it. */
+  channels?: number;
+}
+
+export interface SetChannelModeRequest {
+  transport: Transport;
+  device_id: string;
+  mode: ChannelMode;
 }
 
 export interface OutputsResponse {

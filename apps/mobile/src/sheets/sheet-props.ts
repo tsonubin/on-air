@@ -15,7 +15,8 @@ function iosSnapPoints(spec: SheetSpec): NonNullable<BottomSheetProps["snapPoint
     case "source":
       return [{ height: 280 }];
     case "output":
-      return spec.count > 5 ? ["full"] : [{ height: Math.max(300, 160 + spec.count * 78) }];
+      // Each speaker adds its row plus the channel-mode control under it.
+      return spec.count > 5 ? ["full"] : [{ height: Math.max(340, 210 + spec.count * 124) }];
     case "device-pair":
       return [{ height: spec.transport === "airplay" ? 360 : 300 }];
   }

@@ -13,6 +13,7 @@ pub enum Action {
     Down,
     Up,
     Select,
+    CycleChannel,
     AdjustUp,
     AdjustDown,
     FineUp,
@@ -62,6 +63,11 @@ pub const KEYS: &[Binding] = &[
         keys: "Enter",
         action: Action::Select,
         help: "Activate the source or output (opens pairing when needed)",
+    },
+    Binding {
+        keys: "c",
+        action: Action::CycleChannel,
+        help: "Output channel mode: auto / stereo / mono",
     },
     Binding {
         keys: "h / l, ← / →",
@@ -210,6 +216,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             'g' => Action::GotoTrack,
             'e' => Action::Eject,
             'm' => Action::Monitor,
+            'c' => Action::CycleChannel,
             'a' => Action::Autostart,
             'i' => Action::Status,
             'b' => Action::Bluetooth,
@@ -242,9 +249,13 @@ mod tests {
             action_for(&press(KeyCode::Char('m'))),
             Some(Action::Monitor)
         );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('c'))),
+            Some(Action::CycleChannel)
+        );
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 23);
+        assert_eq!(KEYS.len(), 24);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),

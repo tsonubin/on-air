@@ -1,10 +1,13 @@
+use super::channel::ChannelPlan;
 use audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Async, FixedAsync, PolynomialDegree, Resampler};
 
 const CHUNK_SIZE: usize = 1024;
 
-/// Resamples fixed-size chunks of interleaved PCM with `channels` samples
-/// per frame.
+/// Resamples fixed-size chunks of interleaved PCM with `plan.channels()`
+/// samples per frame. The plan is the same justified channel request every
+/// sender-side construction uses ([`super::channel`]), so no construction
+/// can quietly ask for a mono layout on a stereo path.
 pub struct PcmResampler {
     inner: Async<f32>,
     channels: usize,
@@ -12,8 +15,8 @@ pub struct PcmResampler {
 }
 
 impl PcmResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
-        let channels = channels.max(1);
+    pub fn new(input_rate_hz: u32, output_rate_hz: u32, plan: &ChannelPlan) -> Self {
+        let channels = plan.channels().max(1);
         let ratio = output_rate_hz as f64 / input_rate_hz as f64;
         let inner = Async::<f32>::new_poly(
             ratio,
@@ -82,11 +85,11 @@ pub struct StreamingResampler {
 }
 
 impl StreamingResampler {
-    pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
+    pub fn new(input_rate_hz: u32, output_rate_hz: u32, plan: &ChannelPlan) -> Self {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels))
+            Some(PcmResampler::new(input_rate_hz, output_rate_hz, plan))
         };
         StreamingResampler {
             input_rate_hz,

@@ -29,6 +29,8 @@ async fn bluetooth_sender_pumps_pipeline_pcm_into_the_sink() {
             pipeline_hz: 44_100,
             output_hz: 44_100,
             volume: 100,
+            channel_mode: on_air_core::dsp::channel::ChannelMode::Auto,
+            destination: on_air_core::dsp::channel::Destination::stereo("BT"),
         },
     );
     sender.start().await.unwrap();

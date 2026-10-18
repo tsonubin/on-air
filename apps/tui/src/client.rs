@@ -251,6 +251,14 @@ impl Client {
                 self.activate_output(&transport, &device_id).await,
             ),
             Cmd::DeactivateOutput => done(update::LABEL_STOP, self.deactivate_output().await),
+            Cmd::SetChannelMode {
+                transport,
+                device_id,
+                mode,
+            } => done(
+                update::LABEL_CHANNEL_MODE,
+                self.set_channel_mode(&transport, &device_id, mode).await,
+            ),
             Cmd::SetVolume(volume) => written(MixerControl::Volume, self.set_volume(volume).await),
             Cmd::SetEq(gains) => written(MixerControl::Eq, self.set_eq(gains).await),
             Cmd::SetSampleRate {
@@ -554,6 +562,23 @@ impl Client {
             Method::POST,
             "/api/outputs/active/volume",
             json!({ "volume": volume }),
+            READ_TIMEOUT,
+        )
+        .await
+    }
+
+    /// One output's channel mode (roadmap A4). The core refuses `stereo` on
+    /// a device it knows plays mono, with an explanation of what to do.
+    pub async fn set_channel_mode(
+        &self,
+        transport: &str,
+        device_id: &str,
+        mode: crate::api::ChannelMode,
+    ) -> Result<(), ClientError> {
+        self.send_json(
+            Method::PUT,
+            "/api/outputs/channel-mode",
+            json!({ "transport": transport, "device_id": device_id, "mode": mode }),
             READ_TIMEOUT,
         )
         .await

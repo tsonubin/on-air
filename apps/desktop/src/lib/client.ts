@@ -9,6 +9,7 @@ import {
   type EqGains,
   type OutputInfo,
   type SampleRateResponse,
+  type SetChannelModeRequest,
   type SetSampleRateRequest,
   type StatusResponse,
   type Transport,
@@ -29,6 +30,7 @@ export interface ClientLike {
   getActiveInput(): Promise<ActiveInputResponse>;
   activateInput(name: string): Promise<void>;
   listOutputs(): Promise<OutputInfo[]>;
+  setChannelMode(body: SetChannelModeRequest): Promise<void>;
   getActiveOutput(): Promise<ActiveOutputView | null>;
   activateOutput(transport: Transport, deviceId: string): Promise<void>;
   deactivateOutput(): Promise<void>;
@@ -55,6 +57,7 @@ function createClient(base: string = API_BASE): ClientLike {
     getActiveInput: () => cc.getActiveInput(base),
     activateInput: (name) => cc.activateInput(base, name),
     listOutputs: () => cc.listOutputs(base),
+    setChannelMode: (body) => cc.setChannelMode(base, body),
     getActiveOutput: () => cc.getActiveOutput(base),
     activateOutput: (transport, deviceId) => cc.activateOutput(base, transport, deviceId),
     deactivateOutput: () => cc.deactivateOutput(base),

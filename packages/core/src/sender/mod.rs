@@ -21,6 +21,10 @@ pub enum SenderError {
     /// (not paired, helper not running, already started).
     #[error("{0}")]
     NotReady(String),
+    /// The user's channel mode cannot fit the destination (stereo on a mono
+    /// device). Carries the explanation shown to the user.
+    #[error("{0}")]
+    ChannelMode(String),
     /// The receiver, sidecar or helper process could not be reached.
     #[error("{0}")]
     Transport(String),

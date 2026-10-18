@@ -27,6 +27,7 @@ jest.mock("@on-air/control-client", () => ({
   setVolume: jest.fn(),
   setEq: jest.fn(),
   setSampleRate: jest.fn(),
+  setChannelMode: jest.fn(),
   pairAirplay: jest.fn(),
   pairBluetooth: jest.fn(),
   openBluetoothSettings: jest.fn(),
@@ -114,6 +115,7 @@ function mockDesktop() {
   api.setVolume.mockResolvedValue(undefined);
   api.setEq.mockResolvedValue(undefined);
   api.setSampleRate.mockResolvedValue(undefined);
+  api.setChannelMode.mockResolvedValue(undefined);
   api.pairAirplay.mockResolvedValue(undefined);
   api.pairBluetooth.mockResolvedValue(undefined);
   api.openBluetoothSettings.mockResolvedValue(undefined);
@@ -368,6 +370,80 @@ test("a speaker that is still starting is not shown as live; a failed one can be
   expect(text()).toContain("Failed · Retry");
   await press("output-sonos-uuid:mock-sonos");
   expect(api.activateOutput).toHaveBeenCalledWith(BASE, "sonos", "uuid:mock-sonos", TOKEN);
+});
+
+test("the output sheet shows each speaker's channel mode and saves picks", async () => {
+  api.listOutputs.mockResolvedValue([
+    { ...OUTPUTS[0], channel_mode: "stereo" },
+    OUTPUTS[1],
+    OUTPUTS[2],
+    { ...OUTPUTS[3], channel_mode: "mono" },
+  ]);
+  await renderApp();
+  await pairWith();
+  await press("output-row");
+
+  // An absent saved mode shows Auto; each mode renders its label.
+  expect(host("channel-mode-sonos-uuid:mock-sonos-badge").props.children).toBe("Sonos · Stereo");
+  expect(host("channel-mode-airplay-ap-living-badge").props.children).toBe(
+    "Stereo pair · AirPlay · Auto",
+  );
+  expect(host("channel-mode-airplay-ap-locked-badge").props.children).toBe("AirPlay · Auto");
+  expect(host("channel-mode-bluetooth-bt-speaker-badge").props.children).toBe("Bluetooth · Mono");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-stereo").props.variant).toBe("filled");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-auto").props.variant).toBe("text");
+  expect(host("channel-mode-airplay-ap-living-auto").props.variant).toBe("filled");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-mono").props.label).toBe("Mono");
+  expect(text()).toContain(
+    "Auto fits the speaker, Stereo never downmixes, and Mono mixes left and right.",
+  );
+
+  // Picking a mode saves it for that speaker and refetches what the core holds.
+  api.listOutputs.mockResolvedValue([{ ...OUTPUTS[0], channel_mode: "mono" }, ...OUTPUTS.slice(1)]);
+  await press("channel-mode-sonos-uuid:mock-sonos-mono");
+  expect(api.setChannelMode).toHaveBeenCalledWith(
+    BASE,
+    { transport: "sonos", device_id: "uuid:mock-sonos", mode: "mono" },
+    TOKEN,
+  );
+  expect(host("channel-mode-sonos-uuid:mock-sonos-badge").props.children).toBe("Sonos · Mono");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-mono").props.variant).toBe("filled");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-stereo").props.variant).toBe("text");
+
+  // Every speaker sends its own transport and device id.
+  await press("channel-mode-airplay-ap-living-stereo");
+  expect(api.setChannelMode).toHaveBeenLastCalledWith(
+    BASE,
+    { transport: "airplay", device_id: "ap-living", mode: "stereo" },
+    TOKEN,
+  );
+});
+
+test("a refused channel mode shows the core's explanation and keeps the previous choice", async () => {
+  await renderApp();
+  await pairWith();
+  await press("output-row");
+  api.setChannelMode.mockRejectedValueOnce(
+    new client.HttpError(
+      "/api/outputs/channel-mode",
+      400,
+      '{"code":"invalid_request","error":"Mock Sonos plays mono only; stereo would drop the right channel. Choose Auto or Mono."}',
+    ),
+  );
+  await press("channel-mode-sonos-uuid:mock-sonos-stereo");
+  expect(api.setChannelMode).toHaveBeenCalledWith(
+    BASE,
+    { transport: "sonos", device_id: "uuid:mock-sonos", mode: "stereo" },
+    TOKEN,
+  );
+  expect(text()).toContain(
+    "Mock Sonos plays mono only; stereo would drop the right channel. Choose Auto or Mono.",
+  );
+
+  // The core saved nothing, so the sheet keeps showing the previous choice.
+  expect(host("channel-mode-sonos-uuid:mock-sonos-badge").props.children).toBe("Sonos · Auto");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-auto").props.variant).toBe("filled");
+  expect(host("channel-mode-sonos-uuid:mock-sonos-stereo").props.variant).toBe("text");
 });
 
 test("restores a saved pairing, including a non-default port, without discovery", async () => {

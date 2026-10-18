@@ -25,6 +25,7 @@ import {
   type OutputVolumeResponse,
   type PinResponse,
   type SampleRateResponse,
+  type SetChannelModeRequest,
   type SetEqRequest,
   type SetSampleRateRequest,
   type SetVolumeRequest,
@@ -392,6 +393,21 @@ export async function getVolume(
     opts,
   );
   return body.volume;
+}
+
+/**
+ * How one output fits the pipeline stereo signal to its destination
+ * (roadmap A4). The core refuses `stereo` on a destination it knows plays
+ * mono with an explanation of what to do; the mode is saved and applies
+ * from the output's next activation or stream connection.
+ */
+export async function setChannelMode(
+  base: string,
+  body: SetChannelModeRequest,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(base, "/api/outputs/channel-mode", jsonInit("PUT", token, body), opts);
 }
 
 // ---------------------------------------------------------------------------

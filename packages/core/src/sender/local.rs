@@ -13,6 +13,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use serde_json::Value;
 
+use crate::dsp::channel::Destination;
 use crate::sender::bluetooth::{BluetoothAdapter, BluetoothDevice, BluetoothEndpoint};
 use crate::sender::SenderError;
 
@@ -28,6 +29,19 @@ pub struct LocalOutput {
     pub port: Option<String>,
     /// Where `pacat` plays: the sink, or the virtual chain in front of it.
     pub target: String,
+    /// What Pulse reports for the sink's channel count; `None` when it did
+    /// not say (roadmap A4 then treats the destination as unknown).
+    pub channels: Option<u8>,
+}
+
+impl LocalOutput {
+    /// Where this output plays, as far as its channel count is known.
+    pub fn destination(&self) -> Destination {
+        match self.channels {
+            Some(channels) => Destination::reported(self.name.clone(), u16::from(channels)),
+            None => Destination::unknown(self.name.clone()),
+        }
+    }
 }
 
 fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
@@ -40,6 +54,15 @@ fn property<'a>(value: &'a Value, key: &str) -> &'a str {
         .and_then(|p| p.get(key))
         .and_then(Value::as_str)
         .unwrap_or("")
+}
+
+/// The sink's channel count from `sample_specification`
+/// ("s16le 2ch 44100Hz"), or `None` when Pulse did not report one.
+fn sink_channels(sink: &Value) -> Option<u8> {
+    str_field(sink, "sample_specification")
+        .split_whitespace()
+        .find_map(|token| token.strip_suffix("ch"))
+        .and_then(|count| count.parse().ok())
 }
 
 /// Local hardware: an ALSA (or other native) sink that is not Bluetooth and
@@ -90,6 +113,7 @@ pub fn parse(sinks_json: &str, default_sink: Option<&str>) -> Result<Vec<LocalOu
                 sink: sink_name.into(),
                 port: None,
                 target: target.into(),
+                channels: sink_channels(sink),
             });
             continue;
         }
@@ -101,6 +125,7 @@ pub fn parse(sinks_json: &str, default_sink: Option<&str>) -> Result<Vec<LocalOu
                 sink: sink_name.into(),
                 port: Some(port_name.into()),
                 target: target.into(),
+                channels: sink_channels(sink),
             });
         }
     }
@@ -247,7 +272,7 @@ mod tests {
        "properties":{"node.virtual":"true","media.class":"Audio/Sink"}},
       {"name":"on_air_68693d02ab4fbb23","description":"On-Air desktop (On-Air)","ports":[],"properties":{}},
       {"name":"alsa_output.pci-0000_00_1b.0.analog-stereo","description":"Built-in Audio Analog Stereo",
-       "active_port":"analog-output-speaker",
+       "active_port":"analog-output-speaker","sample_specification":"s16le 2ch 44100Hz",
        "ports":[
          {"name":"analog-output-speaker","description":"Speakers","availability":"availability unknown"},
          {"name":"analog-output-headphones","description":"Headphones","availability":"not available"}],
@@ -269,8 +294,22 @@ mod tests {
                 sink: "alsa_output.pci-0000_00_1b.0.analog-stereo".into(),
                 port: Some("analog-output-speaker".into()),
                 target: "effect_input.macbookpro11_dsp".into(),
+                channels: Some(2),
             }]
         );
+    }
+
+    #[test]
+    fn a_mono_sink_reports_a_mono_destination() {
+        let mono = MACBOOK.replace("s16le 2ch 44100Hz", "s16le 1ch 22050Hz");
+        let outputs = parse(&mono, None).unwrap();
+        assert_eq!(outputs[0].channels, Some(1));
+        assert!(outputs[0].destination().is_mono());
+        // No sample specification: the destination is honestly unknown.
+        let unknown = MACBOOK.replace("\"sample_specification\":\"s16le 2ch 44100Hz\",", "");
+        let outputs = parse(&unknown, None).unwrap();
+        assert_eq!(outputs[0].channels, None);
+        assert!(!outputs[0].destination().is_mono());
     }
 
     #[test]

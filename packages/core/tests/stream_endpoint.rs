@@ -878,3 +878,88 @@ async fn radio_wav_announces_stereo_l16() {
     let silence = stream.next().await.unwrap().unwrap();
     assert_eq!(silence.len() % 4, 0, "silence fill is whole stereo frames");
 }
+
+/// Roadmap A4, at the wire: mono on a stereo destination is a true downmix
+/// into a genuinely mono stream, and `auto` stays byte-identical to the
+/// historical stereo radio.
+#[tokio::test]
+async fn a_mono_channel_mode_serves_a_genuine_mono_wav_and_auto_stays_stereo() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let state = CoreState::new();
+    let nonce = new_stream_nonce();
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
+    let app = on_air_core::build_router(state.clone());
+
+    let set_mode = |mode: &'static str| {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::put("/api/outputs/channel-mode")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"transport":"sonos","device_id":"uuid:test","mode":"{mode}"}}"#
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let header_channels = |header: &bytes::Bytes| u16::from_le_bytes([header[22], header[23]]);
+
+    // The user picks Mono for this output through the real API; the change
+    // applies from this output's next stream connection.
+    assert_eq!(
+        set_mode("mono").await.status(),
+        axum::http::StatusCode::NO_CONTENT
+    );
+    let response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/stream/{nonce}/audio.wav"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+    let header = stream.next().await.unwrap().unwrap();
+    assert!(header.starts_with(b"RIFF"));
+    assert_eq!(header_channels(&header), 1, "mono mode serves a mono WAV");
+    // One stereo frame in, one mono sample out: a true downmix, never a
+    // duplicated mono pair.
+    state
+        .audio_tx
+        .send(bytes::Bytes::copy_from_slice(&[0x10, 0x00, 0x20, 0x00]))
+        .unwrap();
+    let pcm = stream.next().await.unwrap().unwrap();
+    assert_eq!(pcm.len(), 2, "mono stream must carry one sample per frame");
+
+    // Back on auto the same output serves the historical stereo radio,
+    // byte for byte.
+    assert_eq!(
+        set_mode("auto").await.status(),
+        axum::http::StatusCode::NO_CONTENT
+    );
+    let response = app
+        .oneshot(
+            Request::get(format!("/stream/{nonce}/audio.wav"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+    let header = stream.next().await.unwrap().unwrap();
+    assert_eq!(header_channels(&header), 2, "auto keeps the stereo radio");
+    let stereo_frame = bytes::Bytes::copy_from_slice(&[0x10, 0x00, 0x20, 0x00]);
+    state.audio_tx.send(stereo_frame.clone()).unwrap();
+    assert_eq!(
+        stream.next().await.unwrap().unwrap(),
+        stereo_frame,
+        "auto must not change what existing users hear"
+    );
+}

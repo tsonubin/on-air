@@ -72,6 +72,16 @@ export function fakeClient(core: FakeCore, socketOpts: SubscribeOptions = {}): F
       core.activeInput = name;
     }),
     listOutputs: vi.fn(async () => core.outputs),
+    setChannelMode: vi.fn(async (body) => {
+      // The core saves the mode and stores `auto` as an absent field.
+      core.outputs = core.outputs.map((o) => {
+        if (o.transport !== body.transport || o.id !== body.device_id) return o;
+        const next: OutputInfo = { ...o };
+        if (body.mode === "auto") delete next.channel_mode;
+        else next.channel_mode = body.mode;
+        return next;
+      });
+    }),
     getActiveOutput: vi.fn(async () => core.activeOutput),
     activateOutput: vi.fn(async (transport, id) => {
       const output = core.outputs.find((o) => o.transport === transport && o.id === id);

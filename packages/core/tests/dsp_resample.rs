@@ -1,8 +1,22 @@
+use on_air_core::dsp::channel::{ChannelMode, ChannelPlan, Destination, SinkConstruction};
 use on_air_core::dsp::resample::{PcmResampler, StreamingResampler};
+
+/// A one-channel plan, as only an explicit mono mode (or a genuinely mono
+/// destination) can justify one (roadmap A4/A6).
+fn mono_plan() -> ChannelPlan {
+    SinkConstruction::ProcessingThread
+        .plan(ChannelMode::Mono, Destination::stereo("resample test"))
+        .unwrap()
+}
+
+/// The pipeline's own stereo layout.
+fn stereo_plan() -> ChannelPlan {
+    SinkConstruction::ProcessingThread.auto(Destination::stereo("resample test"))
+}
 
 #[test]
 fn upsamples_44100_to_48000_with_correct_ratio() {
-    let mut r = PcmResampler::new(44100, 48000, 1);
+    let mut r = PcmResampler::new(44100, 48000, &mono_plan());
     let n = r.input_frames_next();
     let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.01).sin()).collect();
     let out = r.process(&input);
@@ -17,7 +31,7 @@ fn upsamples_44100_to_48000_with_correct_ratio() {
 
 #[test]
 fn identity_ratio_is_near_lossless() {
-    let mut r = PcmResampler::new(44100, 44100, 1);
+    let mut r = PcmResampler::new(44100, 44100, &mono_plan());
     let n = r.input_frames_next();
     let input: Vec<f32> = (0..n).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
     let out = r.process(&input);
@@ -42,14 +56,14 @@ fn identity_ratio_is_near_lossless() {
 
 #[test]
 fn streaming_passthrough_keeps_samples_when_rates_match() {
-    let mut r = StreamingResampler::new(48_000, 48_000, 1);
+    let mut r = StreamingResampler::new(48_000, 48_000, &mono_plan());
     let input = vec![0.1, -0.2, 0.3];
     assert_eq!(r.process(&input), input);
 }
 
 #[test]
 fn streaming_resampler_accepts_uneven_chunks_44100_to_48000() {
-    let mut r = StreamingResampler::new(44_100, 48_000, 1);
+    let mut r = StreamingResampler::new(44_100, 48_000, &mono_plan());
     let mut output = Vec::new();
     // Inner resampler wants 1024-frame chunks; leftover frames stay buffered.
     let fed = 200 * 12;
@@ -73,7 +87,7 @@ const PI: f32 = std::f32::consts::PI;
 
 #[test]
 fn stereo_resample_keeps_channels_apart() {
-    let mut r = PcmResampler::new(44_100, 48_000, 2);
+    let mut r = PcmResampler::new(44_100, 48_000, &stereo_plan());
     let frames = r.input_frames_next();
     let tone = |n: usize| (2.0 * PI * 1000.0 * n as f32 / 44_100.0).sin() * 0.5;
     let mut out = Vec::new();
@@ -98,14 +112,14 @@ fn stereo_resample_keeps_channels_apart() {
 #[test]
 #[should_panic(expected = "input_frames_next")]
 fn stereo_chunk_must_hold_both_channels() {
-    let mut r = PcmResampler::new(44_100, 48_000, 2);
+    let mut r = PcmResampler::new(44_100, 48_000, &stereo_plan());
     let mono_sized = vec![0.0; r.input_frames_next()];
     r.process(&mono_sized);
 }
 
 #[test]
 fn streaming_stereo_accepts_any_whole_frame_count() {
-    let mut r = StreamingResampler::new(44_100, 48_000, 2);
+    let mut r = StreamingResampler::new(44_100, 48_000, &stereo_plan());
     let mut out = Vec::new();
     for _ in 0..8 {
         out.extend(r.process(&[0.25, -0.25].repeat(333)));
@@ -116,7 +130,7 @@ fn streaming_stereo_accepts_any_whole_frame_count() {
 
 #[test]
 fn same_rate_streaming_stereo_is_lossless() {
-    let mut r = StreamingResampler::new(48_000, 48_000, 2);
+    let mut r = StreamingResampler::new(48_000, 48_000, &stereo_plan());
     assert_eq!(
         r.process(&[0.1, -0.1, 0.2, -0.2]),
         vec![0.1, -0.1, 0.2, -0.2]

@@ -1,3 +1,4 @@
+use crate::dsp::channel::{Destination, SinkConstruction};
 use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::PcmResampler;
 use crate::dsp::PIPELINE_CHANNELS;
@@ -138,8 +139,9 @@ fn process_until_stopped(
         ws_tx,
     } = outputs;
     let mut eq = GraphicEq::new(rates.input_hz as f32, PIPELINE_CHANNELS);
+    let pipeline_plan = SinkConstruction::ProcessingThread.auto(Destination::stereo("capture pipeline"));
     let mut resampler = (rates.input_hz != rates.output_hz)
-        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS));
+        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, &pipeline_plan));
     let chunk_frames = resampler
         .as_ref()
         .map(PcmResampler::input_frames_next)

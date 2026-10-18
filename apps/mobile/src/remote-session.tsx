@@ -3,6 +3,7 @@ import type {
   AirPlayMode,
   CdAction,
   CdStatus,
+  ChannelMode,
   DiscoveredHost,
   EqGains,
   FirewallWarning,
@@ -21,6 +22,7 @@ import {
   pairAirplay,
   pairBluetooth,
   prettyInput,
+  setChannelMode,
   setEq,
   setSampleRate,
   setVolume,
@@ -122,6 +124,8 @@ export type RemoteActions = {
   pairDevice(target: DevicePairTarget, pin: string): Promise<boolean>;
   openBluetoothSettings(): Promise<void>;
   applyRate(kind: "input" | "output", hz: number): Promise<void>;
+  /** Saves one speaker's channel mode; it applies on that speaker's next connection. */
+  applyChannelMode(output: OutputInfo, mode: ChannelMode): Promise<void>;
   applyVolume(value: number): void;
   applyEq(gains: EqGains): void;
   changeBand(index: number, value: number): void;
@@ -427,6 +431,31 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
     [fail, patch, refreshNow],
   );
 
+  const channelModeRef = useRef(false);
+  const applyChannelMode = useCallback(
+    async (output: OutputInfo, mode: ChannelMode) => {
+      const creds = credentials.current;
+      if (!creds || channelModeRef.current) return;
+      channelModeRef.current = true;
+      setActionError(null);
+      try {
+        await setChannelMode(
+          creds.base,
+          { transport: output.transport, device_id: output.id, mode },
+          creds.token,
+        );
+        await refreshNow(["outputs"]);
+      } catch (error) {
+        // A refusal (stereo on a mono speaker) explains itself through
+        // `friendlyError`; the core saved nothing, so the sheet stays as it is.
+        fail(error, "change the channel mode");
+      } finally {
+        channelModeRef.current = false;
+      }
+    },
+    [fail, refreshNow],
+  );
+
   const { push: pushVolume } = volumeQueue;
   const applyVolume = useCallback(
     (value: number) => {
@@ -528,6 +557,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       pairDevice,
       openBluetoothSettings: openBluetooth,
       applyRate,
+      applyChannelMode,
       applyVolume,
       applyEq,
       changeBand,
@@ -576,6 +606,7 @@ export function RemoteProvider({ children }: { children: ReactNode }) {
       pairDevice,
       openBluetooth,
       applyRate,
+      applyChannelMode,
       applyVolume,
       applyEq,
       changeBand,
