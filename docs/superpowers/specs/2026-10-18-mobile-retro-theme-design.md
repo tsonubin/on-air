@@ -163,10 +163,12 @@ danger pair. `IconTile` and `NativeIcon` take the new surfaces and colors.
   Section titles in Plex Mono uppercase. EQ band values in amber Plex Mono.
 - **Bottom sheets** (`src/sheets/sheet-props.ts`): `presentationBackground`
   set to `surface`, `tint(amber)`, dark scheme.
-- **Android:** the Material host is seeded with amber; `NativeFader` passes
-  explicit slider colors (amber track, cream thumb, `separator` inactive
-  track). Compose text in native forms keeps the system font, because
-  runtime-loaded fonts are only guaranteed in React Native text.
+- **Both platforms:** every Expo UI `Host` gets `seedColor={colors.amber}`.
+  Expo UI applies it as the SwiftUI tint on iOS and generates a Material 3
+  palette from it on Android, so sliders, switches and pickers go amber on
+  both without per-control colors. Compose text in native forms on Android
+  keeps the system font, because runtime-loaded fonts are only guaranteed in
+  React Native text.
 
 ## Out of scope
 
