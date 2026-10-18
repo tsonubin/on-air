@@ -1,5 +1,15 @@
-//! The exclusive output: at most one sender is live, and switching tears the
+//! One output session: at most one sender live, switching tears the
 //! previous one down first.
+//!
+//! The invariant this module owns is PER SESSION: a session holds at most
+//! one live sender and serializes its transitions. The old product rule of
+//! one playing output per process is retired; simultaneous multi-output is
+//! first-class through `crate::sync` groups of sessions, whose members
+//! start together against a shared presentation epoch. What is still
+//! forbidden is two sessions driving the same receiver — that stays a hard
+//! refusal (`session::activate` answers "This speaker is in use by another
+//! on-air session"), because a sync group, not two racing sessions, is the
+//! sanctioned way to play one receiver alongside others.
 //!
 //! [`OutputSession`] owns the active sender, its identity, its negotiated
 //! format, the radio stream nonce and the local-sink policy. Every
@@ -12,7 +22,7 @@
 //! holder of the transition lock writes the snapshot.
 
 use crate::events::WsEvent;
-use crate::sender::{AudioSender, OutputFormat, SenderError};
+use crate::sender::{AudioSender, OutputFormat, SenderError, StartPlan};
 use parking_lot::Mutex as SyncMutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -200,7 +210,24 @@ impl OutputSession {
         nonce: Option<String>,
     ) -> Result<(), SenderError> {
         let session = self.clone();
-        run_detached(async move { session.switch_to(sender, identity, nonce).await }).await
+        run_detached(async move { session.switch_to(sender, identity, nonce, None).await }).await
+    }
+
+    /// Like [`OutputSession::activate`], but the sender begins at a sync
+    /// group's shared presentation epoch (`plan`) instead of firing
+    /// immediately. The switch itself still runs now: the old sender stops,
+    /// the new one is prepared, and its transport start is held until
+    /// `plan.epoch.start_at`.
+    pub async fn activate_scheduled(
+        &self,
+        sender: Box<dyn AudioSender>,
+        identity: Option<ActiveOutput>,
+        nonce: Option<String>,
+        plan: StartPlan,
+    ) -> Result<(), SenderError> {
+        let session = self.clone();
+        run_detached(async move { session.switch_to(sender, identity, nonce, Some(plan)).await })
+            .await
     }
 
     /// Stop the live sender, if any, and restore the local speakers.
@@ -295,6 +322,7 @@ impl OutputSession {
         mut sender: Box<dyn AudioSender>,
         identity: Option<ActiveOutput>,
         nonce: Option<String>,
+        plan: Option<StartPlan>,
     ) -> Result<(), SenderError> {
         let mut state = self.inner.state.lock().await;
         let previous = self
@@ -324,7 +352,11 @@ impl OutputSession {
             hook();
         }
 
-        let error = match sender.start().await {
+        let started = match plan {
+            Some(plan) => sender.start_at(plan).await,
+            None => sender.start().await,
+        };
+        let error = match started {
             Ok(()) => {
                 self.go_live(&mut state, sender, identity, nonce).await;
                 return Ok(());

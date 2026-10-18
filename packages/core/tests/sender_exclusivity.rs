@@ -1,6 +1,25 @@
+//! The output invariant, pinned.
+//!
+//! OLD, now retired: one playing output per process ("process-wide
+//! single-output"). Every assertion below that reads like it enforces that
+//! rule is really enforcing its replacement at the level where it still
+//! holds: ONE `OutputSession` never runs two senders — a second activation
+//! in the same session tears the first one down, and a failed stop blocks
+//! the switch.
+//!
+//! NEW: at most one live sender per session, and no two sessions may drive
+//! the same receiver (a hard refusal — "This speaker is in use by another
+//! on-air session"; pinned in `api_patchbay.rs`). Simultaneous multi-output
+//! is first-class through sync groups of sessions (`on_air_core::sync`),
+//! whose members start together at one presentation epoch. A sync group is
+//! MORE constrained than two unrelated outputs, not less: outside a group
+//! outputs free-run and drift apart, which is expected; inside a group they
+//! are held to the shared epoch, the delay lines and drift steering.
+
 use on_air_core::api::ws::WsEvent;
 use on_air_core::sender::{AudioSender, NullSender, SenderError};
-use on_air_core::state::CoreState;
+use on_air_core::session::OutputSession;
+use on_air_core::state::{ActiveOutput, CoreState};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -131,4 +150,68 @@ async fn failed_deactivation_preserves_the_active_sender() {
 
     assert!(state.deactivate_sender().await.is_err());
     assert!(state.output().sender_name().await.is_some());
+}
+
+/// The retired rule allowed only one playing output per process. The
+/// replacement allows several sessions live at once — the first-class
+/// multi-output mode (sync groups of sessions) at its most basic.
+#[tokio::test]
+async fn two_sessions_play_at_the_same_time() {
+    let (ws_tx, _) = tokio::sync::broadcast::channel(16);
+    let session_a = OutputSession::new(ws_tx.clone(), Arc::new(parking_lot::Mutex::new(44_100)));
+    let session_b = OutputSession::new(ws_tx, Arc::new(parking_lot::Mutex::new(44_100)));
+    session_a.set_manage_local_sink(false);
+    session_b.set_manage_local_sink(false);
+
+    let log = Arc::new(Mutex::new(Vec::new()));
+    session_a
+        .activate(Box::new(NullSender::new("A", log.clone())), None, None)
+        .await
+        .unwrap();
+    session_b
+        .activate(Box::new(NullSender::new("B", log.clone())), None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        log.lock().await.as_slice(),
+        ["A:start", "B:start"],
+        "neither session stopped the other: multi-output is legal now"
+    );
+    assert_eq!(session_a.sender_name().await.as_deref(), Some("A"));
+    assert_eq!(session_b.sender_name().await.as_deref(), Some("B"));
+    session_a.deactivate().await.unwrap();
+    session_b.deactivate().await.unwrap();
+}
+
+/// Sync groups relax the process-wide rule, never the per-session one:
+/// inside a group a session still tears its previous sender down first.
+#[tokio::test]
+async fn one_session_still_stops_the_previous_sender_even_in_a_sync_group() {
+    let state = CoreState::new();
+    let group = state.sync.create_group();
+    state.sync.join(
+        &group,
+        &ActiveOutput {
+            transport: "null".into(),
+            device_id: "a".into(),
+            device_name: "A".into(),
+        },
+    );
+    let log = Arc::new(Mutex::new(Vec::new()));
+
+    state
+        .activate_sender(Box::new(NullSender::new("A", log.clone())))
+        .await
+        .unwrap();
+    state
+        .activate_sender(Box::new(NullSender::new("B", log.clone())))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        log.lock().await.as_slice(),
+        ["A:start", "A:stop", "B:start"],
+        "group membership must not weaken the session's own exclusivity"
+    );
 }

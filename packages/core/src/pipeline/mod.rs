@@ -2,12 +2,12 @@ use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::PcmResampler;
 use crate::dsp::PIPELINE_CHANNELS;
 use crate::events::WsEvent;
-use bytes::Bytes;
+use crate::timeline::{PcmChunk, FRAME_BYTES};
 use parking_lot::Mutex;
 use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 /// A capture ring holding `capacity_frames` interleaved pipeline frames.
@@ -39,8 +39,8 @@ impl ProcessingTaskHandle {
     }
 }
 
-fn f32_to_le_i16_bytes(samples: &[f32]) -> Bytes {
-    Bytes::from(crate::dsp::bridge::f32_to_l16_le(samples))
+fn f32_to_le_i16_bytes(samples: &[f32]) -> bytes::Bytes {
+    bytes::Bytes::from(crate::dsp::bridge::f32_to_l16_le(samples))
 }
 
 /// Called once, from the processing thread, if it panics. Receives the
@@ -56,7 +56,7 @@ pub fn spawn_processing_task(
     input_rate_hz: u32,
     output_rate_hz: u32,
     eq_gains_db: Arc<Mutex<[f32; 5]>>,
-    audio_tx: broadcast::Sender<Bytes>,
+    audio_tx: broadcast::Sender<PcmChunk>,
     ws_tx: broadcast::Sender<WsEvent>,
 ) -> ProcessingTaskHandle {
     spawn_processing_task_reporting(
@@ -83,7 +83,7 @@ pub struct ProcessingRates {
 
 pub struct ProcessingOutputs {
     pub eq_gains_db: Arc<Mutex<[f32; 5]>>,
-    pub audio_tx: broadcast::Sender<Bytes>,
+    pub audio_tx: broadcast::Sender<PcmChunk>,
     pub ws_tx: broadcast::Sender<WsEvent>,
 }
 
@@ -146,6 +146,8 @@ fn process_until_stopped(
         .unwrap_or(1024);
     let mut chunk = vec![0.0f32; chunk_frames * PIPELINE_CHANNELS];
     let mut resampled = Vec::new();
+    // Frames published so far: the bus timeline's frame index origin.
+    let mut frames_emitted = 0u64;
 
     while !stop_flag.load(Ordering::Relaxed) {
         let mut filled = 0;
@@ -179,14 +181,26 @@ fn process_until_stopped(
         }
 
         if audio_receivers > 0 {
-            let pcm_bytes = match resampler.as_mut() {
+            let pcm = match resampler.as_mut() {
                 Some(resampler) => {
                     resampler.process_into(&chunk, &mut resampled);
                     f32_to_le_i16_bytes(&resampled)
                 }
                 None => f32_to_le_i16_bytes(&chunk),
             };
-            let _ = audio_tx.send(pcm_bytes);
+            // Publish on the timeline: contiguous frame indices, one
+            // capture stamp, the same buffer the free-running path used.
+            // Empty chunks (a resampler catch-up produced no frames) are
+            // skipped so frame indices stay strictly contiguous.
+            if !pcm.is_empty() {
+                let frames = (pcm.len() / FRAME_BYTES) as u64;
+                let _ = audio_tx.send(PcmChunk {
+                    first_frame: frames_emitted,
+                    captured_at: Instant::now(),
+                    pcm,
+                });
+                frames_emitted += frames;
+            }
         }
     }
 }
