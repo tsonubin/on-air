@@ -11,6 +11,7 @@ import { View } from "react-native";
 import { useRemoteSession } from "@/remote-session";
 import { colors, theme } from "@/theme";
 import { sheetProps } from "./sheet-props";
+import { SyncGroupsPanel } from "./sync-groups";
 
 /** The trailing word on a speaker row. */
 export function outputAction({
@@ -138,7 +139,14 @@ export function OutputSheet({
     activate,
     openBluetoothSettings,
     sync,
+    syncGroups,
     applyTrim,
+    createGroup,
+    joinGroup,
+    leaveGroup,
+    startGroup,
+    stopGroup,
+    dissolveGroup,
   } = useRemoteSession();
 
   const choose = async (output: OutputInfo) => {
@@ -160,10 +168,23 @@ export function OutputSheet({
         (o) => o.transport === activeSyncRow.transport && o.id === activeSyncRow.device_id,
       )
     : undefined;
+  const speakers = outputs.flatMap((output) => {
+    const status = sync.find(
+      (row) => row.transport === output.transport && row.device_id === output.id,
+    );
+    return status ? [{ output, status }] : [];
+  });
+  // An older desktop reports no sync data at all: no playing-together area.
+  const showGroups = sync.length > 0 || syncGroups.length > 0;
 
   return (
     <BottomSheet
-      {...sheetProps({ kind: "output", count: outputs.length, trim: Boolean(activeSyncRow) })}
+      {...sheetProps({
+        kind: "output",
+        count: outputs.length,
+        trim: Boolean(activeSyncRow),
+        groups: showGroups ? { speakers: speakers.length, groups: syncGroups.length } : undefined,
+      })}
       isPresented
       onDismiss={onClose}
       testID="output-sheet"
@@ -225,6 +246,19 @@ export function OutputSheet({
             status={activeSyncRow}
             disabled={!view.controlsEnabled}
             onApply={(trimMs) => void applyTrim(activeSyncOutput, trimMs)}
+          />
+        )}
+        {showGroups && (
+          <SyncGroupsPanel
+            speakers={speakers}
+            groups={syncGroups}
+            disabled={!view.controlsEnabled}
+            onCreate={createGroup}
+            onJoin={joinGroup}
+            onLeave={leaveGroup}
+            onStart={startGroup}
+            onStop={stopGroup}
+            onDissolve={dissolveGroup}
           />
         )}
       </Column>

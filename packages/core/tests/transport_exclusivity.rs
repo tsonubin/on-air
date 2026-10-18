@@ -274,7 +274,7 @@ async fn sonos_and_bluetooth_play_simultaneously_in_one_sync_group() {
     );
 
     let state = CoreState::new();
-    let group = state.sync.create_group();
+    let group = state.sync.create_group("Kitchen + Patio");
     let sonos_identity = on_air_core::state::ActiveOutput {
         transport: "sonos".into(),
         device_id: "uuid:s".into(),
@@ -285,8 +285,8 @@ async fn sonos_and_bluetooth_play_simultaneously_in_one_sync_group() {
         device_id: "bt-1".into(),
         device_name: "BT".into(),
     };
-    let sonos_member = state.sync.join(&group, &sonos_identity);
-    let bt_member = state.sync.join(&group, &bt_identity);
+    let sonos_member = state.sync.join(&group, &sonos_identity).unwrap();
+    let bt_member = state.sync.join(&group, &bt_identity).unwrap();
     let plans = group.schedule_start(std::time::Instant::now());
     let sonos_plan = plans
         .iter()
@@ -358,4 +358,192 @@ async fn sonos_and_bluetooth_play_simultaneously_in_one_sync_group() {
 
     session_a.deactivate().await.unwrap();
     session_b.deactivate().await.unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// Sync-group lifecycle: the user-facing way several outputs play together.
+// Each member keeps its own session; one schedule gives them one epoch.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn starting_a_sync_group_begins_every_member_at_one_presentation_epoch() {
+    use on_air_core::sync::lifecycle;
+    use std::time::Instant;
+
+    let state = CoreState::new_mock().await;
+    let group = lifecycle::create(&state, "Downstairs").await.unwrap();
+    lifecycle::add_member(&state, group, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    lifecycle::add_member(&state, group, "airplay", "ap-living")
+        .await
+        .unwrap();
+
+    let before = Instant::now();
+    lifecycle::start(&state, group).await.unwrap();
+    let finished = Instant::now();
+
+    let epoch = state
+        .sync
+        .group_by_id(group)
+        .unwrap()
+        .epoch()
+        .expect("one presentation epoch for the group");
+    assert!(
+        epoch.start_at >= before + lifecycle::START_PRE_ROLL,
+        "pre-rolled shared epoch, not fire-now (before {before:?}, epoch {:?})",
+        epoch.start_at
+    );
+    assert!(
+        finished >= epoch.start_at,
+        "no member may begin before the shared epoch"
+    );
+
+    let views = state.sync.group_views();
+    assert!(views[0].playing);
+    for member in &views[0].members {
+        assert!(member.playing, "{} began with the group", member.device_name);
+    }
+    let log = state.mock_log.lock().await.clone();
+    assert!(log.iter().any(|line| line == "Mock Sonos:start"), "{log:?}");
+    assert!(
+        log.iter().any(|line| line == "Living Room AirPlay:start"),
+        "{log:?}"
+    );
+    state.shutdown().await;
+}
+
+#[tokio::test]
+async fn leaving_a_sync_group_stops_that_member_cleanly_and_the_others_keep_playing() {
+    use on_air_core::sync::lifecycle;
+
+    let state = CoreState::new_mock().await;
+    let group = lifecycle::create(&state, "Downstairs").await.unwrap();
+    lifecycle::add_member(&state, group, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    lifecycle::add_member(&state, group, "airplay", "ap-living")
+        .await
+        .unwrap();
+    lifecycle::start(&state, group).await.unwrap();
+
+    lifecycle::remove_member(&state, group, "airplay", "ap-living")
+        .await
+        .unwrap();
+
+    let log = state.mock_log.lock().await.clone();
+    assert_eq!(
+        log.iter()
+            .filter(|line| line.as_str() == "Living Room AirPlay:stop")
+            .count(),
+        1,
+        "the leaver stopped exactly once: {log:?}"
+    );
+    assert_eq!(
+        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        0,
+        "the other member keeps playing: {log:?}"
+    );
+    let views = state.sync.group_views();
+    assert_eq!(views[0].members.len(), 1);
+    assert!(views[0].playing, "the group is still playing together");
+    assert!(views[0].members[0].playing);
+    state.shutdown().await;
+}
+
+/// Grouping touches only its own members: a free-running output keeps
+/// free-running — no delay line, no drift steering, no stop when the group
+/// starts or stops.
+#[tokio::test]
+async fn a_free_running_output_is_unaffected_by_grouping() {
+    use on_air_core::sync::lifecycle;
+
+    let state = CoreState::new_mock().await;
+    on_air_core::session::activate(&state, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    let group = lifecycle::create(&state, "Downstairs").await.unwrap();
+    lifecycle::add_member(&state, group, "airplay", "ap-living")
+        .await
+        .unwrap();
+    lifecycle::start(&state, group).await.unwrap();
+
+    let sonos = on_air_core::state::ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:mock-sonos".into(),
+        device_name: "Mock Sonos".into(),
+    };
+    assert!(
+        state.sync.feed_for(&sonos, 48_000).is_none(),
+        "a free-running output gets no group delay line"
+    );
+    let log = state.mock_log.lock().await.clone();
+    assert_eq!(
+        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        0,
+        "starting the group did not disturb the free-running output: {log:?}"
+    );
+    assert_eq!(
+        state.active_output().map(|active| active.device_id).as_deref(),
+        Some("uuid:mock-sonos"),
+        "the free-running output is still the root's"
+    );
+
+    lifecycle::stop(&state, group).await.unwrap();
+    let log = state.mock_log.lock().await.clone();
+    assert_eq!(
+        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        0,
+        "stopping the group did not disturb it either: {log:?}"
+    );
+    let views = state.sync.group_views();
+    let sonos_row = views
+        .iter()
+        .flat_map(|group| group.members.iter())
+        .find(|member| member.device_id == "uuid:mock-sonos");
+    assert!(sonos_row.is_none(), "the free-running output is no member");
+    state.shutdown().await;
+}
+
+/// "Start together" takes over a member that is playing free-running: its
+/// old session stops and it begins with the group at the shared epoch.
+#[tokio::test]
+async fn starting_a_sync_group_takes_over_a_free_running_member() {
+    use on_air_core::sync::lifecycle;
+
+    let state = CoreState::new_mock().await;
+    on_air_core::session::activate(&state, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    let group = lifecycle::create(&state, "Downstairs").await.unwrap();
+    lifecycle::add_member(&state, group, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    lifecycle::add_member(&state, group, "airplay", "ap-living")
+        .await
+        .unwrap();
+
+    lifecycle::start(&state, group).await.unwrap();
+
+    assert!(
+        state.active_output().is_none(),
+        "the free-running session was stopped, not left claiming the speaker"
+    );
+    let log = state.mock_log.lock().await.clone();
+    assert_eq!(
+        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        1,
+        "the free-running sender stopped exactly once: {log:?}"
+    );
+    assert_eq!(
+        log.iter().filter(|line| line.as_str() == "Mock Sonos:start").count(),
+        2,
+        "free-running start plus the group's scheduled start: {log:?}"
+    );
+    let views = state.sync.group_views();
+    assert!(views[0].playing);
+    for member in &views[0].members {
+        assert!(member.playing, "{} plays with the group", member.device_name);
+    }
+    state.shutdown().await;
 }

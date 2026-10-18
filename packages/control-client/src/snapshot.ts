@@ -418,6 +418,12 @@ export function reduceEvent(prev: CoreSnapshot, ev: WsEvent): EventReduction {
       };
       return { ...unchanged, next, touched: ["outputs"], refresh: ["sync"] };
     }
+    case "SyncGroupChanged":
+      // Groups were created, reshaped, started or stopped and the event
+      // carries no state. Stamp `sync` so a read that left before this
+      // event cannot land after it and restore the old groups, then re-read
+      // it through the coalescing queue.
+      return { ...unchanged, touched: ["sync"], refresh: ["sync"] };
     case "LevelMeter":
       // Not snapshot state: hand the reading straight to the UI.
       return { ...unchanged, meter: { left: ev.left, right: ev.right } };

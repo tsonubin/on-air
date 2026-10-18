@@ -243,11 +243,11 @@ fn output(transport: &str, device_id: &str, name: &str) -> on_air_api::ActiveOut
 #[tokio::test]
 async fn two_outputs_in_a_sync_group_start_at_the_same_epoch() {
     let sync = Arc::new(SyncController::new());
-    let group = sync.create_group();
+    let group = sync.create_group("Downstairs");
     let kitchen = output("sonos", "uuid:kitchen", "Kitchen");
     let patio = output("bluetooth", "bt-1", "Patio");
-    let kitchen_member = sync.join(&group, &kitchen);
-    let patio_member = sync.join(&group, &patio);
+    let kitchen_member = sync.join(&group, &kitchen).unwrap();
+    let patio_member = sync.join(&group, &patio).unwrap();
 
     let plans = group.schedule_start(Instant::now() + Duration::from_millis(150));
     assert_eq!(plans.len(), 2, "both members are scheduled");
@@ -335,17 +335,13 @@ async fn two_outputs_in_a_sync_group_start_at_the_same_epoch() {
 #[test]
 fn a_groups_delay_lines_line_every_member_up_at_the_baseline() {
     let sync = Arc::new(SyncController::new());
-    let group = sync.create_group();
+    let group = sync.create_group("Downstairs");
     let sonos = OutputKey::new("sonos", "uuid:1");
     let bluetooth = OutputKey::new("bluetooth", "bt-1");
-    group.join(
-        sonos.clone(),
-        on_air_core::sync::effective_latency("sonos", 0),
-    );
-    group.join(
-        bluetooth.clone(),
-        on_air_core::sync::effective_latency("bluetooth", 0),
-    );
+    sync.join(&group, &output("sonos", "uuid:1", "Kitchen"))
+        .unwrap();
+    sync.join(&group, &output("bluetooth", "bt-1", "Patio"))
+        .unwrap();
     assert_eq!(group.delay_frames(&sonos, 48_000), Some(0));
     assert_eq!(
         group.delay_frames(&bluetooth, 48_000),
@@ -360,5 +356,24 @@ fn a_groups_delay_lines_line_every_member_up_at_the_baseline() {
     assert_eq!(
         group.delay_frames(&bluetooth, 48_000),
         Some((0.150_f64 * 48_000.0).round() as u64)
+    );
+
+    // The same alignment through the feed handle a real output holds: the
+    // fast member's feed carries exactly the group's delay line, sized at
+    // the feed's own rate, so its PCM is held back to the group baseline.
+    let feed = sync
+        .feed_for(&output("bluetooth", "bt-1", "Patio"), 48_000)
+        .expect("a member's feed is aligned to the group");
+    assert_eq!(
+        feed.delay_frames(),
+        (0.150_f64 * 48_000.0).round() as u64,
+        "the feed's delay line is the member's hold at its own rate"
+    );
+    // And a free-running output gets no feed at all: grouping is more
+    // constrained, never less.
+    assert!(
+        sync.feed_for(&output("sonos", "uuid:free", "Free"), 48_000)
+            .is_none(),
+        "free-running outputs stay free of the group"
     );
 }

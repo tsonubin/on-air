@@ -270,11 +270,53 @@ export interface OutputSyncStatus {
    * has measured a window.
    */
   drift_ppm?: number;
+  /**
+   * The sync group this output belongs to, if any. An output is a member of
+   * at most one group at a time.
+   */
+  group_id?: number;
+}
+
+/** One member of a sync group as `GET /api/sync` reports it. */
+export interface SyncGroupMember {
+  transport: Transport;
+  device_id: string;
+  /**
+   * Filled in when the core knows the display name; join the
+   * `GET /api/outputs` catalog instead if it is empty.
+   */
+  device_name: string;
+  /**
+   * True while this member is playing together with its group (started at
+   * the group's shared presentation epoch).
+   */
+  playing: boolean;
+  /** Why this member is not playing after a start failed, if known. */
+  error?: string;
+}
+
+/**
+ * A named sync group: SEVERAL SPEAKERS PLAYING IN SYNC, not one merged
+ * device. Every member keeps its own transport, volume, latency default and
+ * trim, and each member is started and stopped on its own.
+ */
+export interface SyncGroupView {
+  id: number;
+  /** Display name; names are not unique, `id` identifies the group. */
+  name: string;
+  members: SyncGroupMember[];
+  /** True while at least one member is playing with the group. */
+  playing: boolean;
 }
 
 /** `GET /api/sync`. */
 export interface SyncResponse {
   outputs: OutputSyncStatus[];
+  /**
+   * Every sync group with its members. Absent on cores older than this
+   * feature; tolerate its absence.
+   */
+  groups?: SyncGroupView[];
 }
 
 /**
@@ -291,6 +333,26 @@ export interface SetSyncTrimRequest {
 export interface SyncTrimResponse {
   trim_ms: number;
   effective_latency_ms: number;
+}
+
+/**
+ * `POST /api/sync/groups`: create an empty named sync group. Several named
+ * groups may exist at once; names are for display and need not be unique.
+ */
+export interface CreateSyncGroupRequest {
+  /** 1..=64 characters. */
+  name: string;
+}
+
+/**
+ * `POST /api/sync/groups/{id}/members` (add) and
+ * `POST /api/sync/groups/{id}/leave` (remove): move one output into or out
+ * of a sync group. Membership is configuration: it never disturbs what is
+ * playing right now, and it takes effect at the group's next `start`.
+ */
+export interface SyncGroupMemberRequest {
+  transport: Transport;
+  device_id: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +482,11 @@ export type WsEvent =
   | { type: "DeviceJoined"; transport: Transport; id: string; name: string }
   | { type: "DeviceLeft"; transport: Transport; id: string }
   | { type: "ServiceStateChanged"; enabled: boolean }
+  /**
+   * Sync groups changed: one was created, dissolved, its membership moved,
+   * or it was started or stopped. Carries no state; re-read `GET /api/sync`.
+   */
+  | { type: "SyncGroupChanged"; group_id: number }
   | {
       type: "CdStateChanged";
       present: boolean;

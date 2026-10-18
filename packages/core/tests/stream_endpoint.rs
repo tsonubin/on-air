@@ -190,6 +190,41 @@ async fn stream_is_absent_unless_sonos_is_the_exclusive_output() {
     assert_eq!(response.status(), reqwest::StatusCode::NOT_FOUND);
 }
 
+/// A playing sync-group member's own radio stream is served from its own
+/// session: the member's nonce, the shared timeline.
+#[tokio::test]
+async fn a_sync_group_members_stream_is_served_from_its_member_session() {
+    let state = CoreState::new_mock().await;
+    let group = on_air_core::sync::lifecycle::create(&state, "Downstairs")
+        .await
+        .unwrap();
+    on_air_core::sync::lifecycle::add_member(&state, group, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    on_air_core::sync::lifecycle::start(&state, group).await.unwrap();
+    let key = on_air_core::sync::OutputKey::new("sonos", "uuid:mock-sonos");
+    let nonce = state
+        .sync
+        .playing_session(&key)
+        .and_then(|session| session.snapshot().nonce)
+        .expect("the member serves its own radio stream");
+
+    let response = tower::ServiceExt::oneshot(
+        on_air_core::build_router(state),
+        axum::http::Request::builder()
+            .uri(format!("/stream/{nonce}/audio.wav"))
+            .body(axum::body::Body::empty())
+            .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "audio/wav"
+    );
+}
+
 #[tokio::test]
 async fn stream_with_a_stale_nonce_is_not_found() {
     let state = CoreState::new();

@@ -9,6 +9,8 @@ export type SheetSpec =
       kind: "output";
       count: number /** A latency-trim editor is shown below the rows. */;
       trim?: boolean;
+      /** The playing-together area: membership rows and group cards. */
+      groups?: { speakers: number; groups: number };
     }
   | { kind: "device-pair"; transport: string };
 
@@ -18,11 +20,14 @@ function iosSnapPoints(spec: SheetSpec): NonNullable<BottomSheetProps["snapPoint
   switch (spec.kind) {
     case "source":
       return [{ height: 280 }];
-    case "output":
-      // Rows carry a sync line; the trim editor adds its own block.
-      return spec.count > 5
-        ? ["full"]
-        : [{ height: Math.max(300, 160 + spec.count * 96 + (spec.trim ? 150 : 0)) }];
+    case "output": {
+      // Rows carry a sync line; the trim editor and the playing-together
+      // area add their own blocks below them.
+      const groups = spec.groups ? 190 + spec.groups.speakers * 52 + spec.groups.groups * 130 : 0;
+      const height = 160 + spec.count * 96 + (spec.trim ? 150 : 0) + groups;
+      // Taller than a phone screen: snap full instead of clipping the tail.
+      return spec.count > 5 || height > 800 ? ["full"] : [{ height: Math.max(300, height) }];
+    }
     case "device-pair":
       return [{ height: spec.transport === "airplay" ? 360 : 300 }];
   }

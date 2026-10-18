@@ -3,11 +3,13 @@ import type {
   AirPlayMode,
   OutputInfo,
   OutputSyncStatus,
+  SyncGroupView,
 } from "@on-air/api-types";
 import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
 import {
   inputLabels,
   SYNC_DRIFT_DESCRIPTION,
+  SYNC_GROUP_DESCRIPTION,
   SYNC_STATE_LABELS,
   SYNC_TRIM_DESCRIPTION,
   SYNC_TRIM_LIMIT_MS,
@@ -55,12 +57,17 @@ const SYNC_STATE_CLASS: Record<OutputSyncStatus["state"], string> = {
  */
 function SyncRow({
   status,
+  groups,
   disabled,
   onSetTrim,
+  onSetGroup,
 }: {
   status: OutputSyncStatus;
+  /** Groups this output could play with; empty on a core without groups. */
+  groups: SyncGroupView[];
   disabled: boolean;
   onSetTrim(trimMs: number): Promise<void>;
+  onSetGroup(groupId: number | null): Promise<void>;
 }) {
   const [draft, setDraft] = useState(String(status.trim_ms));
   const [busy, setBusy] = useState(false);
@@ -75,12 +82,35 @@ function SyncRow({
     Math.abs(parsed) <= SYNC_TRIM_LIMIT_MS &&
     parsed !== status.trim_ms;
   const drift = status.drift_ppm === undefined ? "" : ` · ${Math.round(status.drift_ppm)} ppm`;
+  const group = groups.find((g) => g.id === status.group_id) ?? null;
   return (
     <div className="device-sync" data-testid={`sync-${status.transport}-${status.device_id}`}>
       <span className={SYNC_STATE_CLASS[status.state]} title={SYNC_DRIFT_DESCRIPTION}>
         {SYNC_STATE_LABELS[status.state]}
         {drift}
+        {group ? ` · in ${group.name}` : ""}
       </span>
+      {(groups.length > 0 || group !== null) && (
+        <select
+          data-testid={`group-select-${status.transport}-${status.device_id}`}
+          aria-label={`Sync group for ${status.device_name}`}
+          title={SYNC_GROUP_DESCRIPTION}
+          value={String(status.group_id ?? "")}
+          disabled={disabled || busy}
+          onChange={(e) => {
+            const picked = e.target.value;
+            setBusy(true);
+            void onSetGroup(picked === "" ? null : Number(picked)).finally(() => setBusy(false));
+          }}
+        >
+          <option value="">Playing alone</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      )}
       <label title={SYNC_TRIM_DESCRIPTION}>
         Latency trim
         <input
@@ -110,6 +140,160 @@ function SyncRow({
   );
 }
 
+/**
+ * One sync group: SEVERAL SPEAKERS PLAYING IN SYNC, never one merged device.
+ * Start begins every member together, stop halts them together, dissolve
+ * forgets the group.
+ */
+function SyncGroupRow({
+  group,
+  outputs,
+  disabled,
+  onStart,
+  onStop,
+  onDissolve,
+}: {
+  group: SyncGroupView;
+  outputs: OutputInfo[] | null;
+  disabled: boolean;
+  onStart(groupId: number): Promise<void>;
+  onStop(groupId: number): Promise<void>;
+  onDissolve(groupId: number): Promise<void>;
+}) {
+  const [busy, setBusy] = useState<"start" | "stop" | "dissolve" | null>(null);
+  return (
+    <li className="sync-group" data-testid={`sync-group-${group.id}`}>
+      <span className="sync-group-name">{group.name}</span>
+      <span className="sync-group-members">
+        {group.members.length === 0 && <span>No speakers yet</span>}
+        {group.members.map((member) => (
+          <span key={`${member.transport}-${member.device_id}`}>
+            {member.device_name ||
+              outputs?.find((o) => o.transport === member.transport && o.id === member.device_id)
+                ?.name ||
+              member.device_id}
+            {member.error ? <span className="text-amber"> · {member.error}</span> : null}
+          </span>
+        ))}
+      </span>
+      <span className={TAG_CLASS}>
+        <Lamp on={group.playing} />
+        {group.playing ? "Playing together" : "Not playing"}
+      </span>
+      <div className="device-actions">
+        <Button
+          data-testid={`start-group-${group.id}`}
+          disabled={disabled || busy !== null}
+          aria-busy={busy === "start"}
+          onClick={() => {
+            setBusy("start");
+            void onStart(group.id).finally(() => setBusy(null));
+          }}
+        >
+          {busy === "start" ? "Starting…" : "Start together"}
+        </Button>
+        <Button
+          data-testid={`stop-group-${group.id}`}
+          disabled={disabled || busy !== null}
+          onClick={() => {
+            setBusy("stop");
+            void onStop(group.id).finally(() => setBusy(null));
+          }}
+        >
+          Stop
+        </Button>
+        <Button
+          data-testid={`dissolve-group-${group.id}`}
+          disabled={disabled || busy !== null}
+          onClick={() => {
+            setBusy("dissolve");
+            void onDissolve(group.id).finally(() => setBusy(null));
+          }}
+        >
+          Dissolve
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/** The "Play together" section: the group list plus the create form. */
+function SyncGroupsPanel({
+  groups,
+  outputs,
+  disabled,
+  onCreateGroup,
+  onStart,
+  onStop,
+  onDissolve,
+}: {
+  groups: SyncGroupView[];
+  outputs: OutputInfo[] | null;
+  disabled: boolean;
+  onCreateGroup(name: string): Promise<boolean>;
+  onStart(groupId: number): Promise<void>;
+  onStop(groupId: number): Promise<void>;
+  onDissolve(groupId: number): Promise<void>;
+}) {
+  const [draft, setDraft] = useState("");
+  const [creating, setCreating] = useState(false);
+  const name = draft.trim();
+  return (
+    <section className="routing-together" aria-labelledby="together-heading">
+      <div className="routing-heading">
+        <h2 id="together-heading">Play together</h2>
+      </div>
+      <p className="sync-group-blurb" data-testid="sync-group-description">
+        {SYNC_GROUP_DESCRIPTION}
+      </p>
+      <ul className="sync-group-list" data-testid="sync-group-list">
+        {groups.length === 0 && <li className="px-1 py-1 text-sm text-steel-dim">No groups yet</li>}
+        {groups.map((group) => (
+          <SyncGroupRow
+            key={group.id}
+            group={group}
+            outputs={outputs}
+            disabled={disabled}
+            onStart={onStart}
+            onStop={onStop}
+            onDissolve={onDissolve}
+          />
+        ))}
+      </ul>
+      <form
+        className="sync-group-create"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (name === "") return;
+          setCreating(true);
+          void onCreateGroup(name).then((created) => {
+            setCreating(false);
+            if (created) setDraft("");
+          });
+        }}
+      >
+        <input
+          type="text"
+          value={draft}
+          maxLength={64}
+          placeholder="New group name"
+          aria-label="New group name"
+          disabled={disabled || creating}
+          onChange={(e) => setDraft(e.target.value)}
+        />
+        <Button
+          type="submit"
+          data-testid="create-group"
+          disabled={disabled || creating || name === ""}
+          aria-busy={creating}
+        >
+          {creating ? "Creating…" : "Create group"}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
 export interface DeviceListProps {
   inputs: string[] | null;
   activeInput: string | null;
@@ -118,6 +302,8 @@ export interface DeviceListProps {
   airplayMode: AirPlayMode | null;
   /** Per-output sync status rows; `null` on an older core. */
   sync: OutputSyncStatus[] | null;
+  /** Sync groups to play together; `[]` on a core without groups. */
+  syncGroups: SyncGroupView[];
   connectingOutput: string | null;
   refreshing: boolean;
   disabled: boolean;
@@ -125,6 +311,12 @@ export interface DeviceListProps {
   onChooseOutput(output: OutputInfo): void;
   /** Applies one output's manual latency trim in milliseconds. */
   onSetTrim(output: OutputInfo, trimMs: number): Promise<void>;
+  /** Moves one output to play with `groupId`, or alone when `null`. */
+  onSetSyncGroup(output: OutputInfo, groupId: number | null): Promise<void>;
+  onCreateGroup(name: string): Promise<boolean>;
+  onStartGroup(groupId: number): Promise<void>;
+  onStopGroup(groupId: number): Promise<void>;
+  onDissolveGroup(groupId: number): Promise<void>;
   onBluetoothSettings(): void;
   onAirplayInfo(): void;
   onRefresh(): void;
@@ -137,12 +329,18 @@ export function DeviceList({
   activeOutput,
   airplayMode,
   sync,
+  syncGroups,
   connectingOutput,
   refreshing,
   disabled,
   onChooseInput,
   onChooseOutput,
   onSetTrim,
+  onSetSyncGroup,
+  onCreateGroup,
+  onStartGroup,
+  onStopGroup,
+  onDissolveGroup,
   onBluetoothSettings,
   onAirplayInfo,
   onRefresh,
@@ -273,8 +471,10 @@ export function DeviceList({
                 {syncStatus && (
                   <SyncRow
                     status={syncStatus}
+                    groups={syncGroups}
                     disabled={disabled}
                     onSetTrim={(trimMs) => onSetTrim(output, trimMs)}
+                    onSetGroup={(groupId) => onSetSyncGroup(output, groupId)}
                   />
                 )}
               </li>
@@ -282,6 +482,16 @@ export function DeviceList({
           })}
         </ul>
       </section>
+
+      <SyncGroupsPanel
+        groups={syncGroups}
+        outputs={outputs}
+        disabled={disabled}
+        onCreateGroup={onCreateGroup}
+        onStart={onStartGroup}
+        onStop={onStopGroup}
+        onDissolve={onDissolveGroup}
+      />
     </div>
   );
 }

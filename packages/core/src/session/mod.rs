@@ -5,7 +5,7 @@ use crate::sender::bluetooth::{
     BluetoothPlaybackConfig, BluetoothSender, PcmOutput, SystemPcmOutput,
 };
 use crate::sender::sonos::SonosSender;
-use crate::sender::{AudioSender, NullSender, SenderError};
+use crate::sender::{AudioSender, NullSender, SenderError, StartPlan};
 use crate::state::CoreState;
 use std::fmt::Write as _;
 
@@ -120,6 +120,29 @@ pub async fn activate(
     transport: &str,
     device_id: &str,
 ) -> Result<(), ActivateError> {
+    activate_on(state, transport, device_id, None).await
+}
+
+/// Like [`activate`], but the sender begins at a sync group's shared
+/// presentation epoch (`plan`) instead of firing immediately. One call runs
+/// per member on that member's own state and session, so a group's members
+/// prepare concurrently and all issue their transport start at
+/// `plan.epoch.start_at`.
+pub async fn activate_scheduled(
+    state: &CoreState,
+    transport: &str,
+    device_id: &str,
+    plan: StartPlan,
+) -> Result<(), ActivateError> {
+    activate_on(state, transport, device_id, Some(plan)).await
+}
+
+async fn activate_on(
+    state: &CoreState,
+    transport: &str,
+    device_id: &str,
+    plan: Option<StartPlan>,
+) -> Result<(), ActivateError> {
     let _senders = state.sender_lock.lock().await;
     if !state
         .service_enabled
@@ -142,6 +165,19 @@ pub async fn activate(
         )
         .into());
     }
+    // Two sessions claiming one receiver is a hard refusal. A sync-group
+    // member session that is already playing this receiver refuses every
+    // other claimant; a member restarting itself is a switch of its own
+    // session, not a second claimant.
+    let claim = crate::sync::OutputKey::new(transport, device_id);
+    if let Some(holder) = state.sync.playing_session(&claim) {
+        if !holder.same_as(state.output()) {
+            return Err(SenderError::not_ready(
+                "This speaker is playing in a sync group. Stop the group first.",
+            )
+            .into());
+        }
+    }
     let built = match transport {
         "sonos" => build_sonos(state, device_id).await?,
         "airplay" => build_airplay(state, device_id)?,
@@ -149,10 +185,20 @@ pub async fn activate(
         "local" => build_local(state, device_id).await?,
         _ => return Err(ActivateError::UnknownTransport(transport.to_string())),
     };
-    let result = state
-        .output()
-        .activate(built.sender, Some(built.identity), built.stream_nonce)
-        .await;
+    let result = match plan {
+        Some(plan) => {
+            state
+                .output()
+                .activate_scheduled(built.sender, Some(built.identity), built.stream_nonce, plan)
+                .await
+        }
+        None => {
+            state
+                .output()
+                .activate(built.sender, Some(built.identity), built.stream_nonce)
+                .await
+        }
+    };
     if transport == "bluetooth" {
         state.invalidate_bluetooth_cache().await;
     }
@@ -261,7 +307,10 @@ fn build_airplay(state: &CoreState, device_id: &str) -> Result<Built, ActivateEr
         sender: Box::new(
             AirPlaySender::new(device.name, device.id, base)
                 .with_radio(url, device.address)
-                .with_independent_stream(state.patchbay_endpoint),
+                // Every multi-output context — a patchbay route or a
+                // playing sync-group member — drives its receiver on its
+                // own pyatv session, so one mix cannot replace another.
+                .with_independent_stream(state.patchbay_endpoint || state.group_member),
         ),
         identity,
         stream_nonce: Some(nonce),

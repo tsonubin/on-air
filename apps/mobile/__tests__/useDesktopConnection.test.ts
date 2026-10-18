@@ -1,3 +1,4 @@
+import type { OutputSyncStatus, SyncGroupView } from "@on-air/api-types";
 import * as client from "@on-air/control-client";
 import { FakeSocket } from "@on-air/control-client/testing";
 import { act, renderHook } from "@testing-library/react-native";
@@ -537,6 +538,41 @@ test("patch updates the snapshot locally", async () => {
   act(() => result.current.patch({ volume: 77, gains: [1, 0, 0, 0, 0] }));
   expect(result.current.volume).toBe(77);
   expect(result.current.gains).toEqual([1, 0, 0, 0, 0]);
+});
+
+test("sync groups ride the sync slice and survive local patches", async () => {
+  const row: OutputSyncStatus = {
+    transport: "sonos",
+    device_id: "uuid:sonos",
+    device_name: "Mock Sonos",
+    state: "free_running",
+    trim_ms: 0,
+    default_latency_ms: 1000,
+    effective_latency_ms: 1000,
+    calibrated: false,
+    delay_frames: 0,
+    output_sample_rate_hz: 48000,
+  };
+  const group: SyncGroupView = { id: 1, name: "Kitchen", members: [], playing: false };
+  reads.getSync.mockResolvedValue({ outputs: [row], groups: [group] });
+  const { result } = connect();
+  await settle();
+  expect(result.current.sync).toEqual([row]);
+  expect(result.current.syncGroups).toEqual([group]);
+
+  // A patch of either half keeps the other: one wire response, one slice.
+  act(() => result.current.patch({ syncGroups: [] }));
+  expect(result.current.syncGroups).toEqual([]);
+  expect(result.current.sync).toEqual([row]);
+  act(() => result.current.patch({ sync: [] }));
+  expect(result.current.syncGroups).toEqual([]);
+
+  // A reshaped group refetches the sync slice and nothing else.
+  act(() => FakeSocket.last?.open());
+  const before = callCounts();
+  act(() => FakeSocket.last?.send({ type: "SyncGroupChanged", group_id: 1 }));
+  await tick(150);
+  expect(callCounts()).toEqual({ ...before, getSync: before.getSync + 1 });
 });
 
 test("an unreachable optional-only refresh keeps the phase; an HTTP error still counts as reached", async () => {

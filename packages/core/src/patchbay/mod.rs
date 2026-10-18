@@ -178,9 +178,10 @@ impl Patchbay {
                 child.input().stop().await;
             }
             if wanted && failure.is_none() && child.active_output().is_none() {
-                if state.active_output().is_some_and(|active| {
+                let claimed = state.active_output().is_some_and(|active| {
                     active.device_id == info.id && active.transport == info.transport
-                }) {
+                }) || state.sync.uses_receiver(&info.transport, &info.id);
+                if claimed {
                     failure = Some("This speaker is in use by the terminal or another client. Stop that output first.".into());
                 } else if info.needs_pair && !info.paired {
                     failure = Some("Pair this speaker in on-air before connecting it.".into());

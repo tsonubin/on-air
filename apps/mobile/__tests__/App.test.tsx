@@ -1,4 +1,10 @@
-import type { CdStatus, OutputInfo } from "@on-air/api-types";
+import type {
+  CdStatus,
+  OutputInfo,
+  OutputSyncStatus,
+  SyncGroupMember,
+  SyncGroupView,
+} from "@on-air/api-types";
 import * as client from "@on-air/control-client";
 import { FakeSocket } from "@on-air/control-client/testing";
 import * as expoRouter from "expo-router";
@@ -23,6 +29,12 @@ jest.mock("@on-air/control-client", () => ({
   getSync: jest.fn(),
   setAudioQuality: jest.fn(),
   setSyncTrim: jest.fn(),
+  createSyncGroup: jest.fn(),
+  dissolveSyncGroup: jest.fn(),
+  addSyncGroupMember: jest.fn(),
+  leaveSyncGroupMember: jest.fn(),
+  startSyncGroup: jest.fn(),
+  stopSyncGroup: jest.fn(),
   getAirplayMode: jest.fn(),
   getCd: jest.fn(),
   controlCd: jest.fn(),
@@ -95,6 +107,40 @@ const NO_DISC: CdStatus = {
   duration_ms: 0,
 };
 
+const SONOS_SYNC: OutputSyncStatus = {
+  transport: "sonos",
+  device_id: "uuid:mock-sonos",
+  device_name: "Mock Sonos",
+  state: "free_running",
+  trim_ms: 0,
+  default_latency_ms: 1000,
+  effective_latency_ms: 1000,
+  calibrated: false,
+  delay_frames: 0,
+  output_sample_rate_hz: 48000,
+};
+const SONOS_MEMBER: SyncGroupMember = {
+  transport: "sonos",
+  device_id: "uuid:mock-sonos",
+  device_name: "Mock Sonos",
+  playing: false,
+};
+const KITCHEN_EMPTY: SyncGroupView = { id: 1, name: "Kitchen", members: [], playing: false };
+const KITCHEN_ONE: SyncGroupView = {
+  id: 1,
+  name: "Kitchen",
+  members: [SONOS_MEMBER],
+  playing: false,
+};
+const KITCHEN_PLAYING: SyncGroupView = {
+  id: 1,
+  name: "Kitchen",
+  members: [{ ...SONOS_MEMBER, playing: true }],
+  playing: true,
+};
+const PATIO_EMPTY: SyncGroupView = { id: 2, name: "Patio", members: [], playing: false };
+const PATIO_ONE: SyncGroupView = { id: 2, name: "Patio", members: [SONOS_MEMBER], playing: false };
+
 function mockDesktop() {
   api.discoverOnAir.mockResolvedValue([STUDIO]);
   api.fetchStatus.mockResolvedValue({ status: "ok", version: "0.1.0", service_enabled: true });
@@ -127,6 +173,12 @@ function mockDesktop() {
   api.pairAirplay.mockResolvedValue(undefined);
   api.pairBluetooth.mockResolvedValue(undefined);
   api.openBluetoothSettings.mockResolvedValue(undefined);
+  api.createSyncGroup.mockResolvedValue(KITCHEN_EMPTY);
+  api.addSyncGroupMember.mockResolvedValue(undefined);
+  api.leaveSyncGroupMember.mockResolvedValue(undefined);
+  api.startSyncGroup.mockResolvedValue(undefined);
+  api.stopSyncGroup.mockResolvedValue(undefined);
+  api.dissolveSyncGroup.mockResolvedValue(undefined);
 }
 
 let tree: ReactTestRenderer.ReactTestRenderer | undefined;
@@ -248,6 +300,8 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   await press("output-row");
   expect(text()).toContain("Living Room AirPlay");
   expect(text()).toContain("Stereo pair · AirPlay");
+  // The default desktop reports no sync rows: no playing-together area.
+  expect(exists("sync-groups")).toBe(false);
   const listsBefore = api.listInputs.mock.calls.length;
   api.getActiveOutput.mockResolvedValue({
     transport: "sonos",
@@ -314,6 +368,110 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(text()).toContain("Pair your Mac");
   expect(store.deleteItemAsync).toHaveBeenCalledWith(PAIRING_KEY);
   expect(FakeSocket.last?.closed).toBe(true);
+});
+
+test("sync groups form several speakers in sync, never one merged device", async () => {
+  api.getSync.mockResolvedValue({ outputs: [SONOS_SYNC], groups: [] });
+  await renderApp();
+  await pairWith();
+  await press("output-row");
+
+  // The copy says what a group is before anything is formed.
+  expect(exists("sync-groups")).toBe(true);
+  expect(text()).toContain("Several speakers playing the same audio in sync");
+  expect(text()).toContain("Playing alone");
+
+  // A group exists only once it is named: 1 to 64 characters.
+  expect(host("sync-group-create").props.onPress).toBeUndefined();
+  ReactTestRenderer.act(() => host("sync-group-name-input").props.onChangeText("   "));
+  expect(text()).toContain("Use 1 to 64 characters.");
+  expect(host("sync-group-create").props.onPress).toBeUndefined();
+  ReactTestRenderer.act(() => host("sync-group-name-input").props.onChangeText("k".repeat(65)));
+  expect(host("sync-group-create").props.onPress).toBeUndefined();
+  ReactTestRenderer.act(() => host("sync-group-name-input").props.onChangeText("Kitchen"));
+  api.getSync.mockResolvedValue({ outputs: [SONOS_SYNC], groups: [KITCHEN_EMPTY] });
+  await press("sync-group-create");
+  expect(api.createSyncGroup).toHaveBeenCalledWith(BASE, "Kitchen", TOKEN);
+  expect(text()).toContain("No speakers yet");
+
+  // A second group: names are display-only and several may exist at once.
+  ReactTestRenderer.act(() => host("sync-group-name-input").props.onChangeText("Patio"));
+  api.getSync.mockResolvedValue({
+    outputs: [SONOS_SYNC],
+    groups: [KITCHEN_EMPTY, PATIO_EMPTY],
+  });
+  await press("sync-group-create");
+  expect(api.createSyncGroup).toHaveBeenLastCalledWith(BASE, "Patio", TOKEN);
+
+  // The chooser moves the speaker in with one call and names the group.
+  await press("sync-membership-sonos-uuid:mock-sonos");
+  expect(exists("sync-alone-sonos-uuid:mock-sonos")).toBe(true);
+  expect(exists("sync-join-1-sonos-uuid:mock-sonos")).toBe(true);
+  expect(exists("sync-join-2-sonos-uuid:mock-sonos")).toBe(true);
+  api.getSync.mockResolvedValue({
+    outputs: [{ ...SONOS_SYNC, group_id: 1 }],
+    groups: [KITCHEN_ONE, PATIO_EMPTY],
+  });
+  await press("sync-join-1-sonos-uuid:mock-sonos");
+  expect(api.addSyncGroupMember).toHaveBeenCalledWith(
+    BASE,
+    1,
+    { transport: "sonos", device_id: "uuid:mock-sonos" },
+    TOKEN,
+  );
+  expect(text()).toContain("Playing with Kitchen");
+
+  // Start together starts every member at one presentation epoch.
+  api.getSync.mockResolvedValue({
+    outputs: [{ ...SONOS_SYNC, group_id: 1 }],
+    groups: [KITCHEN_PLAYING, PATIO_EMPTY],
+  });
+  await press("sync-group-start-1");
+  expect(api.startSyncGroup).toHaveBeenCalledWith(BASE, 1, TOKEN);
+  expect(text()).toContain("playing together now");
+  await press("sync-group-stop-1");
+  expect(api.stopSyncGroup).toHaveBeenCalledWith(BASE, 1, TOKEN);
+
+  // Moving to another group is two sequential calls: out of the old, into the new.
+  const addCallsBeforeMove = api.addSyncGroupMember.mock.calls.length;
+  await press("sync-membership-sonos-uuid:mock-sonos");
+  api.getSync.mockResolvedValue({
+    outputs: [{ ...SONOS_SYNC, group_id: 2 }],
+    groups: [KITCHEN_EMPTY, PATIO_ONE],
+  });
+  await press("sync-join-2-sonos-uuid:mock-sonos");
+  expect(api.leaveSyncGroupMember).toHaveBeenCalledWith(
+    BASE,
+    1,
+    { transport: "sonos", device_id: "uuid:mock-sonos" },
+    TOKEN,
+  );
+  expect(api.addSyncGroupMember).toHaveBeenLastCalledWith(
+    BASE,
+    2,
+    { transport: "sonos", device_id: "uuid:mock-sonos" },
+    TOKEN,
+  );
+  // The leave belongs to this move and must precede its add, not the
+  // earlier join.
+  expect(api.leaveSyncGroupMember.mock.invocationCallOrder[0]).toBeLessThan(
+    api.addSyncGroupMember.mock.invocationCallOrder[addCallsBeforeMove],
+  );
+  expect(text()).toContain("Playing with Patio");
+
+  // Dissolve forgets the group.
+  await press("sync-group-dissolve-2");
+  expect(api.dissolveSyncGroup).toHaveBeenCalledWith(BASE, 2, TOKEN);
+});
+
+test("an older desktop without groups keeps its speakers and reads as none", async () => {
+  api.getSync.mockResolvedValue({ outputs: [SONOS_SYNC] });
+  await renderApp();
+  await pairWith();
+  await press("output-row");
+  expect(exists("sync-groups")).toBe(true);
+  expect(text()).toContain("Playing alone");
+  expect(exists("sync-group-1")).toBe(false);
 });
 
 /** Numbers rendered in host Text nodes (the volume readout among them). */

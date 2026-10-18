@@ -249,6 +249,14 @@ test("reduceEvent applies output, input, disc and catalog events", () => {
   assert.equal(r.next, snapshot);
 });
 
+test("a sync-group change stamps the sync slice and schedules exactly one re-read", () => {
+  const snapshot: CoreSnapshot = { ...EMPTY_SNAPSHOT, outputs: [sonos] };
+  const r = reduceEvent(snapshot, { type: "SyncGroupChanged", group_id: 3 });
+  assert.equal(r.next, snapshot, "the event carries no state of its own");
+  assert.deepEqual(r.touched, ["sync"], "an in-flight read cannot land after it");
+  assert.deepEqual(r.refresh, ["sync"]);
+});
+
 test("a LevelMeter frame reaches the UI as two channels without touching the snapshot", () => {
   const snapshot: CoreSnapshot = { ...EMPTY_SNAPSHOT, outputs: [sonos] };
   const r = reduceEvent(snapshot, {

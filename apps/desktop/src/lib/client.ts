@@ -14,6 +14,8 @@ import {
   type SetSampleRateRequest,
   type SetSyncTrimRequest,
   type StatusResponse,
+  type SyncGroupMemberRequest,
+  type SyncGroupView,
   type SyncResponse,
   type SyncTrimResponse,
   type Transport,
@@ -47,6 +49,13 @@ export interface ClientLike {
   setAudioQuality(quality: DspQuality): Promise<void>;
   getSync(): Promise<SyncResponse>;
   setSyncTrim(body: SetSyncTrimRequest): Promise<SyncTrimResponse>;
+  createSyncGroup(name: string): Promise<SyncGroupView>;
+  dissolveSyncGroup(groupId: number): Promise<void>;
+  addSyncGroupMember(groupId: number, member: SyncGroupMemberRequest): Promise<void>;
+  leaveSyncGroupMember(groupId: number, member: SyncGroupMemberRequest): Promise<void>;
+  /** Slow: resolves once every member has started at the shared epoch. */
+  startSyncGroup(groupId: number): Promise<void>;
+  stopSyncGroup(groupId: number): Promise<void>;
   getAirplayMode(): Promise<AirPlayMode>;
   pairAirplay(deviceId: string, pin: string): Promise<void>;
   pairBluetooth(id: string): Promise<void>;
@@ -77,6 +86,12 @@ function createClient(base: string = API_BASE): ClientLike {
     setAudioQuality: (quality) => cc.setAudioQuality(base, quality),
     getSync: () => cc.getSync(base),
     setSyncTrim: (body) => cc.setSyncTrim(base, body),
+    createSyncGroup: (name) => cc.createSyncGroup(base, name),
+    dissolveSyncGroup: (groupId) => cc.dissolveSyncGroup(base, groupId),
+    addSyncGroupMember: (groupId, member) => cc.addSyncGroupMember(base, groupId, member),
+    leaveSyncGroupMember: (groupId, member) => cc.leaveSyncGroupMember(base, groupId, member),
+    startSyncGroup: (groupId) => cc.startSyncGroup(base, groupId),
+    stopSyncGroup: (groupId) => cc.stopSyncGroup(base, groupId),
     getAirplayMode: () => cc.getAirplayMode(base),
     pairAirplay: (deviceId, pin) => cc.pairAirplay(base, deviceId, pin),
     pairBluetooth: (id) => cc.pairBluetooth(base, id),

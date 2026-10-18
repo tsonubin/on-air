@@ -39,6 +39,26 @@ pub struct FirstRunTuning {
     pub applied_quality: bool,
 }
 
+/// One output as a member of a saved sync group (`settings.json`,
+/// `sync_groups`). Groups are configuration: after a restart they come back
+/// created and stopped, never playing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSyncGroupMember {
+    pub transport: String,
+    pub device_id: String,
+    /// Display name as last seen; discovery may refresh it later.
+    #[serde(default)]
+    pub device_name: String,
+}
+
+/// A saved named sync group (`settings.json`, `sync_groups`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSyncGroup {
+    pub name: String,
+    #[serde(default)]
+    pub members: Vec<SavedSyncGroupMember>,
+}
+
 /// A stored DSP profile the wire enum no longer knows reads as "unset":
 /// the enum's equivalent of the [`SavedSettings::normalized`] membership
 /// check on `capture_buffer_ms`, so a settings file written by a version
@@ -77,6 +97,7 @@ pub struct SavedSettings {
     /// until it has completed (or when it never applied anything).
     pub first_run_tuning: Option<FirstRunTuning>,
     pub sync_trims: Vec<SavedSyncTrim>,
+    pub sync_groups: Vec<SavedSyncGroup>,
 }
 
 impl Default for SavedSettings {
@@ -93,6 +114,7 @@ impl Default for SavedSettings {
             dsp_quality: None,
             recommended_dsp_quality: None,
             first_run_tuning: None,
+            sync_groups: Vec::new(),
             sync_trims: Vec::new(),
         }
     }
@@ -128,6 +150,13 @@ impl SavedSettings {
                 crate::sync::latency::TRIM_LIMIT_MS,
             );
             !trim.transport.trim().is_empty() && !trim.device_id.trim().is_empty()
+        });
+        self.sync_groups.retain_mut(|group| {
+            group.name = group.name.trim().chars().take(64).collect();
+            group.members.retain(|member| {
+                !member.transport.trim().is_empty() && !member.device_id.trim().is_empty()
+            });
+            !group.name.is_empty()
         });
         self
     }
@@ -294,6 +323,14 @@ mod tests {
                 transport: "sonos".into(),
                 device_id: "uuid:living-room".into(),
                 trim_ms: -250,
+            }],
+            sync_groups: vec![SavedSyncGroup {
+                name: "Downstairs".into(),
+                members: vec![SavedSyncGroupMember {
+                    transport: "sonos".into(),
+                    device_id: "uuid:living-room".into(),
+                    device_name: "Living Room".into(),
+                }],
             }],
         };
         write_file(&path, &expected).unwrap();

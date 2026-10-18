@@ -19,6 +19,7 @@ use crate::settings::{SavedSettings, SettingsPersistence};
 use crate::sync::{OutputKey, SyncController};
 use crate::timeline::PcmChunk;
 use parking_lot::Mutex as StdMutex;
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::atomic::{
@@ -109,6 +110,17 @@ pub struct CoreState {
     pub(crate) owntone_base: Arc<StdMutex<String>>,
     pub(crate) bluetooth: Arc<dyn BluetoothAdapter>,
     bluetooth_cache: Arc<Mutex<BluetoothDeviceCache>>,
+
+    /// The isolated states `sync/lifecycle` gives playing sync-group
+    /// members, keyed by output: one sender and radio-nonce owner per
+    /// member, all reading the shared timeline bus above. Only the root
+    /// state holds entries (each child gets an empty registry), so this
+    /// never becomes a reference cycle.
+    pub(crate) group_children: Arc<tokio::sync::Mutex<HashMap<crate::sync::OutputKey, CoreState>>>,
+    /// True in the states [`CoreState::group_child`] hands to playing
+    /// sync-group members: each drives its receiver on its own transport
+    /// session, like a patchbay endpoint, not through the shared one.
+    pub(crate) group_member: bool,
 
     // Settings.
     pub(crate) eq_gains_db: Arc<StdMutex<[f32; 5]>>,
@@ -258,6 +270,9 @@ impl CoreState {
                 trim.trim_ms,
             );
         }
+        for group in &saved_settings.sync_groups {
+            sync.restore_group(group);
+        }
         let (change_signal, _) = watch::channel(0u64);
         let cd = CdDeck::new();
         cd.add_event_sink(ws_tx.clone());
@@ -293,6 +308,8 @@ impl CoreState {
             owntone_base: Arc::new(StdMutex::new("http://127.0.0.1:3689".into())),
             bluetooth: Arc::new(SystemBluetoothAdapter::from_host()),
             bluetooth_cache: Arc::new(Mutex::new(None)),
+            group_children: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            group_member: false,
             eq_gains_db,
             dsp_quality,
             target_sample_rate_hz,
@@ -603,6 +620,53 @@ impl CoreState {
 
     pub(crate) fn remember_capture_buffer(&self, buffer_ms: u32) {
         self.update_saved_settings(|saved| saved.capture_buffer_ms = buffer_ms);
+    }
+
+    /// Isolated sender, nonce and stream counters for one playing
+    /// sync-group member. Unlike a patchbay child this shares the ROOT's
+    /// timeline bus (`audio_tx`), input rate and sync registry — the members
+    /// of a group must read one timeline to hold one presentation epoch —
+    /// but owns its output session and output rate so a mixed-rate group
+    /// never fights over one mutex. Discovery, the service flag and the
+    /// mock log stay shared.
+    pub(crate) fn group_child(&self) -> Self {
+        let mut child = self.clone();
+        // Each child gets its own empty registry (and sender/config locks),
+        // so this never becomes a reference cycle and concurrent member
+        // starts never serialize behind one switch lock.
+        child.group_children = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        child.sender_lock = Arc::new(Mutex::new(()));
+        child.config_lock = Arc::new(Mutex::new(()));
+        child.settings_persistence = None;
+        child.saved_settings = Arc::new(StdMutex::new(SavedSettings::default()));
+        child.settings_revision = Arc::new(AtomicU64::new(0));
+        child.output_sample_rate_hz = Arc::new(StdMutex::new(*self.output_sample_rate_hz.lock()));
+        child.stream_clients = Arc::new(AtomicUsize::new(0));
+        child.stream_progress = Arc::new(AtomicU64::new(0));
+        let (ws_tx, _) = broadcast::channel(64);
+        child.ws_tx = ws_tx;
+        child.output = OutputSession::new(child.ws_tx.clone(), child.output_sample_rate_hz.clone());
+        child.output.set_manage_local_sink(!self.mock);
+        child.group_member = true;
+        child
+    }
+
+    /// The playing sync-group member whose radio stream owns `nonce`, if
+    /// any.
+    pub async fn group_stream_state(&self, nonce: &str) -> Option<CoreState> {
+        self.group_children
+            .lock()
+            .await
+            .values()
+            .find(|child| child.output().snapshot().serves_radio(nonce))
+            .cloned()
+    }
+
+    /// Persist the sync groups exactly as configured (`sync_groups` in
+    /// settings.json). They are restored created and stopped.
+    pub(crate) fn remember_sync_groups(&self) {
+        let groups = self.sync.saved_groups();
+        self.update_saved_settings(|saved| saved.sync_groups = groups.clone());
     }
 
     // ---- first-run tuning and DSP quality ------------------------------

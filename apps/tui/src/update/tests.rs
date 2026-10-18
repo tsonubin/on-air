@@ -2,7 +2,7 @@ use super::*;
 use crate::api::{
     ActiveOutput, ActiveOutputView, AudioQualityResponse, CdStatus, DspQuality, MeterLevel,
     OutputInfo, OutputPhase, OutputSyncStatus, SampleRateResponse, SampleRateSide, StatusResponse,
-    SyncState,
+    SyncGroupView, SyncState,
 };
 use crate::model::DestState;
 
@@ -72,6 +72,7 @@ fn model_with_mock_snapshot() -> Model {
         bluetooth: None,
         audio_quality: None,
         sync: None,
+        sync_groups: None,
     };
     model.autostart = Some(false);
     model
@@ -1569,6 +1570,7 @@ fn sync_row(transport: &str, device_id: &str, trim_ms: i32) -> OutputSyncStatus 
         delay_frames: 0,
         output_sample_rate_hz: 48000,
         drift_ppm: None,
+        group_id: None,
     }
 }
 
@@ -1660,6 +1662,292 @@ fn the_trim_prompt_validates_the_value_and_reports_a_refused_write() {
     assert_eq!(input, "", "the refused value is cleared");
     assert_eq!(error.as_deref(), Some("nope"));
     assert_eq!(name, "Mock Sonos");
+}
+
+fn group(id: u64, name: &str, playing: bool) -> SyncGroupView {
+    SyncGroupView {
+        id,
+        name: name.into(),
+        members: vec![],
+        playing,
+    }
+}
+
+fn in_group(group_id: u64) -> OutputSyncStatus {
+    let mut row = sync_row("sonos", "uuid:mock-sonos", 0);
+    row.group_id = Some(group_id);
+    row
+}
+
+#[test]
+fn g_on_an_output_opens_the_sync_group_prompt_on_its_group() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![in_group(2)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", true)]);
+    assert!(update(&mut m, key('g')).is_empty());
+    let Modal::GroupPrompt {
+        transport,
+        device_id,
+        name,
+        index,
+        naming,
+        ..
+    } = &m.modal
+    else {
+        panic!("expected the group prompt, got {:?}", m.modal);
+    };
+    assert_eq!(
+        (transport.as_str(), device_id.as_str(), name.as_str()),
+        ("sonos", "uuid:mock-sonos", "Mock Sonos"),
+        "the prompt is about the selected output"
+    );
+    assert_eq!(*index, 1, "the highlighted group is the one it is in");
+    assert!(!*naming);
+}
+
+#[test]
+fn g_outside_the_destination_pane_still_goes_to_a_track() {
+    let mut m = model_with_mock_snapshot();
+    m.snapshot.cd = Some(disc(true));
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false)]);
+    update(&mut m, key('g'));
+    assert!(matches!(m.modal, Modal::TrackPrompt { .. }));
+}
+
+#[test]
+fn enter_joins_the_highlighted_group_and_done_closes_and_refreshes() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", false)]);
+    update(&mut m, key('g'));
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::JoinSyncGroup {
+            group_id: 1,
+            from: None,
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+        }]
+    );
+    assert_eq!(
+        m.pending,
+        Some(Pending {
+            label: LABEL_GROUP.into()
+        })
+    );
+    // Success closes the prompt; the follow-up refresh lands the group.
+    assert_eq!(
+        update(&mut m, done(LABEL_GROUP, Ok(()))),
+        vec![Cmd::Refresh]
+    );
+    assert_eq!(m.pending, None);
+    assert_eq!(m.modal, Modal::None);
+}
+
+#[test]
+fn enter_takes_the_output_out_of_its_own_group() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![in_group(1)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", true)]);
+    update(&mut m, key('g'));
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::LeaveSyncGroup {
+            group_id: 1,
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+        }]
+    );
+}
+
+#[test]
+fn enter_on_another_group_moves_by_leaving_the_old_one_first() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![in_group(1)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", false)]);
+    update(&mut m, key('g'));
+    update(&mut m, code(KeyCode::Down));
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::JoinSyncGroup {
+            group_id: 2,
+            from: Some(1),
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+        }],
+        "a move leaves the old group before it joins the new one"
+    );
+}
+
+#[test]
+fn p_plays_the_highlighted_group_together_and_stops_it() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", true)]);
+    update(&mut m, key('g'));
+    assert_eq!(update(&mut m, key('p')), vec![Cmd::StartSyncGroup(1)]);
+    assert_eq!(
+        update(&mut m, done(LABEL_GROUP, Ok(()))),
+        vec![Cmd::Refresh]
+    );
+    // The success closed the prompt; reopen it and stop the other group.
+    update(&mut m, key('g'));
+    update(&mut m, code(KeyCode::Down));
+    assert_eq!(update(&mut m, key('p')), vec![Cmd::StopSyncGroup(2)]);
+}
+
+#[test]
+fn x_removes_the_highlighted_group_and_done_closes_and_refreshes() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", true), group(2, "upstairs", true)]);
+    update(&mut m, key('g'));
+    update(&mut m, code(KeyCode::Down));
+    assert_eq!(
+        update(&mut m, key('x')),
+        vec![Cmd::DissolveSyncGroup { group_id: 2 }]
+    );
+    assert_eq!(
+        m.pending,
+        Some(Pending {
+            label: LABEL_DISSOLVE_GROUP.into()
+        })
+    );
+    // Success closes the prompt; the follow-up refresh drops the group.
+    assert_eq!(
+        update(&mut m, done(LABEL_DISSOLVE_GROUP, Ok(()))),
+        vec![Cmd::Refresh]
+    );
+    assert_eq!(m.pending, None);
+    assert_eq!(m.modal, Modal::None);
+    // With no group highlighted there is nothing to remove.
+    m.snapshot.sync_groups = Some(vec![]);
+    update(&mut m, key('g'));
+    assert_eq!(update(&mut m, key('x')), vec![]);
+    assert!(matches!(m.modal, Modal::GroupPrompt { .. }));
+}
+
+#[test]
+fn a_refused_dissolve_keeps_the_prompt_with_the_error() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", true)]);
+    update(&mut m, key('g'));
+    assert_eq!(
+        update(&mut m, key('x')),
+        vec![Cmd::DissolveSyncGroup { group_id: 1 }]
+    );
+    assert_eq!(
+        update(&mut m, done(LABEL_DISSOLVE_GROUP, Err("nope".into()))),
+        vec![Cmd::Refresh]
+    );
+    assert_eq!(m.pending, None);
+    assert!(
+        matches!(&m.modal, Modal::GroupPrompt { error: Some(e), .. } if e == "nope"),
+        "{:?}",
+        m.modal
+    );
+}
+
+#[test]
+fn n_names_a_new_group_and_enter_creates_it_with_the_output() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false)]);
+    update(&mut m, key('g'));
+    assert!(update(&mut m, key('n')).is_empty());
+    for c in "kitchen".chars() {
+        update(&mut m, key(c));
+    }
+    assert!(
+        matches!(&m.modal, Modal::GroupPrompt { naming: true, input, .. } if input == "kitchen"),
+        "{:?}",
+        m.modal
+    );
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::CreateSyncGroup {
+            name: "kitchen".into(),
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+        }]
+    );
+}
+
+#[test]
+fn a_new_group_name_is_1_to_64_characters() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    update(&mut m, key('g'));
+    update(&mut m, key('n'));
+    // An empty name is refused before anything is sent.
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    assert!(matches!(&m.modal, Modal::GroupPrompt { error: Some(_), .. }));
+    assert_eq!(m.pending, None);
+    // A name of only spaces is empty too.
+    for _ in 0..3 {
+        update(&mut m, key(' '));
+    }
+    assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
+    assert!(matches!(&m.modal, Modal::GroupPrompt { error: Some(_), .. }));
+    assert_eq!(m.pending, None);
+    // Typing stops at the wire's 64 characters.
+    for _ in 0..70 {
+        update(&mut m, key('x'));
+    }
+    assert!(
+        matches!(&m.modal, Modal::GroupPrompt { input, .. } if input.len() == GROUP_NAME_MAX),
+        "{:?}",
+        m.modal
+    );
+}
+
+#[test]
+fn a_refused_group_write_keeps_the_prompt_with_the_error() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false)]);
+    update(&mut m, key('g'));
+    assert_eq!(
+        update(&mut m, code(KeyCode::Enter)),
+        vec![Cmd::JoinSyncGroup {
+            group_id: 1,
+            from: None,
+            transport: "sonos".into(),
+            device_id: "uuid:mock-sonos".into(),
+        }]
+    );
+    // The write may have half-applied — a move leaves before it joins — so
+    // membership is re-read underneath the still-open prompt.
+    assert_eq!(
+        update(&mut m, done(LABEL_GROUP, Err("nope".into()))),
+        vec![Cmd::Refresh]
+    );
+    assert_eq!(m.pending, None);
+    assert!(
+        matches!(&m.modal, Modal::GroupPrompt { error: Some(e), .. } if e == "nope"),
+        "{:?}",
+        m.modal
+    );
+}
+
+#[test]
+fn the_group_prompt_moves_the_highlighter_and_esc_closes_it() {
+    let mut m = on_dest("uuid:mock-sonos");
+    m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
+    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", false)]);
+    update(&mut m, key('g'));
+    assert_eq!(update(&mut m, code(KeyCode::Down)), vec![]);
+    assert!(matches!(&m.modal, Modal::GroupPrompt { index: 1, .. }));
+    // The highlighter stops at the ends of the list.
+    update(&mut m, code(KeyCode::Down));
+    assert!(matches!(&m.modal, Modal::GroupPrompt { index: 1, .. }));
+    update(&mut m, code(KeyCode::Up));
+    assert!(matches!(&m.modal, Modal::GroupPrompt { index: 0, .. }));
+    // Esc closes, even in the middle of naming a group.
+    update(&mut m, key('n'));
+    update(&mut m, code(KeyCode::Esc));
+    assert_eq!(m.modal, Modal::None);
 }
 
 fn mouse(target: Target, rect: Rect, column: u16, row: u16, kind: MouseKind) -> Msg {

@@ -1,5 +1,5 @@
 use axum::http::{header, HeaderValue, Method};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
@@ -111,6 +111,27 @@ pub fn build_router(state: CoreState) -> Router {
         )
         .route("/api/sync", get(api::sync::get_sync))
         .route("/api/sync/trim", put(api::sync::set_sync_trim))
+        .route("/api/sync/groups", post(api::sync::create_sync_group))
+        .route(
+            "/api/sync/groups/{id}",
+            delete(api::sync::dissolve_sync_group),
+        )
+        .route(
+            "/api/sync/groups/{id}/members",
+            post(api::sync::add_sync_group_member),
+        )
+        .route(
+            "/api/sync/groups/{id}/leave",
+            post(api::sync::leave_sync_group_member),
+        )
+        .route(
+            "/api/sync/groups/{id}/start",
+            post(api::sync::start_sync_group),
+        )
+        .route(
+            "/api/sync/groups/{id}/stop",
+            post(api::sync::stop_sync_group),
+        )
         .route("/api/service", put(api::service::set_service))
         .route("/api/ws", get(api::ws::ws_handler))
         .route("/api/pairing/pin", get(api::pairing::get_pin))

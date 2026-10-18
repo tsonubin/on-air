@@ -62,7 +62,7 @@ pub(super) fn source_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &m
 }
 
 /// The right-aligned tags of a Destination row: `⚇ pair` first, then its
-/// sync standing and manual trim, then its state.
+/// sync standing, manual trim and sync group, then its state.
 fn dest_tags(entry: &DestEntry) -> Vec<(String, Style)> {
     let mut tags = Vec::new();
     if entry.pair_badge {
@@ -85,6 +85,9 @@ fn dest_tags(entry: &DestEntry) -> Vec<(String, Style)> {
                 Style::new().add_modifier(Modifier::DIM),
             ));
         }
+    }
+    if let Some(group) = &entry.group {
+        tags.push((truncate(&format!("together: {group}"), 20), Style::new()));
     }
     let state = match entry.state {
         DestState::Live => Some(("live", Style::new().fg(Color::Green))),

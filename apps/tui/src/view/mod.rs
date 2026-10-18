@@ -22,8 +22,8 @@ use cd::cd_strip;
 use header::{hint_line, render_header};
 use mixer::mixer_pane;
 use overlay::{
-    audio_check_overlay, eject_overlay, firewall_overlay, help_overlay, pin_overlay,
-    status_overlay, track_overlay, trim_overlay,
+    audio_check_overlay, eject_overlay, firewall_overlay, group_overlay, help_overlay,
+    pin_overlay, status_overlay, track_overlay, trim_overlay,
 };
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -142,6 +142,7 @@ pub fn view(model: &Model, frame: &mut Frame) -> HitMap {
                 model.pending.is_some(),
             ))
         }
+        Modal::GroupPrompt { .. } => Some(group_overlay(model, frame, area)),
         Modal::ConfirmEject => Some(eject_overlay(frame, area)),
         Modal::Status => Some(status_overlay(model, frame, area)),
         Modal::Firewall => Some(firewall_overlay(model, frame, area)),

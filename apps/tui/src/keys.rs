@@ -26,9 +26,10 @@ pub enum Action {
     PrevTrack,
     SeekBack,
     SeekForward,
-    GotoTrack,
     Eject,
     Trim,
+    /// `g`: sync groups on a Destination row, CD go to track elsewhere.
+    Group,
     Monitor,
     Autostart,
     Status,
@@ -106,8 +107,8 @@ pub const KEYS: &[Binding] = &[
     },
     Binding {
         keys: "g",
-        action: Action::GotoTrack,
-        help: "CD go to track",
+        action: Action::Group,
+        help: "CD go to track (outside the Destination pane)",
     },
     Binding {
         keys: "e",
@@ -118,6 +119,11 @@ pub const KEYS: &[Binding] = &[
         keys: "d",
         action: Action::Trim,
         help: "Latency trim for the selected output (manual, in ms)",
+    },
+    Binding {
+        keys: "g",
+        action: Action::Group,
+        help: "Sync group for the selected output (join, play together)",
     },
     Binding {
         keys: "m",
@@ -213,7 +219,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             '<' | ',' => Action::PrevTrack,
             '[' => Action::SeekBack,
             ']' => Action::SeekForward,
-            'g' => Action::GotoTrack,
+            'g' => Action::Group,
             'e' => Action::Eject,
             'd' => Action::Trim,
             'm' => Action::Monitor,
@@ -250,9 +256,10 @@ mod tests {
             Some(Action::Monitor)
         );
         assert_eq!(action_for(&press(KeyCode::Char('d'))), Some(Action::Trim));
+        assert_eq!(action_for(&press(KeyCode::Char('g'))), Some(Action::Group));
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 24);
+        assert_eq!(KEYS.len(), 25);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),

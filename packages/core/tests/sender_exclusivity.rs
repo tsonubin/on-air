@@ -189,15 +189,18 @@ async fn two_sessions_play_at_the_same_time() {
 #[tokio::test]
 async fn one_session_still_stops_the_previous_sender_even_in_a_sync_group() {
     let state = CoreState::new();
-    let group = state.sync.create_group();
-    state.sync.join(
-        &group,
-        &ActiveOutput {
-            transport: "null".into(),
-            device_id: "a".into(),
-            device_name: "A".into(),
-        },
-    );
+    let group = state.sync.create_group("Together");
+    state
+        .sync
+        .join(
+            &group,
+            &ActiveOutput {
+                transport: "null".into(),
+                device_id: "a".into(),
+                device_name: "A".into(),
+            },
+        )
+        .unwrap();
     let log = Arc::new(Mutex::new(Vec::new()));
 
     state
@@ -214,4 +217,64 @@ async fn one_session_still_stops_the_previous_sender_even_in_a_sync_group() {
         ["A:start", "A:stop", "B:start"],
         "group membership must not weaken the session's own exclusivity"
     );
+}
+
+/// Group lifecycle, pinned at the registry: an output plays in at most one
+/// group at a time — the second join is REFUSED, never a silent move.
+#[tokio::test]
+async fn an_output_cannot_be_in_two_groups_at_once() {
+    let state = CoreState::new();
+    let downstairs = state.sync.create_group("Downstairs");
+    let party = state.sync.create_group("Party");
+    let output = ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:kitchen".into(),
+        device_name: "Kitchen".into(),
+    };
+    let member = state.sync.join(&downstairs, &output).unwrap();
+
+    let refused = state.sync.join(&party, &output);
+    assert!(
+        matches!(refused, Err(on_air_core::sync::JoinError::AlreadyInGroup)),
+        "joining a second group must be refused, got {refused:?}"
+    );
+    let current = state
+        .sync
+        .group_of(&on_air_core::sync::OutputKey::new("sonos", "uuid:kitchen"))
+        .expect("still a member of its first group");
+    assert_eq!(current.id(), downstairs.id(), "the first group keeps it");
+    assert_eq!(current.member_of(&on_air_core::sync::OutputKey::new("sonos", "uuid:kitchen")), Some(member));
+
+    // Re-joining the same group is idempotent, not a second membership.
+    assert_eq!(state.sync.join(&downstairs, &output).unwrap(), member);
+    assert_eq!(downstairs.members().len(), 1);
+}
+
+/// The hard refusal at the group boundary: while a sync-group member
+/// session plays a receiver, no other session may claim it.
+#[tokio::test]
+async fn a_group_members_session_refuses_a_second_claimant() {
+    let state = CoreState::new_mock().await;
+    let created = on_air_core::sync::lifecycle::create(&state, "Downstairs")
+        .await
+        .unwrap();
+    on_air_core::sync::lifecycle::add_member(&state, created, "sonos", "uuid:mock-sonos")
+        .await
+        .unwrap();
+    on_air_core::sync::lifecycle::start(&state, created).await.unwrap();
+
+    let refused = on_air_core::session::activate(&state, "sonos", "uuid:mock-sonos").await;
+    let error = refused.expect_err("a second claimant must be refused");
+    assert!(
+        matches!(
+            error,
+            on_air_core::session::ActivateError::Sender(SenderError::NotReady(_))
+        ),
+        "{error}"
+    );
+    assert!(
+        error.to_string().contains("sync group"),
+        "the refusal names the sync group: {error}"
+    );
+    state.shutdown().await;
 }

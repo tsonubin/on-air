@@ -13,6 +13,7 @@ import { useCoreSnapshot } from "./hooks/useCoreSnapshot";
 import { useMixer } from "./hooks/useMixer";
 import { useOutputSelection } from "./hooks/useOutputSelection";
 import { useService } from "./hooks/useService";
+import { useSyncGroups } from "./hooks/useSyncGroups";
 import { UNREACHABLE_COPY } from "./lib/errorCopy";
 import { CdTransport } from "./ui/CdTransport";
 
@@ -21,6 +22,7 @@ function App() {
   const { snapshot, connection } = core;
   const service = useService(core);
   const selection = useOutputSelection({ core });
+  const syncGroups = useSyncGroups({ core });
   const mixer = useMixer({ snapshot, reportError: core.reportError, refresh: core.refresh });
   const cd = useCdTransport(core);
   const { autostart, toggle: toggleAutostart } = useAutostart(core.reportError);
@@ -70,12 +72,18 @@ function App() {
               activeOutput={snapshot.activeOutput}
               airplayMode={snapshot.airplayMode}
               sync={snapshot.sync?.outputs ?? null}
+              syncGroups={snapshot.sync?.groups ?? []}
               connectingOutput={selection.connectingOutput}
               refreshing={selection.refreshingDevices}
               disabled={locked}
               onChooseInput={(name) => void selection.chooseInput(name)}
               onChooseOutput={(output) => void selection.chooseOutput(output)}
               onSetTrim={(output, trimMs) => selection.setTrim(output, trimMs)}
+              onSetSyncGroup={(output, groupId) => syncGroups.setMembership(output, groupId)}
+              onCreateGroup={(name) => syncGroups.createGroup(name)}
+              onStartGroup={(groupId) => syncGroups.startGroup(groupId)}
+              onStopGroup={(groupId) => syncGroups.stopGroup(groupId)}
+              onDissolveGroup={(groupId) => syncGroups.dissolveGroup(groupId)}
               onBluetoothSettings={selection.openBluetoothSettings}
               onAirplayInfo={selection.showAirplayHelp}
               onRefresh={() => void selection.refreshDevices()}

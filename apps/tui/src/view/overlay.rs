@@ -2,7 +2,7 @@
 
 use super::layout::centered;
 use crate::keys::KEYS;
-use crate::model::Model;
+use crate::model::{Modal, Model};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
@@ -301,6 +301,118 @@ pub(super) fn trim_overlay(
         Paragraph::new(lines)
             .wrap(Wrap { trim: true })
             .block(Block::bordered().title(format!(" Latency trim · {name} "))),
+        rect,
+    );
+    rect
+}
+
+/// The sync-group overlay for one output: which groups exist, where this
+/// output plays and the keys that change it. The copy insists on the
+/// truth: a group is several speakers playing in sync, never one merged
+/// device, and nothing here is calibrated.
+pub(super) fn group_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rect {
+    let Modal::GroupPrompt {
+        transport,
+        device_id,
+        name,
+        index,
+        input,
+        naming,
+        error,
+    } = &model.modal
+    else {
+        unreachable!("group_overlay is only called for the group prompt");
+    };
+    let groups = model.snapshot.sync_groups.as_deref().unwrap_or_default();
+    let current = model
+        .sync_row(transport, device_id)
+        .and_then(|row| row.group_id);
+    let mut lines = vec![
+        Line::from("Several speakers play the same audio in sync — not one merged device."),
+        Line::from("Each keeps its own volume and latency trim, typed by ear."),
+        Line::from("Nothing here is measured or calibrated."),
+        Line::from(match current.and_then(|id| groups.iter().find(|g| g.id == id)) {
+            Some(group) => format!("This output: {name} — in \"{}\"", group.name),
+            None => format!("This output: {name} — not in a group yet"),
+        }),
+    ];
+    if groups.is_empty() {
+        lines.push(Line::from("No groups yet — press n to name one."));
+    }
+    for (position, group) in groups.iter().enumerate() {
+        let mut listed = String::new();
+        for member in &group.members {
+            if !listed.is_empty() {
+                listed.push_str(", ");
+            }
+            // A member that failed to start is marked, not hidden.
+            if member.error.is_some() {
+                listed.push_str("✗ ");
+            }
+            listed.push_str(&member.device_name);
+        }
+        if listed.is_empty() {
+            listed.push_str("no speakers yet");
+        }
+        let state = if group.playing {
+            "playing together"
+        } else {
+            "stopped"
+        };
+        let here = if Some(group.id) == current {
+            " (this output)"
+        } else {
+            ""
+        };
+        lines.push(Line::from(format!(
+            "{}{} — {listed} — {state}{here}",
+            if position == *index { "> " } else { "  " },
+            group.name,
+        )));
+    }
+    if *naming {
+        lines.push(Line::from(Span::styled(
+            format!("New group name: {input}▏"),
+            Style::new().bold(),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("Enter: create it and put {name} in it   Esc: close"),
+            Style::new().dim(),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            "↑/↓: choose   Enter: join or take out   n: new group   Esc: close",
+            Style::new().dim(),
+        )));
+        lines.push(Line::from(Span::styled(
+            "p: play together / stop   x: remove the group",
+            Style::new().dim(),
+        )));
+        lines.push(Line::from(
+            "Removing a group stops its speakers if they are playing along.",
+        ));
+    }
+    if let Some(error) = error {
+        lines.push(Line::from(Span::styled(
+            error.to_string(),
+            Style::new().fg(Color::Red),
+        )));
+    }
+    if model.pending.is_some() {
+        lines.push(Line::from(Span::styled(
+            "Working…",
+            Style::new().fg(Color::Yellow),
+        )));
+    }
+    // Two spare rows over the logical lines: the copy wraps at overlay
+    // widths and a clipped list line would hide the group it names.
+    let height = lines.len() as u16 + 4;
+    let rect = centered(area, area.width.min(72), height.min(area.height));
+    frame.render_widget(Clear, rect);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .block(Block::bordered().title(format!(" Sync group · {name} "))),
         rect,
     );
     rect
