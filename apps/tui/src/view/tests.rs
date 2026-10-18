@@ -754,8 +754,8 @@ fn core_down_dims_but_keeps_rows() {
     assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     let (x, y) = cell_of(&b, "VOL");
     assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
-    m.meter.rms_db = -6.0;
-    m.meter.peak_db = -6.0;
+    m.meter.left.rms_db = -6.0;
+    m.meter.left.peak_db = -6.0;
     let b = render(&m, 100, 30);
     let (x, y) = cell_of(&b, "█");
     assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
