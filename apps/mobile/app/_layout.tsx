@@ -1,4 +1,4 @@
-import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import { DarkTheme, ThemeProvider } from "expo-router";
 import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -19,7 +19,9 @@ function Navigation() {
   );
 }
 
-// The app is dark-only (`userInterfaceStyle: "dark"` in app.json).
+// The app is dark-only (`userInterfaceStyle: "dark"` in app.json). Expo Router's
+// Stack reads its own theme context, so ThemeProvider and DarkTheme come from
+// expo-router; otherwise the native headers fall back to the light theme.
 export default function RootLayout() {
   return (
     <SafeAreaProvider>

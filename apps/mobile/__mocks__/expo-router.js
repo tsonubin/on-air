@@ -55,6 +55,8 @@ Stack.Protected = () => null;
 Stack.Toolbar = (props) => React.createElement("NativeToolbar", props, props.children);
 Stack.Toolbar.Button = (props) => React.createElement("NativeToolbarButton", props, props.children);
 module.exports = {
+  DarkTheme: { dark: true },
+  ThemeProvider: ({ children }) => React.createElement(React.Fragment, {}, children),
   router,
   Stack,
   __reset: () => {

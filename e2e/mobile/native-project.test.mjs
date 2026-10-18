@@ -117,6 +117,11 @@ test("iOS adopts the scene life cycle the iOS 27 SDK requires", () => {
   );
 });
 
+test("iOS native project keeps the dark-only Expo appearance", () => {
+  assert.equal(appConfig.userInterfaceStyle, "dark");
+  assert.match(iosInfo, /<key>UIUserInterfaceStyle<\/key>\s*<string>Dark<\/string>/);
+});
+
 test("Icon Composer packages retain the shared Live Dial artwork", () => {
   const icon = readFileSync(path.join(ROOT, "apps/mobile/assets/icon.png"));
   const packages = ["apps/mobile/assets/AppIcon.icon", "apps/mobile/ios/OnAirMobile/AppIcon.icon"];
