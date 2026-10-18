@@ -19,6 +19,23 @@ Notable changes to on-air. The format follows
   installs the latest release's prebuilt binaries through the `on-air-bin`
   recipe with checksums pinned from that release, or builds a clone with
   `--checkout`; re-running updates.
+- Omarchy: a media widget and notifications (PR #15, in review). The media
+  widget shows the CD transport and the active output and collapses away
+  when there is nothing playing, so a laptop with no optical drive sees no
+  phantom player. Toasts cover output connected, disconnected and failed,
+  audio paused and resumed, and a rotated pairing PIN; rapid changes
+  coalesce into one notification. A D-Bus MPRIS bridge is not included —
+  the exact interface a future one must expose is specified in
+  `docs/omarchy.md`.
+- A shared playback timeline, the foundation for playing several kinds of
+  speaker in sync (PR #16, in review). Every audio chunk carries a frame
+  index and a capture timestamp; outputs can be grouped onto one
+  presentation epoch; each output holds a delay line so a fast transport
+  waits for a slow one; and clock drift is steered through a
+  variable-ratio resampler. Per-output latency trim and sync state
+  (`free-running`, `syncing`, `locked`) are exposed over the API. Every
+  latency figure is a documented default and is not calibrated — the trim
+  exists precisely because these must be corrected by ear.
 
 ### Changed
 
@@ -50,6 +67,15 @@ Notable changes to on-air. The format follows
   sha2 0.11, getrandom 0.4, if-addrs 0.15; Vite 8, Vitest 5, React 19.3
   on the desktop; Jest 30 on the phone; TypeScript 7, Biome 2.5.15,
   Turbo 2.11, Playwright 1.64. Expo SDK 57 pins stay as Expo expects them.
+
+### Removed
+
+- Omarchy patchbay: the click-to-connect menu (PR #15, in review). Right-clicking
+  a row and choosing a target from a submenu was a second way to do what the cable
+  already did, and the two together were confusing. Connecting now happens one way
+  only: press a socket and drag a cable to the other side. Right-clicking a cable
+  anywhere along its length removes it immediately, with no submenu. Mixing and
+  grouping by dragging a row onto a neighbour is unchanged.
 
 ### Fixed
 
