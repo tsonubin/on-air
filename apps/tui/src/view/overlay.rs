@@ -259,7 +259,9 @@ pub(super) fn trim_overlay(
         "Enter: apply   Esc: close",
         Style::new().dim(),
     )));
-    let height = lines.len() as u16 + 2;
+    // Two spare rows over the logical lines: the copy wraps at overlay
+    // widths and a clipped input line would hide the control.
+    let height = lines.len() as u16 + 4;
     let rect = centered(area, area.width.min(64), height.min(area.height));
     frame.render_widget(Clear, rect);
     frame.render_widget(
