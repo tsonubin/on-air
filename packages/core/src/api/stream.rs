@@ -202,6 +202,7 @@ pub async fn stream_audio(
     let rx = state.audio_tx.subscribe();
     let pipeline_hz = *state.target_sample_rate_hz.lock();
     let output_hz = *state.output_sample_rate_hz.lock();
+    let quality = state.dsp_quality();
     let header = wav_header(output_hz, PIPELINE_CHANNELS as u16);
 
     // A sync-group member's feed: drift-corrected conversion plus its delay
@@ -216,7 +217,7 @@ pub async fn stream_audio(
     let (stage, observer) = match feed {
         Some(feed) => {
             let (bridge, control) =
-                RateBridge::new_steered(pipeline_hz, output_hz, PIPELINE_CHANNELS);
+                RateBridge::new_steered(pipeline_hz, output_hz, PIPELINE_CHANNELS, quality);
             let delay = (feed.delay_frames() > 0)
                 .then(|| PcmDelayLine::new(feed.delay_frames(), PIPELINE_CHANNELS));
             let observer = SyncObserver {
@@ -226,14 +227,16 @@ pub async fn stream_audio(
                 served_frames: 0,
                 next_report: Instant::now(),
             };
-            (
-                RateStage::Sync { bridge, delay },
-                Some(observer),
-            )
+            (RateStage::Sync { bridge, delay }, Some(observer))
         }
         None if pipeline_hz == output_hz => (RateStage::Passthrough, None),
         None => (
-            RateStage::Fixed(RateBridge::new(pipeline_hz, output_hz, PIPELINE_CHANNELS)),
+            RateStage::Fixed(RateBridge::new(
+                pipeline_hz,
+                output_hz,
+                PIPELINE_CHANNELS,
+                quality,
+            )),
             None,
         ),
     };

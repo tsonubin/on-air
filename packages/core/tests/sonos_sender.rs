@@ -159,3 +159,170 @@ async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
         "failed Stop left the preserved Sonos sender without recovery"
     );
 }
+
+/// B9 invariant: the stall recovery of a sync-group member must not restart
+/// playback at whatever wall-clock instant the stall was noticed. It
+/// re-enters the group instead: the restart is held to the group's pending
+/// presentation epoch, and from the moment of re-entry the sync status
+/// reports `syncing` (the stale drift report is dropped) until the drift
+/// servo re-locks.
+#[tokio::test]
+async fn sync_member_recovery_holds_to_the_group_epoch_and_reports_syncing() {
+    use on_air_api::SyncState;
+    use on_air_core::state::{ActiveOutput, CoreState};
+    use on_air_core::sync::DriftReport;
+    use std::time::{Duration, Instant};
+
+    let (addr, captured) = start_fake_sonos().await;
+    let device = SonosDevice::discovered(
+        "uuid:sync-recovery",
+        format!("http://{addr}/xml/device_description.xml"),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        "Sync Recovery",
+    );
+    let identity = ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:sync-recovery".into(),
+        device_name: "Sync Recovery".into(),
+    };
+    let mut state = CoreState::new();
+    state.set_mock(true);
+
+    // The output is in a sync group whose coordinated start is still
+    // pending, and its drift servo had locked before the stall.
+    let group = state.sync.create_group();
+    state.sync.join(&group, &identity);
+    let epoch = Instant::now() + Duration::from_millis(4500);
+    group.schedule_start(epoch);
+    state.sync.report_drift(
+        &identity,
+        Some(DriftReport {
+            drift_ppm: 0.0,
+            state: SyncState::Locked,
+        }),
+    );
+    let sync_state = |state: &CoreState| {
+        state
+            .sync
+            .sync_status(&[(identity.clone(), 44_100)])
+            .into_iter()
+            .find(|row| row.device_id == identity.device_id)
+            .map(|row| row.state)
+    };
+    assert_eq!(sync_state(&state), Some(SyncState::Locked));
+
+    let sender = SonosSender::new(
+        device,
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        "http://127.0.0.1:47990/stream/audio.wav".into(),
+    )
+    .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone())
+    .with_sync(state.sync.clone(), identity.clone());
+    state
+        .activate_sender_as(Box::new(sender), Some(identity.clone()))
+        .await
+        .unwrap();
+    let plays = || {
+        captured
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|action| action.contains("#Play"))
+            .count()
+    };
+    let actions = || captured.0.lock().unwrap().len();
+    // Activation: SetAVTransportURI + Play. Nothing pulls the stream, so
+    // stall recovery supervises.
+    assert_eq!((actions(), plays()), (2, 1));
+
+    // The recovery notices the stall after its initial 2 s delay, re-enters
+    // the group (the sync status drops to `syncing`) and holds the restart
+    // until the group's epoch instead of firing immediately.
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    assert_eq!(
+        actions(),
+        2,
+        "recovery must not restart playback before the group's epoch"
+    );
+    assert_eq!(
+        sync_state(&state),
+        Some(SyncState::Syncing),
+        "re-entry reports syncing, not the stale locked report"
+    );
+
+    // Once the epoch passes, the restart goes through as SetAVTransportURI
+    // + Play (SET_URI_SETTLE_DELAY included).
+    let restarted = tokio::time::timeout(Duration::from_millis(4000), async {
+        loop {
+            if plays() >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await;
+    assert!(
+        restarted.is_ok(),
+        "the recovery restart must still happen at the group's epoch"
+    );
+    assert!(
+        Instant::now() >= epoch,
+        "the restart fired before the epoch"
+    );
+    assert_eq!(sync_state(&state), Some(SyncState::Syncing));
+}
+
+/// A sync context alone changes nothing for a free-running output: with no
+/// group to re-enter, recovery keeps its historical fire-now restart.
+#[tokio::test]
+async fn recovery_of_a_free_running_output_still_restarts_immediately() {
+    use on_air_core::state::{ActiveOutput, CoreState};
+    use std::time::Duration;
+
+    let (addr, captured) = start_fake_sonos().await;
+    let device = SonosDevice::discovered(
+        "uuid:free-recovery",
+        format!("http://{addr}/xml/device_description.xml"),
+        IpAddr::V4(Ipv4Addr::LOCALHOST),
+        "Free Recovery",
+    );
+    let identity = ActiveOutput {
+        transport: "sonos".into(),
+        device_id: "uuid:free-recovery".into(),
+        device_name: "Free Recovery".into(),
+    };
+    let mut state = CoreState::new();
+    state.set_mock(true);
+    let sender = SonosSender::new(
+        device,
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        "http://127.0.0.1:47990/stream/audio.wav".into(),
+    )
+    .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone())
+    .with_sync(state.sync.clone(), identity.clone());
+    state
+        .activate_sender_as(Box::new(sender), Some(identity))
+        .await
+        .unwrap();
+    let recovered = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let play_count = captured
+                .0
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|action| action.contains("#Play"))
+                .count();
+            if play_count >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await;
+    assert!(
+        recovered.is_ok(),
+        "a free-running output must keep its fire-now recovery"
+    );
+}

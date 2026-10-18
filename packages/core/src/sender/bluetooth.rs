@@ -214,6 +214,8 @@ pub struct BluetoothPlaybackConfig {
     pub pipeline_hz: u32,
     pub output_hz: u32,
     pub volume: u8,
+    /// The DSP quality profile the rate conversion is built with.
+    pub quality: crate::dsp::DspQuality,
     /// Present when this output is a sync-group member: the feed holds the
     /// group's delay line and reports drift. Free-running outputs carry
     /// `None` and use the cheap fixed-rate path untouched.
@@ -296,7 +298,13 @@ impl AudioSender for BluetoothSender {
         let steered = config.sync.is_some();
         let opened = tokio::task::spawn_blocking(move || {
             let endpoint = adapter.connect(&id)?;
-            output.open(&endpoint, config.pipeline_hz, config.output_hz, steered)
+            output.open(
+                &endpoint,
+                config.pipeline_hz,
+                config.output_hz,
+                steered,
+                config.quality,
+            )
         })
         .await
         .map_err(|e| SenderError::internal(format!("Bluetooth preparation task failed: {e}")))??;
@@ -354,7 +362,11 @@ impl AudioSender for BluetoothSender {
             }
         }));
         let pump_stop = live.stop.clone();
-        let delay_frames = config.sync.as_ref().map(SyncFeed::delay_frames).unwrap_or(0);
+        let delay_frames = config
+            .sync
+            .as_ref()
+            .map(SyncFeed::delay_frames)
+            .unwrap_or(0);
         live.pump = Some(tokio::spawn(async move {
             // The sync-group member's delay line: a fast transport holds the
             // timeline back so it waits for the slowest member. Steady state

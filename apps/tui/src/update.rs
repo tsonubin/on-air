@@ -579,7 +579,13 @@ fn on_event(model: &mut Model, event: WsEvent) -> Vec<Cmd> {
             clamp_selection(model);
             schedule_refresh(model)
         }
-        WsEvent::LevelMeter { rms, peak } => {
+        WsEvent::LevelMeter { left, right } => {
+            // One combined bar until the TUI renders left/right (roadmap
+            // F5): the exact pre-split reading, pooled over both channels.
+            let (rms, peak) = (
+                ((left.rms * left.rms + right.rms * right.rms) * 0.5).sqrt(),
+                left.peak.max(right.peak),
+            );
             let live = model
                 .snapshot
                 .active_output

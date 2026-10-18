@@ -81,6 +81,16 @@ pub fn delay_frames(delay: Duration, rate_hz: u32) -> u64 {
     (delay.as_secs_f64() * f64::from(rate_hz)).round() as u64
 }
 
+/// One member's plan against a presentation epoch.
+fn plan_for(member: &Member, baseline: Duration, epoch: PresentationEpoch) -> StartPlan {
+    StartPlan {
+        epoch,
+        delay: baseline.saturating_sub(member.latency.latency),
+        effective_latency: member.latency.latency,
+        baseline_latency: baseline,
+    }
+}
+
 struct Member {
     id: MemberId,
     key: OutputKey,
@@ -203,18 +213,28 @@ impl SyncGroup {
         state
             .members
             .iter()
-            .map(|member| {
-                (
-                    member.id,
-                    StartPlan {
-                        epoch,
-                        delay: baseline.saturating_sub(member.latency.latency),
-                        effective_latency: member.latency.latency,
-                        baseline_latency: baseline,
-                    },
-                )
-            })
+            .map(|member| (member.id, plan_for(member, baseline, epoch)))
             .collect()
+    }
+
+    /// One member's [`StartPlan`] for epoch `at`, without touching the
+    /// group's remembered epoch. This is the plan a mid-flight re-entry —
+    /// a transport that restarted and must begin playing again — starts
+    /// against. `None` when `key` is not a member of this group.
+    pub fn start_plan(&self, key: &OutputKey, at: Instant) -> Option<StartPlan> {
+        let state = self.state.lock();
+        let member = state.members.iter().find(|member| member.key == *key)?;
+        let baseline = state
+            .members
+            .iter()
+            .map(|member| member.latency.latency)
+            .max()
+            .unwrap_or_default();
+        Some(plan_for(
+            member,
+            baseline,
+            PresentationEpoch { start_at: at },
+        ))
     }
 
     /// The epoch the last [`SyncGroup::schedule_start`] set, if any.

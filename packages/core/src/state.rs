@@ -112,6 +112,9 @@ pub struct CoreState {
 
     // Settings.
     pub(crate) eq_gains_db: Arc<StdMutex<[f32; 5]>>,
+    /// The DSP quality profile: shared with the input wiring so each
+    /// processing task builds its resampler with the current setting.
+    pub(crate) dsp_quality: Arc<StdMutex<crate::dsp::DspQuality>>,
     pub(crate) target_sample_rate_hz: Arc<StdMutex<u32>>,
     pub(crate) output_sample_rate_hz: Arc<StdMutex<u32>>,
     output_volume: Arc<AtomicU8>,
@@ -243,6 +246,7 @@ impl CoreState {
         let cd = CdDeck::new();
         cd.set_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
+        let dsp_quality = Arc::new(StdMutex::new(saved_settings.dsp_quality));
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
         let output_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz));
         let output = OutputSession::new(ws_tx.clone(), output_sample_rate_hz.clone());
@@ -254,6 +258,7 @@ impl CoreState {
             input_rate_hz: target_sample_rate_hz.clone(),
             cd: cd.clone(),
             capture_buffer_ms: capture_buffer_ms.clone(),
+            dsp_quality: dsp_quality.clone(),
         });
         CoreState {
             patchbay: Arc::new(crate::patchbay::Patchbay::new(None, false)),
@@ -273,6 +278,7 @@ impl CoreState {
             bluetooth: Arc::new(SystemBluetoothAdapter::from_host()),
             bluetooth_cache: Arc::new(Mutex::new(None)),
             eq_gains_db,
+            dsp_quality,
             target_sample_rate_hz,
             output_sample_rate_hz,
             output_volume: Arc::new(AtomicU8::new(saved_settings.volume)),
@@ -391,6 +397,7 @@ impl CoreState {
         child.settings_revision = Arc::new(AtomicU64::new(0));
         child.config_lock = Arc::new(Mutex::new(()));
         child.eq_gains_db = Arc::new(StdMutex::new([0.0; 5]));
+        child.dsp_quality = Arc::new(StdMutex::new(crate::dsp::DspQuality::default()));
         child.target_sample_rate_hz = Arc::new(StdMutex::new(44100));
         child.output_sample_rate_hz = Arc::new(StdMutex::new(44100));
         child.output_volume = Arc::new(AtomicU8::new(self.output_volume()));
@@ -408,6 +415,7 @@ impl CoreState {
             cd: child.cd.clone(),
             // Patchbay captures follow the user's capture buffer too.
             capture_buffer_ms: child.capture_buffer_ms.clone(),
+            dsp_quality: child.dsp_quality.clone(),
         });
         child.input.set_mock(self.mock);
         child
@@ -486,6 +494,28 @@ impl CoreState {
         *self.eq_gains_db.lock()
     }
 
+    /// The current DSP quality profile (saved setting).
+    pub fn dsp_quality(&self) -> crate::dsp::DspQuality {
+        *self.dsp_quality.lock()
+    }
+
+    /// `GET /api/audio/quality`'s view: the chosen profile, the last
+    /// benchmark's verdict (the current profile until one has run), and
+    /// every selectable profile.
+    pub fn audio_quality(&self) -> on_air_api::AudioQualityResponse {
+        let quality = self.dsp_quality();
+        let recommended = self
+            .saved_settings
+            .lock()
+            .recommended_dsp_quality
+            .unwrap_or(quality);
+        on_air_api::AudioQualityResponse {
+            quality,
+            recommended,
+            profiles: crate::dsp::DspQuality::ALL.to_vec(),
+        }
+    }
+
     /// The pipeline (input) sample rate.
     pub fn input_sample_rate_hz(&self) -> u32 {
         *self.target_sample_rate_hz.lock()
@@ -546,6 +576,20 @@ impl CoreState {
 
     pub(crate) fn remember_capture_buffer(&self, buffer_ms: u32) {
         self.update_saved_settings(|saved| saved.capture_buffer_ms = buffer_ms);
+    }
+
+    /// Persist the chosen DSP quality profile (`dsp_quality` in
+    /// settings.json). Each resampler picks it up as it is next built: the
+    /// processing thread at the next capture start, a stream body or sender
+    /// when it opens.
+    pub(crate) fn remember_dsp_quality(&self, quality: crate::dsp::DspQuality) {
+        *self.dsp_quality.lock() = quality;
+        self.update_saved_settings(|saved| saved.dsp_quality = quality);
+    }
+
+    /// Persist the last benchmark's quality verdict (`recommended_dsp_quality`).
+    pub(crate) fn remember_recommended_quality(&self, quality: crate::dsp::DspQuality) {
+        self.update_saved_settings(|saved| saved.recommended_dsp_quality = Some(quality));
     }
 
     pub(crate) fn remember_eq(&self, gains: [f32; 5]) {

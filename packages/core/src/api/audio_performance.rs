@@ -6,7 +6,9 @@ use crate::api::{
 use crate::audio_benchmark::{run, BUFFER_OPTIONS_MS};
 use crate::state::CoreState;
 use axum::{extract::State, http::StatusCode, Json};
-use on_air_api::{AudioBenchmark, SetCaptureBufferRequest};
+use on_air_api::{
+    AudioBenchmark, AudioQualityResponse, SetAudioQualityRequest, SetCaptureBufferRequest,
+};
 use std::sync::atomic::Ordering;
 
 pub async fn benchmark(
@@ -21,14 +23,40 @@ pub async fn benchmark(
     let input = state.input_sample_rate_hz();
     let output = state.output_sample_rate_hz();
     let gains = *state.eq_gains_db.lock();
+    let quality = state.dsp_quality();
     let report = tokio::task::spawn_blocking(move || {
         let _guard = guard;
-        run(input, output, gains, 96)
+        run(input, output, gains, 96, quality)
     })
     .await
     .map_err(|_| ApiError::internal("audio check stopped unexpectedly"))?
     .map_err(ApiError::internal)?;
+    // The recommendation is a property of this machine's measurements, so
+    // it survives restarts alongside the chosen profile.
+    state.remember_recommended_quality(report.recommended_quality);
     Ok(Json(report))
+}
+
+/// `GET /api/audio/quality`: the chosen profile, the last benchmark's
+/// recommendation and every selectable profile.
+pub async fn get_quality(
+    Paired: Paired,
+    State(state): State<CoreState>,
+) -> Json<AudioQualityResponse> {
+    Json(state.audio_quality())
+}
+
+/// `PUT /api/audio/quality`: choose the DSP quality profile. It applies as
+/// each resampler is next built — the processing thread at the next capture
+/// start, a stream body or sender when it opens — so nothing is rebuilt
+/// underneath a playing speaker.
+pub async fn set_quality(
+    Paired: Paired,
+    State(state): State<CoreState>,
+    JsonBody(request): JsonBody<SetAudioQualityRequest>,
+) -> Result<StatusCode, ApiError> {
+    state.remember_dsp_quality(request.quality);
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn set_buffer(
