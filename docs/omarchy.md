@@ -12,21 +12,28 @@ ships in the package under `/usr/share/doc/on-air/omarchy/`.
 
 ## Install
 
-From a clone of this repository (needs Rust and `base-devel`):
-
 ```bash
-git clone https://github.com/tsonubin/on-air.git && cd on-air
-packaging/omarchy/install.sh
+curl -fsSL https://raw.githubusercontent.com/tsonubin/on-air/main/packaging/omarchy/install.sh | sh
 on-air status
 ```
 
-That builds the `on-air` package from your checkout with `makepkg`, installs
-it with `sudo pacman -U`, enables the service, and prints the snippets below with the
-path each belongs in. It edits nothing under `~/.config`. It builds the
-working tree, uncommitted edits included, and keeps compiled output in
-`target/omarchy/`, so later runs only recompile what changed. Run
-`packaging/omarchy/install.sh --clean` to rebuild everything.
-Installation skips the Rust test suite. For development, run
+The installer takes the latest release's prebuilt binaries, checks them
+against the release's `SHA256SUMS`, and installs them as the `on-air-bin`
+pacman package with `sudo pacman -U`. Nothing compiles, which matters on
+older laptops. It then enables the `on-air-core` user service, restarts it
+so an update replaces the running core, and prints the snippets below with
+the path each belongs in. It edits nothing under `~/.config`. Run it
+again to update. `pacman -R on-air-bin` removes it. Prebuilt installs
+need a release with the terminal UI binaries and the recipes (v0.2.0 or
+newer; v0.1.0 predates them).
+
+From a clone of this repository (needs Rust and `base-devel`), the same
+script takes `--checkout` to build the `on-air` package from your working
+tree (uncommitted edits included; compiled output stays in
+`target/omarchy/`, so later runs only recompile what changed —
+`--clean` rebuilds everything), `--source` to build the release from
+source instead, and `--version X.Y.Z` to pick a release. Installation
+skips the Rust test suite. For development, run
 `cargo test --locked -p on-air-core -p on-air-tui` separately.
 
 Run the installer as your normal user in a terminal. The install step uses
@@ -41,8 +48,11 @@ The package installs `on-air-core` and `on-air` to `/usr/bin`, the unit to
 `/usr/lib/systemd/user/on-air-core.service`, a launcher entry, an icon, and
 the snippets. It depends on `libpulse` (`pactl`, `parec`, `pacat` for the
 PipeWire capture), `bluez-utils` (`bluetoothctl`) and `xdg-terminal-exec`
-(what opens the launcher entry in your terminal). AirPlay without OwnTone
-needs `python-pyatv`.
+(what opens the launcher entry in your terminal). AirPlay goes through
+OwnTone (`owntone-server` in the AUR) when it runs, otherwise through
+pyatv: install `uv` and fetch pyatv once with
+`uv run --with pyatv python3 -c "import pyatv"`, since the core runs it
+offline.
 
 ## Launch
 
@@ -68,9 +78,10 @@ Omarchy palette, font, border, scaling and reduced-motion preference.
 
 The **Desktop** source receives apps sent to **On-Air desktop**. Discovered
 AirPlay/Sonos speakers are also selectable directly as system outputs.
-Independent AirPlay needs `python-pyatv` and a receiver address from LAN
-discovery. Output groups use independent timing, and the network path
-streams stereo PCM. Physical speaker buffering remains.
+Independent AirPlay needs pyatv (through `uv`, as in Install) and a
+receiver address from LAN discovery. Output groups use independent
+timing, and the network path streams stereo PCM. Physical speaker
+buffering remains.
 
 See [the panel guide](../apps/quickshell/README.md) for all gestures, keyboard
 controls, state persistence and the Qt preview. The sections below describe
