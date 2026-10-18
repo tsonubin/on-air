@@ -366,6 +366,36 @@ main section {
   margin-top: 1.5rem;
 }
 
+/* The fade belongs to the scroll box only. Putting it on .diagram would let
+   it paint over the figcaption below and clip the caption's own text. */
+.diagram-frame {
+  position: relative;
+}
+
+.diagram-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 3.5rem;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--bg-soft));
+  opacity: 0;
+}
+
+.diagram-hint {
+  display: none;
+}
+
+@media (max-width: 46rem) {
+  .diagram-frame::after {
+    opacity: 1;
+  }
+
+  .diagram-hint {
+    display: block;
+  }
+}
+
 .diagram-scroll {
   overflow-x: auto;
   border: 1px solid var(--border);

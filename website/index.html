@@ -173,8 +173,9 @@
           </div>
 
           <figure class="diagram">
-            <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable (WAI-ARIA) -->
-            <section class="diagram-scroll" tabindex="0" aria-label="Audio flow diagram, scrollable">
+            <div class="diagram-frame">
+              <!-- biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be keyboard reachable (WAI-ARIA) -->
+              <section class="diagram-scroll" tabindex="0" aria-label="Audio flow diagram, scrollable">
               <svg
                 viewBox="0 0 960 520"
                 role="img"
@@ -270,10 +271,12 @@
                 ></line>
                 <text class="diagram-note" x="496" y="372">control only</text>
               </svg>
-            </section>
+              </section>
+            </div>
             <figcaption>
               One core, one audio path. Clients talk to the control plane; speakers receive audio
               from the core.
+              <span class="diagram-hint">Scroll the diagram sideways to see the speaker side.</span>
             </figcaption>
           </figure>
 
