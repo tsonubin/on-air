@@ -3,10 +3,13 @@ import { test } from "node:test";
 import {
   activateInput,
   activateOutput,
+  addSyncGroupMember,
   apiBase,
   connectBluetooth,
   controlCd,
+  createSyncGroup,
   deactivateOutput,
+  dissolveSyncGroup,
   fetchStatus,
   getActiveInput,
   getActiveOutput,
@@ -19,6 +22,7 @@ import {
   getSync,
   getVolume,
   HttpError,
+  leaveSyncGroupMember,
   listBluetooth,
   listInputs,
   listOutputs,
@@ -33,6 +37,8 @@ import {
   setSyncTrim,
   setVolume,
   simulateCd,
+  startSyncGroup,
+  stopSyncGroup,
   verifyPin,
   wsUrl,
 } from "./http.ts";
@@ -527,4 +533,49 @@ test("setSyncTrim puts a manual trim and returns its effective latency", async (
     calls[0].init?.body,
     JSON.stringify({ transport: "bluetooth", device_id: "bt-1", trim_ms: -100 }),
   );
+});
+
+test("the sync-group routes drive the whole group lifecycle", async () => {
+  // Create returns the new group so the caller has its id.
+  const created = respond(json({ id: 7, name: "Downstairs", members: [], playing: false }));
+  const group = await createSyncGroup(BASE, "Downstairs", "tok", { fetchImpl: created.fetchImpl });
+  assert.equal(group.id, 7);
+  assert.equal(created.calls[0].url, `${BASE}/api/sync/groups`);
+  assert.equal(created.calls[0].init?.method, "POST");
+  assert.equal(created.calls[0].init?.body, JSON.stringify({ name: "Downstairs" }));
+
+  // Membership is a POST per move: add to one group, take out again.
+  const added = respond(new Response(null, { status: 204 }));
+  await addSyncGroupMember(BASE, 7, { transport: "sonos", device_id: "uuid:1" }, "tok", {
+    fetchImpl: added.fetchImpl,
+  });
+  assert.equal(added.calls[0].url, `${BASE}/api/sync/groups/7/members`);
+  assert.equal(added.calls[0].init?.method, "POST");
+  assert.equal(
+    added.calls[0].init?.body,
+    JSON.stringify({ transport: "sonos", device_id: "uuid:1" }),
+  );
+
+  const left = respond(new Response(null, { status: 204 }));
+  await leaveSyncGroupMember(BASE, 7, { transport: "sonos", device_id: "uuid:1" }, "tok", {
+    fetchImpl: left.fetchImpl,
+  });
+  assert.equal(left.calls[0].url, `${BASE}/api/sync/groups/7/leave`);
+  assert.equal(left.calls[0].init?.method, "POST");
+
+  // Playback: start together at one epoch, stop, dissolve.
+  const started = respond(new Response(null, { status: 204 }));
+  await startSyncGroup(BASE, 7, "tok", { fetchImpl: started.fetchImpl });
+  assert.equal(started.calls[0].url, `${BASE}/api/sync/groups/7/start`);
+  assert.equal(started.calls[0].init?.method, "POST");
+
+  const stopped = respond(new Response(null, { status: 204 }));
+  await stopSyncGroup(BASE, 7, "tok", { fetchImpl: stopped.fetchImpl });
+  assert.equal(stopped.calls[0].url, `${BASE}/api/sync/groups/7/stop`);
+  assert.equal(stopped.calls[0].init?.method, "POST");
+
+  const dissolved = respond(new Response(null, { status: 204 }));
+  await dissolveSyncGroup(BASE, 7, "tok", { fetchImpl: dissolved.fetchImpl });
+  assert.equal(dissolved.calls[0].url, `${BASE}/api/sync/groups/7`);
+  assert.equal(dissolved.calls[0].init?.method, "DELETE");
 });

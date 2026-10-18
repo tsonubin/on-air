@@ -17,6 +17,7 @@ import {
   type CdControlRequest,
   type CdSimulateRequest,
   type CdStatus,
+  type CreateSyncGroupRequest,
   DEFAULT_PORT,
   type DspQuality,
   type EqGains,
@@ -33,6 +34,8 @@ import {
   type SetSyncTrimRequest,
   type SetVolumeRequest,
   type StatusResponse,
+  type SyncGroupMemberRequest,
+  type SyncGroupView,
   type SyncResponse,
   type SyncTrimResponse,
   type Transport,
@@ -125,6 +128,103 @@ export async function setSyncTrim(
   opts?: RequestOptions,
 ): Promise<SyncTrimResponse> {
   return request<SyncTrimResponse>(base, "/api/sync/trim", jsonInit("PUT", token, body), opts);
+}
+
+/**
+ * Create an empty named sync group: SEVERAL SPEAKERS that will play in
+ * sync, not one merged device. Nothing plays until `startSyncGroup`.
+ */
+export async function createSyncGroup(
+  base: string,
+  name: string,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<SyncGroupView> {
+  const payload: CreateSyncGroupRequest = { name };
+  return request<SyncGroupView>(base, "/api/sync/groups", jsonInit("POST", token, payload), opts);
+}
+
+/**
+ * Dissolve a group. Its playing members stop cleanly; free-running outputs
+ * are untouched.
+ */
+export async function dissolveSyncGroup(
+  base: string,
+  groupId: number,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(
+    base,
+    `/api/sync/groups/${groupId}`,
+    { method: "DELETE", headers: authHeaders(token) },
+    opts,
+    SLOW_REQUEST_TIMEOUT_MS,
+  );
+}
+
+/**
+ * Put one output into a group. Membership never disturbs playback; it takes
+ * effect at the group's next `startSyncGroup`.
+ */
+export async function addSyncGroupMember(
+  base: string,
+  groupId: number,
+  member: SyncGroupMemberRequest,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(base, `/api/sync/groups/${groupId}/members`, jsonInit("POST", token, member), opts);
+}
+
+/**
+ * Take one output out of a group. If it is playing with the group it stops
+ * cleanly and the other members keep playing.
+ */
+export async function leaveSyncGroupMember(
+  base: string,
+  groupId: number,
+  member: SyncGroupMemberRequest,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(base, `/api/sync/groups/${groupId}/leave`, jsonInit("POST", token, member), opts);
+}
+
+/**
+ * Start every member of a group at ONE presentation epoch: the speakers
+ * begin together. Each stays its own speaker with its own transport and
+ * latency trim. A member playing free-running is taken over.
+ */
+export async function startSyncGroup(
+  base: string,
+  groupId: number,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(
+    base,
+    `/api/sync/groups/${groupId}/start`,
+    { method: "POST", headers: authHeaders(token) },
+    opts,
+    SLOW_REQUEST_TIMEOUT_MS,
+  );
+}
+
+/** Stop every member cleanly. The group stays configured, just not playing. */
+export async function stopSyncGroup(
+  base: string,
+  groupId: number,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<void> {
+  await request(
+    base,
+    `/api/sync/groups/${groupId}/stop`,
+    { method: "POST", headers: authHeaders(token) },
+    opts,
+    SLOW_REQUEST_TIMEOUT_MS,
+  );
 }
 
 /** Per-call knobs accepted as the trailing argument of every HTTP function. */

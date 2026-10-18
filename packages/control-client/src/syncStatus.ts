@@ -15,3 +15,13 @@ export const SYNC_TRIM_DESCRIPTION =
 
 export const SYNC_DRIFT_DESCRIPTION =
   "Drift is measured against the shared timeline while an output is synchronized.";
+
+/**
+ * What a sync group is, in the words every client must be able to stand
+ * behind: SEVERAL SPEAKERS playing the same audio in sync — never one
+ * merged device. Each member keeps its own transport, volume and latency
+ * trim, and every latency figure is an uncalibrated default the trim
+ * corrects by ear.
+ */
+export const SYNC_GROUP_DESCRIPTION =
+  "Several speakers playing the same audio in sync — not one merged device. Each keeps its own volume and latency trim.";
