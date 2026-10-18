@@ -1,24 +1,82 @@
-use super::resample::StreamingResampler;
+use super::resample::{RateControl, SteerableResampler, StreamingResampler};
 use super::PIPELINE_CHANNELS;
 
 /// Decode pipeline stereo L16 LE, resample to the output rate, then fit it to
 /// the destination channel count. This is the sender-side half of the
 /// input/output sample-rate bridge.
+///
+/// [`RateBridge::new`] is the cheap fixed-ratio path used by free-running
+/// outputs. [`RateBridge::new_steered`] builds the drift-corrected path: a
+/// variable-ratio resampler steered through the returned [`RateControl`],
+/// used by sync-group members.
 pub struct RateBridge {
-    resampler: StreamingResampler,
+    core: RateCore,
     channels: usize,
+}
+
+enum RateCore {
+    Fixed(StreamingResampler),
+    Steered {
+        resampler: SteerableResampler,
+        control: RateControl,
+        applied_ppm: f64,
+    },
 }
 
 impl RateBridge {
     pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
         RateBridge {
-            resampler: StreamingResampler::new(input_rate_hz, output_rate_hz, PIPELINE_CHANNELS),
+            core: RateCore::Fixed(StreamingResampler::new(
+                input_rate_hz,
+                output_rate_hz,
+                PIPELINE_CHANNELS,
+            )),
             channels: channels.max(1),
         }
     }
 
+    /// The drift-corrected bridge for a sync-group member, plus the handle
+    /// its drift observer steers the ratio with.
+    pub fn new_steered(
+        input_rate_hz: u32,
+        output_rate_hz: u32,
+        channels: usize,
+    ) -> (Self, RateControl) {
+        let control = RateControl::default();
+        let bridge = RateBridge {
+            core: RateCore::Steered {
+                resampler: SteerableResampler::new(
+                    input_rate_hz,
+                    output_rate_hz,
+                    PIPELINE_CHANNELS,
+                ),
+                control: control.clone(),
+                applied_ppm: 0.0,
+            },
+            channels: channels.max(1),
+        };
+        (bridge, control)
+    }
+
     pub fn process_l16(&mut self, pcm: &[u8]) -> Vec<f32> {
-        let resampled = self.resampler.process(&l16_le_to_f32(pcm));
+        let samples = l16_le_to_f32(pcm);
+        let resampled = match &mut self.core {
+            RateCore::Fixed(resampler) => resampler.process(&samples),
+            RateCore::Steered {
+                resampler,
+                control,
+                applied_ppm,
+            } => {
+                // One relaxed atomic read per chunk, and a live ratio update
+                // only when the drift observer actually moved the correction.
+                let want = control.correction_ppm();
+                if want != *applied_ppm {
+                    resampler.set_rate_correction_ppm(want);
+                    *applied_ppm = want;
+                }
+                resampler.process(&samples)
+            }
+        };
         map_stereo(&resampled, self.channels)
     }
 
@@ -27,7 +85,10 @@ impl RateBridge {
     }
 
     pub fn output_rate_hz(&self) -> u32 {
-        self.resampler.output_rate_hz()
+        match &self.core {
+            RateCore::Fixed(resampler) => resampler.output_rate_hz(),
+            RateCore::Steered { resampler, .. } => resampler.output_rate_hz(),
+        }
     }
 
     pub fn channels(&self) -> usize {

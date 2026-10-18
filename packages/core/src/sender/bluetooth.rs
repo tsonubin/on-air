@@ -8,12 +8,14 @@ pub use pcm::{
 };
 
 use crate::sender::{AudioSender, OutputFormat, SenderError};
+use crate::sync::{DriftController, SyncFeed};
+use crate::timeline::{PcmChunk, PcmDelayLine};
 use bytes::Bytes;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, TrySendError};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -207,11 +209,15 @@ impl BluetoothAdapter for SystemBluetoothAdapter {
 }
 
 /// Requested rates and initial app volume, retained across stop/start rollback.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BluetoothPlaybackConfig {
     pub pipeline_hz: u32,
     pub output_hz: u32,
     pub volume: u8,
+    /// Present when this output is a sync-group member: the feed holds the
+    /// group's delay line and reports drift. Free-running outputs carry
+    /// `None` and use the cheap fixed-rate path untouched.
+    pub sync: Option<SyncFeed>,
 }
 
 struct LivePlayback {
@@ -239,7 +245,7 @@ impl Drop for LivePlayback {
 pub struct BluetoothSender {
     device: BluetoothDevice,
     adapter: Arc<dyn BluetoothAdapter>,
-    audio_tx: broadcast::Sender<Bytes>,
+    audio_tx: broadcast::Sender<PcmChunk>,
     output: Arc<dyn PcmOutput>,
     config: BluetoothPlaybackConfig,
     connection_attempted: bool,
@@ -251,7 +257,7 @@ impl BluetoothSender {
     pub fn new(
         device: BluetoothDevice,
         adapter: Arc<dyn BluetoothAdapter>,
-        audio_tx: broadcast::Sender<Bytes>,
+        audio_tx: broadcast::Sender<PcmChunk>,
         output: Arc<dyn PcmOutput>,
         config: BluetoothPlaybackConfig,
     ) -> Self {
@@ -286,10 +292,11 @@ impl AudioSender for BluetoothSender {
         let adapter = self.adapter.clone();
         let id = self.device.id.clone();
         let output = self.output.clone();
-        let config = self.config;
+        let config = self.config.clone();
+        let steered = config.sync.is_some();
         let opened = tokio::task::spawn_blocking(move || {
             let endpoint = adapter.connect(&id)?;
-            output.open(&endpoint, config.pipeline_hz, config.output_hz)
+            output.open(&endpoint, config.pipeline_hz, config.output_hz, steered)
         })
         .await
         .map_err(|e| SenderError::internal(format!("Bluetooth preparation task failed: {e}")))??;
@@ -307,7 +314,15 @@ impl AudioSender for BluetoothSender {
         let (writer_tx, writer_rx) = sync_channel::<Bytes>(8);
         let sink = live.opened.sink.clone();
         let writer_stop = live.stop.clone();
+        // Drift for a sync-group member: the writer observes what the
+        // consumer actually accepted and steers the sink's rate conversion.
+        let feed = config.sync.clone();
         live.writer = Some(std::thread::spawn(move || {
+            let consumption = sink.consumption();
+            let mut drift = consumption
+                .as_ref()
+                .map(|(_, nominal_hz)| DriftController::new(*nominal_hz));
+            let mut last_observed = Instant::now();
             while !writer_stop.load(Ordering::Acquire) {
                 match writer_rx.recv_timeout(Duration::from_millis(100)) {
                     Ok(chunk) => {
@@ -321,19 +336,61 @@ impl AudioSender for BluetoothSender {
                             break;
                         }
                     }
-                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Timeout) => {}
                     Err(RecvTimeoutError::Disconnected) => break,
+                }
+                if let (Some((counter, _)), Some(drift)) = (consumption.as_ref(), drift.as_mut()) {
+                    if last_observed.elapsed() >= Duration::from_secs(1) {
+                        last_observed = Instant::now();
+                        drift.observe(counter.load(Ordering::Relaxed), Instant::now());
+                        if let Some(control) = sink.rate_control() {
+                            control.set_correction_ppm(drift.correction_ppm());
+                        }
+                        if let Some(feed) = feed.as_ref() {
+                            feed.report(drift);
+                        }
+                    }
                 }
             }
         }));
         let pump_stop = live.stop.clone();
+        let delay_frames = config.sync.as_ref().map(SyncFeed::delay_frames).unwrap_or(0);
         live.pump = Some(tokio::spawn(async move {
+            // The sync-group member's delay line: a fast transport holds the
+            // timeline back so it waits for the slowest member. Steady state
+            // is zero-copy into a reused segment vector; free-running outputs
+            // skip the line entirely.
+            let mut delay = (delay_frames > 0)
+                .then(|| PcmDelayLine::new(delay_frames, crate::dsp::PIPELINE_CHANNELS));
+            let mut parts: Vec<Bytes> = Vec::with_capacity(2);
             while !pump_stop.load(Ordering::Acquire) {
                 match rx.recv().await {
-                    Ok(chunk) => match writer_tx.try_send(chunk) {
-                        Ok(()) | Err(TrySendError::Full(_)) => {}
-                        Err(TrySendError::Disconnected(_)) => break,
-                    },
+                    Ok(chunk) => {
+                        let pcm = chunk.pcm;
+                        let mut sent = true;
+                        match delay.as_mut() {
+                            Some(delay) => {
+                                parts.clear();
+                                delay.push_into(pcm, &mut parts);
+                                for part in parts.drain(..) {
+                                    match writer_tx.try_send(part) {
+                                        Ok(()) | Err(TrySendError::Full(_)) => {}
+                                        Err(TrySendError::Disconnected(_)) => {
+                                            sent = false;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            None => match writer_tx.try_send(pcm) {
+                                Ok(()) | Err(TrySendError::Full(_)) => {}
+                                Err(TrySendError::Disconnected(_)) => sent = false,
+                            },
+                        }
+                        if !sent {
+                            break;
+                        }
+                    }
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }

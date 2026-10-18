@@ -7,6 +7,8 @@ pub mod bluetooth;
 pub mod local;
 pub mod sonos;
 
+pub use crate::sync::StartPlan;
+
 /// Failure of a transport sender. Variants carry a human message but callers
 /// branch on the variant, never on the text.
 #[derive(Debug, thiserror::Error)]
@@ -72,6 +74,16 @@ pub struct OutputFormat {
 #[async_trait::async_trait]
 pub trait AudioSender: Send + Sync {
     async fn start(&mut self) -> Result<(), SenderError>;
+
+    /// Scheduled start for a sync-group member: begin at the group's shared
+    /// presentation epoch instead of firing immediately. The default holds
+    /// the sender until `plan.epoch.start_at` and then starts it; a
+    /// transport that can pre-roll its own buffer may override.
+    async fn start_at(&mut self, plan: StartPlan) -> Result<(), SenderError> {
+        plan.wait().await;
+        self.start().await
+    }
+
     async fn stop(&mut self) -> Result<(), SenderError>;
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError>;
     fn name(&self) -> &str;

@@ -1,8 +1,19 @@
 use futures_util::StreamExt;
 use on_air_core::session::new_stream_nonce;
 use on_air_core::state::{ActiveOutput, CoreState};
+use on_air_core::timeline::PcmChunk;
 use std::sync::atomic::Ordering;
 use tokio::net::TcpListener;
+
+/// Wrap raw test bytes in a timeline chunk. These bodies never go through
+/// the processing task, so the metadata is not what the test pins.
+fn chunk(pcm: bytes::Bytes) -> PcmChunk {
+    PcmChunk {
+        first_frame: 0,
+        captured_at: std::time::Instant::now(),
+        pcm,
+    }
+}
 
 /// Make a fake sender with this identity the exclusive output, serving the
 /// radio at `nonce`.
@@ -52,7 +63,7 @@ async fn streams_published_pcm_chunks_with_correct_content_type() {
     tokio::spawn(async move {
         // keep publishing until a subscriber (the HTTP request below) picks one up
         loop {
-            let _ = audio_tx_clone.send(known_chunk_clone.clone());
+            let _ = audio_tx_clone.send(chunk(known_chunk_clone.clone()));
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
     });
@@ -106,7 +117,9 @@ async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
     // Queue roughly 2.3 seconds of 1024-frame chunks before polling the body.
     for sequence in 0u16..100 {
         audio_tx
-            .send(bytes::Bytes::copy_from_slice(&sequence.to_le_bytes()))
+            .send(chunk(bytes::Bytes::copy_from_slice(
+                &sequence.to_le_bytes(),
+            )))
             .unwrap();
     }
 
@@ -156,7 +169,7 @@ async fn a_larger_capture_buffer_does_not_insert_silence_between_normal_batches(
         "normal capture batching must not add extra silence to the audio timeline"
     );
     let pcm = bytes::Bytes::from_static(&[1, 2, 3, 4]);
-    state.audio_tx.send(pcm.clone()).unwrap();
+    state.audio_tx.send(chunk(pcm.clone())).unwrap();
     assert_eq!(stream.next().await.unwrap().unwrap(), pcm);
 }
 
@@ -577,7 +590,7 @@ async fn start_sonos_recovery_harness(
     failure: FakeSonosFailure,
 ) -> (
     CoreState,
-    tokio::sync::broadcast::Sender<bytes::Bytes>,
+    tokio::sync::broadcast::Sender<PcmChunk>,
     SonosRecoveryProbe,
     Option<tokio::sync::oneshot::Sender<()>>,
 ) {
@@ -637,7 +650,7 @@ async fn start_sonos_recovery_harness(
         let mut stream = response.into_body().into_data_stream();
         assert!(stream.next().await.unwrap().unwrap().starts_with(b"RIFF"));
         audio_tx
-            .send(bytes::Bytes::from_static(FIRST_AUDIO))
+            .send(chunk(bytes::Bytes::from_static(FIRST_AUDIO)))
             .unwrap();
         let pcm = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
             .await
@@ -702,13 +715,13 @@ async fn start_sonos_recovery_harness(
 }
 
 async fn publish_until_seen(
-    audio_tx: &tokio::sync::broadcast::Sender<bytes::Bytes>,
+    audio_tx: &tokio::sync::broadcast::Sender<PcmChunk>,
     pcm: &'static [u8],
     seen: &std::sync::atomic::AtomicBool,
 ) -> bool {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(6_500);
     while tokio::time::Instant::now() < deadline {
-        let _ = audio_tx.send(bytes::Bytes::from_static(pcm));
+        let _ = audio_tx.send(chunk(bytes::Bytes::from_static(pcm)));
         if seen.load(std::sync::atomic::Ordering::Acquire) {
             return true;
         }
@@ -834,7 +847,9 @@ async fn sonos_stream_reader_recovers_after_broadcast_lag() {
 
     for sequence in 0u16..1000 {
         audio_tx
-            .send(bytes::Bytes::copy_from_slice(&sequence.to_le_bytes()))
+            .send(chunk(bytes::Bytes::copy_from_slice(
+                &sequence.to_le_bytes(),
+            )))
             .unwrap();
     }
     // The next poll observes Lagged internally, skips stale data, and must

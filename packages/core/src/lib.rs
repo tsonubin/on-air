@@ -23,6 +23,8 @@ pub mod sender;
 pub mod session;
 pub mod settings;
 pub mod state;
+pub mod sync;
+pub mod timeline;
 
 use state::CoreState;
 
@@ -87,6 +89,8 @@ pub fn build_router(state: CoreState) -> Router {
             "/api/sample-rate",
             get(api::sample_rate::get_sample_rate).put(api::sample_rate::set_sample_rate),
         )
+        .route("/api/sync", get(api::sync::get_sync))
+        .route("/api/sync/trim", put(api::sync::set_sync_trim))
         .route("/api/service", put(api::service::set_service))
         .route("/api/ws", get(api::ws::ws_handler))
         .route("/api/pairing/pin", get(api::pairing::get_pin))

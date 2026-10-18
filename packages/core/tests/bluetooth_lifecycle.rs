@@ -5,12 +5,22 @@ use on_air_core::sender::bluetooth::{
 };
 use on_air_core::sender::{AudioSender, OutputFormat, SenderError};
 use on_air_core::state::CoreState;
+use on_air_core::timeline::PcmChunk;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tokio::sync::{broadcast, Notify};
 
 type Log = Arc<Mutex<Vec<String>>>;
+
+/// Raw test bytes on the timeline bus; the metadata is not what these pin.
+fn chunk(pcm: Bytes) -> PcmChunk {
+    PcmChunk {
+        first_frame: 0,
+        captured_at: std::time::Instant::now(),
+        pcm,
+    }
+}
 fn device() -> BluetoothDevice {
     BluetoothDevice {
         id: "speaker-id".into(),
@@ -25,6 +35,7 @@ fn config(volume: u8) -> BluetoothPlaybackConfig {
         pipeline_hz: 44_100,
         output_hz: 44_100,
         volume,
+        sync: None,
     }
 }
 struct Adapter {
@@ -113,6 +124,7 @@ impl PcmOutput for Output {
         endpoint: &BluetoothEndpoint,
         pipeline_hz: u32,
         preferred_hz: u32,
+        _steered: bool,
     ) -> Result<OpenedPcmSink, SenderError> {
         assert_eq!(
             endpoint,
@@ -148,7 +160,7 @@ impl PcmOutput for Output {
 struct Fixture {
     adapter: Arc<Adapter>,
     output: Arc<Output>,
-    audio: broadcast::Sender<Bytes>,
+    audio: broadcast::Sender<PcmChunk>,
     log: Log,
 }
 impl Fixture {
@@ -182,7 +194,7 @@ impl Fixture {
     async fn sample(&self, value: i16) -> i16 {
         let sink = self.output.latest();
         self.audio
-            .send(Bytes::copy_from_slice(&value.to_le_bytes()))
+            .send(chunk(Bytes::copy_from_slice(&value.to_le_bytes())))
             .unwrap();
         tokio::time::timeout(Duration::from_secs(1), sink.written.notified())
             .await
@@ -240,7 +252,7 @@ async fn stop_and_drop_cancel_a_blocked_write() {
         let mut sender = f.sender(config(100));
         sender.start().await.unwrap();
         let sink = f.output.latest();
-        f.audio.send(Bytes::from_static(&[0, 1])).unwrap();
+        f.audio.send(chunk(Bytes::from_static(&[0, 1]))).unwrap();
         tokio::time::timeout(Duration::from_secs(1), sink.entered.notified())
             .await
             .unwrap();
@@ -473,6 +485,7 @@ fn native_bluetooth_name_does_not_select_pacat() {
         &BluetoothEndpoint::Native("Bluetooth nonexistent lifecycle test endpoint".into()),
         44_100,
         44_100,
+        false,
     );
     let error = match result {
         Ok(_) => panic!("nonexistent endpoint opened"),
@@ -499,8 +512,9 @@ impl PcmOutput for GatedOutput {
         endpoint: &BluetoothEndpoint,
         pipeline: u32,
         preferred: u32,
+        steered: bool,
     ) -> Result<OpenedPcmSink, SenderError> {
-        let opened = self.output.open(endpoint, pipeline, preferred)?;
+        let opened = self.output.open(endpoint, pipeline, preferred, steered)?;
         self.entered.notify_one();
         let mut released = self.released.lock().unwrap();
         while !*released {

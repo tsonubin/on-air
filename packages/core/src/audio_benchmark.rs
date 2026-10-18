@@ -77,9 +77,9 @@ pub fn run(
                         .into(),
                 );
             }
-            let pcm = loop {
+            let chunk = loop {
                 match receiver.try_recv() {
-                    Ok(pcm) => break pcm,
+                    Ok(chunk) => break chunk.pcm,
                     Err(broadcast::error::TryRecvError::Empty)
                         if dispatched.elapsed() < Duration::from_secs(1) =>
                     {
@@ -92,7 +92,7 @@ pub fn run(
                     }
                 }
             };
-            std::hint::black_box(bridge.process_l16(&pcm));
+            std::hint::black_box(bridge.process_l16(&chunk));
             let pipeline = dispatched.elapsed().as_secs_f64() * 1000.0;
             if index >= 4 {
                 timings.push((pipeline, scheduler));

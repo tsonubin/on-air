@@ -10,6 +10,16 @@ use std::time::Duration;
 
 const SAVE_DEBOUNCE: Duration = Duration::from_millis(200);
 
+/// One output's saved latency trim (`settings.json`, `sync_trims`): the
+/// user's manual calibration of that output's playout latency, in
+/// milliseconds.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSyncTrim {
+    pub transport: String,
+    pub device_id: String,
+    pub trim_ms: i32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SavedSettings {
@@ -21,6 +31,7 @@ pub struct SavedSettings {
     pub output_sample_rate_hz: u32,
     pub service_enabled: bool,
     pub capture_buffer_ms: u32,
+    pub sync_trims: Vec<SavedSyncTrim>,
 }
 
 impl Default for SavedSettings {
@@ -34,6 +45,7 @@ impl Default for SavedSettings {
             output_sample_rate_hz: crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ,
             service_enabled: true,
             capture_buffer_ms: 0,
+            sync_trims: Vec::new(),
         }
     }
 }
@@ -62,6 +74,12 @@ impl SavedSettings {
         if !rates::STANDARD_RATES_HZ.contains(&self.output_sample_rate_hz) {
             self.output_sample_rate_hz = crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ;
         }
+        self.sync_trims.retain_mut(|trim| {
+            trim.trim_ms = trim
+                .trim_ms
+                .clamp(-crate::sync::latency::TRIM_LIMIT_MS, crate::sync::latency::TRIM_LIMIT_MS);
+            !trim.transport.trim().is_empty() && !trim.device_id.trim().is_empty()
+        });
         self
     }
 }
@@ -215,6 +233,11 @@ mod tests {
             output_sample_rate_hz: 44_100,
             service_enabled: false,
             capture_buffer_ms: 0,
+            sync_trims: vec![SavedSyncTrim {
+                transport: "sonos".into(),
+                device_id: "uuid:living-room".into(),
+                trim_ms: -250,
+            }],
         };
         write_file(&path, &expected).unwrap();
         assert_eq!(load_file(&path).unwrap(), expected);

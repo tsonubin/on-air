@@ -1,19 +1,28 @@
 use crate::api::error::ApiError;
 use crate::dsp::bridge::RateBridge;
+use crate::dsp::resample::RateControl;
 use crate::dsp::PIPELINE_CHANNELS;
 use crate::state::CoreState;
+use crate::sync::{DriftController, SyncFeed};
+use crate::timeline::{PcmChunk, PcmDelayLine, FRAME_BYTES};
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::header;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
+use std::pin::Pin;
 use std::sync::atomic::Ordering;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt;
+use tokio_stream::{Stream, StreamExt};
 
 const MAX_STREAM_CLIENTS: usize = 4;
-const SILENCE_INTERVAL: std::time::Duration = std::time::Duration::from_millis(40);
+const SILENCE_INTERVAL: Duration = Duration::from_millis(40);
+/// How often a synchronized receiver's measured drift is published and its
+/// resampler steered. Reports are cheap; one per second is plenty.
+const DRIFT_REPORT_INTERVAL: Duration = Duration::from_secs(1);
 
 struct StreamClientGuard(CoreState);
 
@@ -60,6 +69,112 @@ pub fn radio_stream_is_live(state: &CoreState, nonce: &str) -> bool {
     state.output().snapshot().serves_radio(nonce)
 }
 
+/// One receiver's rate stage.
+///
+/// Free-running outputs keep the cheap path: pure passthrough at equal
+/// rates, the fixed-ratio resampler otherwise. A sync-group member gets the
+/// drift-corrected variable-ratio resampler and its per-output delay line —
+/// the transport delay minus the group baseline, so a fast transport waits
+/// for the slowest member.
+enum RateStage {
+    Passthrough,
+    Fixed(RateBridge),
+    Sync {
+        bridge: RateBridge,
+        delay: Option<PcmDelayLine>,
+    },
+}
+
+impl RateStage {
+    /// Convert one input chunk and append 0..n zero-copy output segments to
+    /// `out`. The caller clears and reuses `out`: nothing allocates per
+    /// chunk beyond what the rate conversion itself does.
+    fn process(&mut self, pcm: Bytes, out: &mut Vec<Bytes>) {
+        match self {
+            RateStage::Passthrough => out.push(pcm),
+            RateStage::Fixed(bridge) => {
+                let resampled = bridge.process_l16_to_l16(&pcm);
+                if !resampled.is_empty() {
+                    out.push(Bytes::from(resampled));
+                }
+            }
+            RateStage::Sync { bridge, delay } => {
+                let resampled = bridge.process_l16_to_l16(&pcm);
+                if resampled.is_empty() {
+                    return;
+                }
+                let converted = Bytes::from(resampled);
+                match delay {
+                    Some(delay) => delay.push_into(converted, out),
+                    None => out.push(converted),
+                }
+            }
+        }
+    }
+}
+
+/// The receiver's audio body: the timeline bus converted and (for sync
+/// members) delayed, delivered as zero-copy segments — no allocation and no
+/// copying per chunk beyond what the rate stage itself does.
+struct PcmBody {
+    inner: BroadcastStream<PcmChunk>,
+    stage: RateStage,
+    pending: Vec<Bytes>,
+    next: usize,
+}
+
+impl Stream for PcmBody {
+    type Item = Result<Bytes, std::convert::Infallible>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        loop {
+            if this.next < this.pending.len() {
+                let segment = std::mem::take(&mut this.pending[this.next]);
+                this.next += 1;
+                return Poll::Ready(Some(Ok(segment)));
+            }
+            match Pin::new(&mut this.inner).poll_next(cx) {
+                Poll::Ready(Some(Ok(chunk))) => {
+                    this.pending.clear();
+                    this.next = 0;
+                    this.stage.process(chunk.pcm, &mut this.pending);
+                }
+                // A slow reader lagged the bus: old chunks are gone, and
+                // nothing here can resurrect them.
+                Poll::Ready(Some(Err(_lagged))) => continue,
+                Poll::Ready(None) => return Poll::Ready(None),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+    }
+}
+
+/// Measures what this receiver actually consumed from the wire and steers
+/// its rate stage toward the timeline. The signal is the body's own pull
+/// rate: after the receiver's buffer fills, frames leave this stream at the
+/// receiver's consumption rate, which is the clock drift being corrected.
+struct SyncObserver {
+    feed: SyncFeed,
+    drift: DriftController,
+    control: RateControl,
+    served_frames: u64,
+    next_report: Instant,
+}
+
+impl SyncObserver {
+    fn observe(&mut self, frames: u64) {
+        self.served_frames += frames;
+        let now = Instant::now();
+        self.drift.observe(self.served_frames, now);
+        if now >= self.next_report {
+            self.next_report = now + DRIFT_REPORT_INTERVAL;
+            self.control.set_correction_ppm(self.drift.correction_ppm());
+            self.feed.report(&self.drift);
+        }
+    }
+}
+
 pub async fn stream_audio(
     State(state): State<CoreState>,
     Path(nonce): Path<String>,
@@ -88,24 +203,47 @@ pub async fn stream_audio(
     let pipeline_hz = *state.target_sample_rate_hz.lock();
     let output_hz = *state.output_sample_rate_hz.lock();
     let header = wav_header(output_hz, PIPELINE_CHANNELS as u16);
-    let pcm = BroadcastStream::new(rx).filter_map({
-        let mut bridge = RateBridge::new(pipeline_hz, output_hz, PIPELINE_CHANNELS);
-        let _client_guard = client_guard;
-        move |item| {
-            let _ = &_client_guard;
-            let Ok(chunk) = item else {
-                return None;
+
+    // A sync-group member's feed: drift-corrected conversion plus its delay
+    // line. A free-running output is not in any group and keeps the cheap
+    // path with no delay and no steering.
+    let feed = state
+        .output()
+        .snapshot()
+        .identity
+        .as_ref()
+        .and_then(|identity| state.sync.feed_for(identity, output_hz));
+    let (stage, observer) = match feed {
+        Some(feed) => {
+            let (bridge, control) =
+                RateBridge::new_steered(pipeline_hz, output_hz, PIPELINE_CHANNELS);
+            let delay = (feed.delay_frames() > 0)
+                .then(|| PcmDelayLine::new(feed.delay_frames(), PIPELINE_CHANNELS));
+            let observer = SyncObserver {
+                feed,
+                drift: DriftController::new(output_hz),
+                control: control.clone(),
+                served_frames: 0,
+                next_report: Instant::now(),
             };
-            if pipeline_hz == output_hz {
-                return Some(Ok::<Bytes, std::convert::Infallible>(chunk));
-            }
-            let resampled = bridge.process_l16_to_l16(&chunk);
-            if resampled.is_empty() {
-                return None;
-            }
-            Some(Ok(Bytes::from(resampled)))
+            (
+                RateStage::Sync { bridge, delay },
+                Some(observer),
+            )
         }
-    });
+        None if pipeline_hz == output_hz => (RateStage::Passthrough, None),
+        None => (
+            RateStage::Fixed(RateBridge::new(pipeline_hz, output_hz, PIPELINE_CHANNELS)),
+            None,
+        ),
+    };
+
+    let pcm = PcmBody {
+        inner: BroadcastStream::new(rx),
+        stage,
+        pending: Vec::new(),
+        next: 0,
+    };
     let silence = silence_chunk(output_hz);
     let mut silence_interval = tokio::time::interval_at(
         tokio::time::Instant::now() + SILENCE_INTERVAL,
@@ -115,9 +253,14 @@ pub async fn stream_audio(
     let stream_progress = state.stream_progress.clone();
     let capture_buffer_ms = state.capture_buffer_ms.clone();
     let mut last_pcm = tokio::time::Instant::now();
+    let mut observer = observer;
+    // The client guard must live exactly as long as the body stream, not
+    // this handler: the closure below owns it.
+    let _client_guard = client_guard;
     let pcm = pcm
         .timeout_repeating(silence_interval)
         .filter_map(move |item| {
+            let _ = &_client_guard;
             let pcm = match item {
                 Ok(pcm) => {
                     last_pcm = tokio::time::Instant::now();
@@ -127,7 +270,7 @@ pub async fn stream_audio(
                     // A larger capture buffer delivers audio in larger,
                     // less frequent batches. Do not fill normal intervals
                     // between those batches with extra silence.
-                    let grace = std::time::Duration::from_millis(
+                    let grace = Duration::from_millis(
                         u64::from(capture_buffer_ms.load(Ordering::Acquire)) * 2 + 40,
                     );
                     if last_pcm.elapsed() < grace {
@@ -136,6 +279,11 @@ pub async fn stream_audio(
                     Ok(silence.clone())
                 }
             };
+            if let Some(observer) = observer.as_mut() {
+                if let Ok(pcm) = &pcm {
+                    observer.observe((pcm.len() / FRAME_BYTES) as u64);
+                }
+            }
             stream_progress.fetch_add(1, Ordering::Relaxed);
             Some(pcm)
         })

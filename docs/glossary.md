@@ -4,7 +4,26 @@ LAN-only desktop audio: capture, process, and send to **one** live output at a t
 
 ## Exclusive output
 
-The product invariant. Exactly one of Sonos, AirPlay, or Bluetooth may be playing. Switching tears down the previous sender first. Owned by the output **session** module.
+The rule that one output **session** plays exactly one speaker at a time:
+switching tears down the previous sender first, and no two sessions may
+drive the same receiver — on collision the second session is refused
+("This speaker is in use by another on-air session"). Exclusivity is a
+property of a session, not of the process: several sessions may play at
+once when they belong to one **sync group**. Owned by the output
+**session** module.
+
+## Sync group
+
+Outputs that play together across protocols. Members share one
+presentation epoch — a common scheduled start instead of fire-now — and
+each holds a delay line that holds a fast transport back for the slowest
+member, with drift steering keeping the clocks together over time. A sync
+group is more constrained than two unrelated outputs, not less: outside a
+group, outputs free-run and drift apart, which is fine and expected;
+inside one, they are held to the shared epoch and the delay lines. Every
+latency figure is a documented default plus a user trim, never a
+measurement: the design spec requires acoustic (mic loopback)
+verification, and none has been done.
 
 ## Rate bridge
 

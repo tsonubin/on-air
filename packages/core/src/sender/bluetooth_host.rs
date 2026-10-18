@@ -108,8 +108,14 @@ mod platform {
     use std::process::Command;
     use std::time::{Duration, Instant};
 
+    /// One bounded `bluetoothctl` query. Bounded like the `pactl` helper
+    /// (`sender/local.rs`): a wedged `bluetoothctl` — no bluetoothd, no
+    /// D-Bus — must not hang device listing, and therefore every consumer
+    /// of it, forever.
     fn bluetoothctl(args: &[&str]) -> String {
-        Command::new("bluetoothctl")
+        Command::new("timeout")
+            .arg("3")
+            .arg("bluetoothctl")
             .args(args)
             .output()
             .ok()
