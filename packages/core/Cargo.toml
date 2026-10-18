@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11"
 rubato = "5.0.0"
+realfft = "3.5"
 audioadapter-buffers = "5.2.0"
 async-trait = "0.1.92"
 bytes = "1"

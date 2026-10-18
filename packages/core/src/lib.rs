@@ -18,6 +18,7 @@ static ALLOCATOR: alloc_counting::CountingAllocator = alloc_counting::CountingAl
 
 pub mod api;
 pub mod audio_benchmark;
+pub mod calibration;
 pub mod cd;
 pub mod dsp;
 pub mod events;
@@ -115,6 +116,14 @@ pub fn build_router(state: CoreState) -> Router {
         )
         .route("/api/sync", get(api::sync::get_sync))
         .route("/api/sync/trim", put(api::sync::set_sync_trim))
+        .route(
+            "/api/sync/calibrate",
+            post(api::calibration::start_calibration),
+        )
+        .route(
+            "/api/sync/calibration",
+            get(api::calibration::calibration_status),
+        )
         .route("/api/sync/groups", post(api::sync::create_sync_group))
         .route(
             "/api/sync/groups/{id}",
@@ -155,6 +164,11 @@ pub fn build_router(state: CoreState) -> Router {
     if state.mock {
         // The disc simulator never exists on a production core.
         router = router.route("/api/mock/cd", post(api::cd::simulate_cd));
+        // Neither does the synthetic calibration loopback.
+        router = router.route(
+            "/api/mock/calibration/loopback",
+            post(api::calibration::simulate_loopback),
+        );
     }
     router
         .fallback(api::error::route_not_found)

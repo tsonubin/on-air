@@ -1,5 +1,6 @@
 use crate::dsp::{eq::EQ_GAIN_RANGE_DB, rates, DspQuality};
 use crate::session::ActiveOutput;
+use on_air_api::CalibrationMeasurement;
 use on_air_api::ChannelMode;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -109,6 +110,11 @@ pub struct SavedSettings {
     /// until it has completed (or when it never applied anything).
     pub first_run_tuning: Option<FirstRunTuning>,
     pub sync_trims: Vec<SavedSyncTrim>,
+    /// Per-output acoustic latency measurements (`settings.json`,
+    /// `sync_calibrations`): what the mic loopback actually recorded on
+    /// this machine, keyed like `sync_trims`. A present entry replaces the
+    /// documented latency default for that output (roadmap B10).
+    pub sync_calibrations: Vec<CalibrationMeasurement>,
     pub sync_groups: Vec<SavedSyncGroup>,
     pub channel_modes: Vec<SavedChannelMode>,
 }
@@ -130,6 +136,7 @@ impl Default for SavedSettings {
             sync_groups: Vec::new(),
             sync_trims: Vec::new(),
             channel_modes: Vec::new(),
+            sync_calibrations: Vec::new(),
         }
     }
 }
@@ -164,6 +171,14 @@ impl SavedSettings {
                 crate::sync::latency::TRIM_LIMIT_MS,
             );
             !trim.transport.trim().is_empty() && !trim.device_id.trim().is_empty()
+        });
+        // One measurement per output; a hand-edited file with duplicates
+        // collapses to the first entry.
+        self.sync_calibrations
+            .retain(|m| !m.transport.trim().is_empty() && !m.device_id.trim().is_empty());
+        let mut seen = std::collections::HashSet::new();
+        self.sync_calibrations.retain(|m| {
+            seen.insert((m.transport.clone(), m.device_id.clone()))
         });
         self.sync_groups.retain_mut(|group| {
             group.name = group.name.trim().chars().take(64).collect();
@@ -349,6 +364,18 @@ mod tests {
                 transport: "sonos".into(),
                 device_id: "uuid:living-room".into(),
                 trim_ms: -250,
+            }],
+            sync_calibrations: vec![CalibrationMeasurement {
+                transport: "sonos".into(),
+                device_id: "uuid:living-room".into(),
+                latency_us: 987_654,
+                confidence: on_air_api::CalibrationConfidence::High,
+                runs: 3,
+                samples: 144_000,
+                spread_us: 20,
+                sample_rate_hz: 48_000,
+                measured_at_unix_s: 1_760_000_000,
+                run_delays_us: vec![987_650, 987_654, 987_670],
             }],
             sync_groups: vec![SavedSyncGroup {
                 name: "Downstairs".into(),

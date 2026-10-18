@@ -278,13 +278,25 @@ export interface OutputSyncStatus {
    * verification, and none of these figures has been measured on hardware.
    */
   default_latency_ms: number;
-  /** `default_latency_ms + trim_ms`, clamped at zero. Still uncalibrated. */
+  /**
+   * The latency the sync machinery uses: the measured value when one has
+   * been applied, else `default_latency_ms`, plus `trim_ms`, clamped at
+   * zero. Only `calibrated` says which base is in effect — never present a
+   * default as a measurement.
+   */
   effective_latency_ms: number;
   /**
-   * Whether the latency figure is a calibrated measurement. Never true
-   * today: the trim control exists precisely because it is not.
+   * Whether the latency figure is based on an acoustic measurement
+   * (`calibration` is present). False for documented defaults and for user
+   * trims: a trim corrects by ear and is not a measurement.
    */
   calibrated: boolean;
+  /**
+   * The acoustic measurement backing this row, when one has been applied.
+   * Present exactly when `calibrated` is true; absent rows are defaults and
+   * say so.
+   */
+  calibration?: CalibrationMeasurement;
   /** Delay line this output's feed holds, in frames; 0 when free-running. */
   delay_frames: number;
   output_sample_rate_hz: number;
@@ -377,6 +389,123 @@ export interface CreateSyncGroupRequest {
 export interface SyncGroupMemberRequest {
   transport: Transport;
   device_id: string;
+}
+
+// ---------------------------------------------------------------------------
+// Acoustic latency calibration (roadmap B10)
+// ---------------------------------------------------------------------------
+
+/**
+ * How trustworthy a completed latency measurement is. The figure is only
+ * ever applied to the sync machinery when it is `high` or `medium`; a `low`
+ * result is reported as bad and never replaces a default.
+ */
+export type CalibrationConfidence = "high" | "medium" | "low";
+
+/**
+ * One completed acoustic latency measurement for one output: how long audio
+ * takes to travel from the pipeline PCM bus, through the transport, out of
+ * the speaker and back into the microphone (the mic loopback).
+ *
+ * The figure is a LOOPBACK measurement: beyond the transport's buffering it
+ * includes speaker-to-microphone propagation (~3 ms per metre) and the
+ * capture path's delivery latency. Those terms are constant for every
+ * transport measured on one machine in one position, so the differences
+ * between transports — what a sync group aligns — are unaffected by them.
+ */
+export interface CalibrationMeasurement {
+  transport: Transport;
+  device_id: string;
+  /**
+   * Measured latency in microseconds (sub-millisecond resolution; the
+   * estimator's floor is far below one millisecond).
+   */
+  latency_us: number;
+  /** Only `high` and `medium` are applied to the sync machinery. */
+  confidence: CalibrationConfidence;
+  /** Probe runs whose detection was trusted; `latency_us` is their median. */
+  runs: number;
+  /** Capture samples analysed across those runs. */
+  samples: number;
+  /** Highest minus lowest accepted run in µs: how stable the number is. */
+  spread_us: number;
+  /** The capture rate the delay was measured at. */
+  sample_rate_hz: number;
+  /** Unix seconds when the run completed. */
+  measured_at_unix_s: number;
+  /** Each accepted run's delay in µs, sorted ascending (median = `latency_us`). */
+  run_delays_us?: number[];
+}
+
+/** One target's progress inside a calibration run. */
+export type CalibrationTargetState = "pending" | "running" | "complete" | "failed";
+
+/** One output's state inside a calibration run. */
+export interface CalibrationTargetStatus {
+  transport: Transport;
+  device_id: string;
+  device_name: string;
+  /** `complete` = measured and applied; `failed` = not applied. */
+  state: CalibrationTargetState;
+  /**
+   * What was measured, including low-confidence attempts that were not
+   * applied. Absent until the target has finished.
+   */
+  measurement?: CalibrationMeasurement;
+  /** Why this target produced no applied measurement, if known. */
+  error?: string;
+}
+
+/** A calibration run's overall state. */
+export type CalibrationRunState = "running" | "complete" | "failed";
+
+/**
+ * A calibration run. Targets are measured one after another (transports are
+ * exclusive), in request order.
+ */
+export interface CalibrationRunView {
+  run_id: number;
+  /**
+   * `running` until every target has finished; then `complete` when at
+   * least one target produced an applied measurement, `failed` when none
+   * did.
+   */
+  state: CalibrationRunState;
+  targets: CalibrationTargetStatus[];
+  /** Unix seconds when the run started. */
+  started_at_unix_s: number;
+}
+
+/** One output a calibration run will measure. */
+export interface CalibrationTarget {
+  transport: Transport;
+  device_id: string;
+}
+
+/**
+ * `POST /api/sync/calibrate`: start an acoustic calibration run. The core
+ * plays a known probe through each target transport in turn, listens on the
+ * given microphone, and measures the delay by cross-correlation. The reply
+ * is immediate (202); monitor with `GET /api/sync/calibration`.
+ */
+export interface StartCalibrationRequest {
+  /** 1..=16 targets. "All transports" is one target per output. */
+  targets: CalibrationTarget[];
+  /**
+   * Microphone to listen on: the label `GET /api/inputs` lists. A
+   * loopback/monitor source is refused.
+   */
+  capture_input: string;
+  /** Probe repetitions per target (1..=10, default 3). */
+  runs_per_target?: number;
+  /** Longest delay searched for per target, in ms (500..=15000). */
+  max_delay_ms?: number;
+}
+
+/** `GET /api/sync/calibration`. */
+export interface CalibrationStatusResponse {
+  active?: CalibrationRunView;
+  last?: CalibrationRunView;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +640,11 @@ export type WsEvent =
    * or it was started or stopped. Carries no state; re-read `GET /api/sync`.
    */
   | { type: "SyncGroupChanged"; group_id: number }
+  /**
+   * A calibration run started, made progress, finished or failed. Carries
+   * no state; re-read `GET /api/sync/calibration` and `GET /api/sync`.
+   */
+  | { type: "CalibrationChanged"; run_id: number }
   | {
       type: "CdStateChanged";
       present: boolean;

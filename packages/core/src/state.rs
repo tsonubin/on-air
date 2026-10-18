@@ -105,6 +105,11 @@ pub struct CoreState {
     /// Shared with patchbay children so a group can span sessions.
     pub sync: Arc<SyncController>,
 
+    /// Acoustic latency calibration (roadmap B10): at most one run at a
+    /// time, its progress for `GET /api/sync/calibration`, and (mock mode
+    /// only) the CI world the synthetic loopback places behind the probe.
+    pub(crate) calibration: Arc<crate::calibration::run::CalibrationController>,
+
     // Catalogs.
     pub(crate) sonos: Arc<Mutex<DeviceRegistry>>,
     pub(crate) airplay: Arc<StdMutex<Vec<CatalogDevice>>>,
@@ -274,6 +279,9 @@ impl CoreState {
                 trim.trim_ms,
             );
         }
+        for measurement in &saved_settings.sync_calibrations {
+            sync.set_calibration(measurement);
+        }
         for group in &saved_settings.sync_groups {
             sync.restore_group(group);
         }
@@ -307,6 +315,7 @@ impl CoreState {
             audio_tx,
             ws_tx,
             sync,
+            calibration: Arc::new(crate::calibration::run::CalibrationController::new()),
             sonos: Arc::new(Mutex::new(DeviceRegistry::new())),
             airplay: Arc::new(StdMutex::new(Vec::new())),
             owntone_base: Arc::new(StdMutex::new("http://127.0.0.1:3689".into())),
@@ -370,9 +379,30 @@ impl CoreState {
             true,
         ));
         state.set_mock(true);
-        state.pairing = Arc::new(StdMutex::new(PairingState::mock()));
-        state.input.set_mock_inputs(vec!["Mock Monitor".into()]);
-        *state.airplay.lock() = vec![CatalogDevice {
+        state.seed_mock_hardware().await;
+        state
+    }
+
+    /// E2E / CI: a mock core that also persists settings to `path`, so a
+    /// test can restart it and assert what was saved survived.
+    pub async fn new_mock_persistent(path: impl Into<PathBuf>) -> Self {
+        let mut state =
+            Self::new_persistent(path).with_keep_awake(KeepAwake::with_spawner(
+                None,
+                Box::new(crate::keep_awake::NoopSpawner),
+                true,
+            ));
+        state.set_mock(true);
+        state.seed_mock_hardware().await;
+        state
+    }
+
+    /// The fake hardware a mock core pretends to have: one of each
+    /// transport the product supports.
+    async fn seed_mock_hardware(&mut self) {
+        self.pairing = Arc::new(StdMutex::new(PairingState::mock()));
+        self.input.set_mock_inputs(vec!["Mock Monitor".into()]);
+        *self.airplay.lock() = vec![CatalogDevice {
             id: "ap-living".into(),
             name: "Living Room AirPlay".into(),
             needs_pair: false,
@@ -381,7 +411,7 @@ impl CoreState {
             member_count: 1,
             address: String::new(),
         }];
-        state.bluetooth = Arc::new(MockBluetoothAdapter::with_devices(vec![
+        self.bluetooth = Arc::new(MockBluetoothAdapter::with_devices(vec![
             BluetoothDevice {
                 id: "bt-speaker".into(),
                 name: "Mock Bluetooth Speaker".into(),
@@ -403,8 +433,7 @@ impl CoreState {
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             "Mock Sonos",
         );
-        state.sonos.lock().await.upsert(sonos, Instant::now());
-        state
+        self.sonos.lock().await.upsert(sonos, Instant::now());
     }
 
     /// Hardware-free mode: senders are fakes, inputs come from the mock
@@ -858,6 +887,23 @@ impl CoreState {
                     device_id: device_id.to_string(),
                     trim_ms,
                 }),
+            }
+        });
+    }
+
+    /// Apply a completed acoustic measurement (roadmap B10): it becomes
+    /// the latency the sync machinery uses instead of the documented
+    /// default (`calibrated` turns true) and is persisted (`sync_calibrations`
+    /// in settings.json).
+    pub(crate) fn apply_calibration(&self, measurement: &on_air_api::CalibrationMeasurement) {
+        self.sync.set_calibration(measurement);
+        self.update_saved_settings(|saved| {
+            match saved.sync_calibrations.iter_mut().find(|saved| {
+                saved.transport == measurement.transport
+                    && saved.device_id == measurement.device_id
+            }) {
+                Some(existing) => *existing = measurement.clone(),
+                None => saved.sync_calibrations.push(measurement.clone()),
             }
         });
     }

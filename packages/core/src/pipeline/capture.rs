@@ -44,7 +44,25 @@ pub fn pick_capture_config(
 /// Reads interleaved f32 LE stereo into `producer` until EOF, an error or
 /// `stop`. Pipe reads need not end on a frame boundary, so up to one frame
 /// less a byte is carried into the next read.
-pub fn pump_f32le_stereo(mut reader: impl Read, producer: &mut HeapProd<f32>, stop: &AtomicBool) {
+pub fn pump_f32le_stereo(
+    reader: impl Read,
+    producer: &mut HeapProd<f32>,
+    stop: &AtomicBool,
+) {
+    pump_f32le_stereo_with(reader, stop, |samples, _at| {
+        push_frames(producer, samples, PIPELINE_CHANNELS);
+    });
+}
+
+/// Like [`pump_f32le_stereo`], but hands every drained block to `sink`
+/// with the instant its read returned. The calibration recorder
+/// (`crate::calibration::record`) timestamps samples with this; the
+/// production capture path ignores the instant.
+pub fn pump_f32le_stereo_with(
+    mut reader: impl Read,
+    stop: &AtomicBool,
+    mut sink: impl FnMut(&[f32], std::time::Instant),
+) {
     let mut buf = [0u8; 4096 + F32_FRAME_BYTES - 1];
     let mut samples = [0.0f32; 4096 / 4];
     let mut pending = 0;
@@ -58,7 +76,7 @@ pub fn pump_f32le_stereo(mut reader: impl Read, producer: &mut HeapProd<f32>, st
                 for (sample, bytes) in samples.iter_mut().zip(raw) {
                     *sample = f32::from_le_bytes(*bytes);
                 }
-                push_frames(producer, &samples[..raw.len()], PIPELINE_CHANNELS);
+                sink(&samples[..raw.len()], std::time::Instant::now());
                 pending = total - complete;
                 buf.copy_within(complete..total, 0);
             }
@@ -143,7 +161,7 @@ pub fn is_pulse_monitor_name(name: &str) -> bool {
 /// capture through `parec`. Other platforms never spawn these binaries.
 #[cfg(target_os = "linux")]
 mod pulse {
-    use super::{parse_pactl_monitor_sources, pump_f32le_stereo};
+    use super::{parse_pactl_monitor_sources, pump_f32le_stereo, pump_f32le_stereo_with};
     use ringbuf::HeapProd;
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -187,6 +205,51 @@ mod pulse {
         preferred_rate_hz: Option<u32>,
         buffer_ms: u32,
     ) -> Result<(PulseMonitorCapture, u32), String> {
+        let (child, stdout, rate) = spawn_parec(source, preferred_rate_hz, buffer_ms)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = stop.clone();
+        let reader =
+            std::thread::spawn(move || pump_f32le_stereo(stdout, &mut producer, &stop_thread));
+        Ok((
+            PulseMonitorCapture {
+                stop,
+                child: Some(child),
+                reader: Some(reader),
+            },
+            rate,
+        ))
+    }
+
+    /// Like [`start_pulse_monitor`], but hands every drained block to
+    /// `sink` with the instant its read returned (the calibration
+    /// recorder timestamps samples with this).
+    pub fn start_pulse_monitor_stamped(
+        source: &str,
+        preferred_rate_hz: Option<u32>,
+        buffer_ms: u32,
+        sink: impl FnMut(&[f32], std::time::Instant) + Send + 'static,
+    ) -> Result<(PulseMonitorCapture, u32), String> {
+        let (child, stdout, rate) = spawn_parec(source, preferred_rate_hz, buffer_ms)?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_thread = stop.clone();
+        let reader =
+            std::thread::spawn(move || pump_f32le_stereo_with(stdout, &stop_thread, sink));
+        Ok((
+            PulseMonitorCapture {
+                stop,
+                child: Some(child),
+                reader: Some(reader),
+            },
+            rate,
+        ))
+    }
+
+    /// Spawn `parec` on `source` and return its raw f32 LE stereo stdout.
+    fn spawn_parec(
+        source: &str,
+        preferred_rate_hz: Option<u32>,
+        buffer_ms: u32,
+    ) -> Result<(Child, Box<dyn std::io::Read + Send>, u32), String> {
         let rate = preferred_rate_hz.unwrap_or(48000);
         let mut child = Command::new("parec")
             .args([
@@ -211,18 +274,7 @@ mod pulse {
             let _ = child.wait();
             "parec stdout missing".to_string()
         })?;
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_thread = stop.clone();
-        let reader =
-            std::thread::spawn(move || pump_f32le_stereo(stdout, &mut producer, &stop_thread));
-        Ok((
-            PulseMonitorCapture {
-                stop,
-                child: Some(child),
-                reader: Some(reader),
-            },
-            rate,
-        ))
+        Ok((child, Box::new(stdout), rate))
     }
 }
 
@@ -250,10 +302,19 @@ mod pulse {
     ) -> Result<(PulseMonitorCapture, u32), String> {
         Err("Pulse monitor capture is only available on Linux".to_string())
     }
+
+    pub fn start_pulse_monitor_stamped(
+        _source: &str,
+        _preferred_rate_hz: Option<u32>,
+        _buffer_ms: u32,
+        _sink: impl FnMut(&[f32], std::time::Instant) + Send + 'static,
+    ) -> Result<(PulseMonitorCapture, u32), String> {
+        Err("Pulse monitor capture is only available on Linux".to_string())
+    }
 }
 
 use pulse::pulse_monitor_source_names;
-pub use pulse::{start_pulse_monitor, PulseMonitorCapture};
+pub use pulse::{start_pulse_monitor, start_pulse_monitor_stamped, PulseMonitorCapture};
 
 /// Prefer the analog-output monitor over DSP/effect monitors.
 pub fn preferred_pulse_monitor() -> Option<String> {
@@ -303,9 +364,23 @@ pub fn start_capture_at(
 
 pub fn start_capture_buffered_at(
     device: &Device,
-    producer: HeapProd<f32>,
+    mut producer: HeapProd<f32>,
     preferred_rate_hz: Option<u32>,
     buffer_ms: u32,
+) -> Result<(Stream, u32), cpal::Error> {
+    start_capture_stamped_at(device, preferred_rate_hz, buffer_ms, move |samples, _at| {
+        push_frames(&mut producer, samples, PIPELINE_CHANNELS);
+    })
+}
+
+/// Like [`start_capture_buffered_at`], but hands every captured block to
+/// `sink` with the instant its callback ran. The calibration recorder
+/// (`crate::calibration::record`) timestamps samples with this.
+pub fn start_capture_stamped_at(
+    device: &Device,
+    preferred_rate_hz: Option<u32>,
+    buffer_ms: u32,
+    sink: impl FnMut(&[f32], std::time::Instant) + Send + 'static,
 ) -> Result<(Stream, u32), cpal::Error> {
     let default = device.default_input_config()?;
     let supported = preferred_rate_hz
@@ -322,18 +397,18 @@ pub fn start_capture_buffered_at(
     let actual_rate = config.sample_rate;
 
     let stream = match sample_format {
-        SampleFormat::I8 => build_input_stream::<i8>(device, config, channels, producer)?,
-        SampleFormat::I16 => build_input_stream::<i16>(device, config, channels, producer)?,
-        SampleFormat::I24 => build_input_stream::<I24>(device, config, channels, producer)?,
-        SampleFormat::I32 => build_input_stream::<i32>(device, config, channels, producer)?,
-        SampleFormat::I64 => build_input_stream::<i64>(device, config, channels, producer)?,
-        SampleFormat::U8 => build_input_stream::<u8>(device, config, channels, producer)?,
-        SampleFormat::U16 => build_input_stream::<u16>(device, config, channels, producer)?,
-        SampleFormat::U24 => build_input_stream::<U24>(device, config, channels, producer)?,
-        SampleFormat::U32 => build_input_stream::<u32>(device, config, channels, producer)?,
-        SampleFormat::U64 => build_input_stream::<u64>(device, config, channels, producer)?,
-        SampleFormat::F32 => build_input_stream::<f32>(device, config, channels, producer)?,
-        SampleFormat::F64 => build_input_stream::<f64>(device, config, channels, producer)?,
+        SampleFormat::I8 => build_input_stream::<i8>(device, config, channels, sink)?,
+        SampleFormat::I16 => build_input_stream::<i16>(device, config, channels, sink)?,
+        SampleFormat::I24 => build_input_stream::<I24>(device, config, channels, sink)?,
+        SampleFormat::I32 => build_input_stream::<i32>(device, config, channels, sink)?,
+        SampleFormat::I64 => build_input_stream::<i64>(device, config, channels, sink)?,
+        SampleFormat::U8 => build_input_stream::<u8>(device, config, channels, sink)?,
+        SampleFormat::U16 => build_input_stream::<u16>(device, config, channels, sink)?,
+        SampleFormat::U24 => build_input_stream::<U24>(device, config, channels, sink)?,
+        SampleFormat::U32 => build_input_stream::<u32>(device, config, channels, sink)?,
+        SampleFormat::U64 => build_input_stream::<u64>(device, config, channels, sink)?,
+        SampleFormat::F32 => build_input_stream::<f32>(device, config, channels, sink)?,
+        SampleFormat::F64 => build_input_stream::<f64>(device, config, channels, sink)?,
         other => {
             return Err(cpal::Error::with_message(
                 cpal::ErrorKind::UnsupportedConfig,
@@ -370,21 +445,24 @@ fn build_input_stream<T>(
     device: &Device,
     config: StreamConfig,
     channels: usize,
-    mut producer: HeapProd<f32>,
+    mut sink: impl FnMut(&[f32], std::time::Instant) + Send + 'static,
 ) -> Result<Stream, cpal::Error>
 where
     T: Sample + SizedSample,
     f32: FromSample<T>,
 {
+    // One reusable staging buffer per stream: the callback never allocates.
+    let mut flat: Vec<f32> = Vec::new();
     device.build_input_stream(
         config,
         move |data: &[T], _: &InputCallbackInfo| {
+            flat.clear();
             for frame in data.chunks_exact(channels) {
                 let stereo = stereo_frame(frame).map(f32::from_sample);
-                if push_frames(&mut producer, &stereo, PIPELINE_CHANNELS) == 0 {
-                    break;
-                }
+                flat.push(stereo[0]);
+                flat.push(stereo[1]);
             }
+            sink(&flat, std::time::Instant::now());
         },
         |err| eprintln!("capture stream error: {err}"),
         None,

@@ -6,6 +6,9 @@
 //! with its members (several speakers that play together — not one merged
 //! device). The `/api/sync/groups` routes mutate that model; each change
 //! broadcasts `SyncGroupChanged` so clients re-read the one response.
+//! Latency figures are either an acoustic measurement
+//! (`calibration` present, `calibrated: true`) or a documented default
+//! plus the user's trim; the row always says which.
 
 use crate::api::auth::Paired;
 use crate::api::error::{ApiError, JsonBody};
@@ -24,8 +27,11 @@ pub use on_air_api::{
 };
 
 /// `GET /api/sync`: every output's latency model, delay line, measured
-/// drift and coarse sync state, and every sync group. Latency figures are
-/// documented defaults plus the user's trim — never measurements.
+/// drift and coarse sync state, and every sync group. Each latency figure
+/// is an applied acoustic measurement where one exists
+/// (`calibration` present) and a documented default plus the user's trim
+/// where none does — the row's `calibrated` flag and `calibration` record
+/// say which, so a client never presents a default as a measurement.
 pub async fn get_sync(Paired: Paired, State(state): State<CoreState>) -> Json<SyncResponse> {
     let rate = current_sample_rates(&state).output.sample_rate_hz;
     let live: Vec<_> = state

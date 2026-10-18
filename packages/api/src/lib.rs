@@ -430,16 +430,25 @@ pub struct OutputSyncStatus {
     pub state: SyncState,
     /// The user's latency trim in milliseconds, which may be negative.
     pub trim_ms: i32,
-    /// The documented per-transport default latency in milliseconds. NOT a
-    /// measurement: no latency figure has been verified acoustically on
-    /// hardware, per the design spec's mic-loopback rule.
+    /// The documented per-transport default latency in milliseconds: the
+    /// guess used where no measurement has been applied. NOT a measurement
+    /// itself — `calibration` / `calibrated` say whether the figure in
+    /// effect is one.
     pub default_latency_ms: u32,
-    /// `default_latency_ms + trim_ms`, clamped at zero. Still uncalibrated;
-    /// the trim is manual, not a measurement.
+    /// The latency the sync machinery uses: the measured value when one has
+    /// been applied, else `default_latency_ms`, plus `trim_ms`, clamped at
+    /// zero. Only `calibrated` says which base is in effect — a client must
+    /// never present a default as a measurement.
     pub effective_latency_ms: u32,
-    /// Whether the latency figure is a calibrated measurement. Never true
-    /// today: the trim control exists precisely because it is not.
+    /// Whether the latency figure is based on an acoustic measurement
+    /// (`calibration` is present). False for documented defaults and for
+    /// user trims: a trim corrects by ear and is not a measurement.
     pub calibrated: bool,
+    /// The acoustic measurement backing this row, when one has been
+    /// applied. Present exactly when `calibrated` is true; absent rows are
+    /// defaults and say so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<CalibrationMeasurement>,
     /// The delay line this output's feed holds, in frames at
     /// `output_sample_rate_hz` (0 when free-running).
     pub delay_frames: u64,
@@ -526,6 +535,174 @@ pub struct CreateSyncGroupRequest {
 pub struct SyncGroupMemberRequest {
     pub transport: String,
     pub device_id: String,
+}
+
+// ---------------------------------------------------------------------------
+// Acoustic latency calibration (roadmap B10)
+// ---------------------------------------------------------------------------
+
+/// How trustworthy a completed latency measurement is. The figure is only
+/// ever applied to the sync machinery when it is [`Self::High`] or
+/// [`Self::Medium`]; a [`Self::Low`] result is reported as bad and never
+/// replaces a default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalibrationConfidence {
+    /// Every run found a clean, consistent arrival.
+    High,
+    /// Usable: a clear arrival, but one or more runs were marginal or the
+    /// runs disagreed slightly.
+    #[default]
+    Medium,
+    /// Not trustworthy: the correlation peak was weak or the runs
+    /// disagreed badly. Reported, never applied.
+    Low,
+}
+
+/// One completed acoustic latency measurement for one output: how long
+/// audio takes to travel from the pipeline PCM bus, through the transport,
+/// out of the speaker and back into the microphone (the mic loopback).
+///
+/// The figure is a LOOPBACK measurement. Beyond the transport's own
+/// buffering it includes the speaker-to-microphone propagation (~3 ms per
+/// metre) and the capture path's delivery latency (bounded by the capture
+/// buffer the run reports). Those two terms are constant for every
+/// transport measured on one machine in one position, so the *differences*
+/// between transports — what a sync group aligns — are unaffected by them;
+/// any residual absolute offset is what the manual trim is for.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationMeasurement {
+    pub transport: String,
+    pub device_id: String,
+    /// Measured latency in microseconds (sub-millisecond resolution; the
+    /// estimator's own floor is far below one millisecond).
+    pub latency_us: u64,
+    /// How trustworthy the figure is. Only `high` and `medium` are applied
+    /// to the sync machinery.
+    pub confidence: CalibrationConfidence,
+    /// Probe runs whose detection was trusted and folded into `latency_us`
+    /// (the median of them).
+    pub runs: u32,
+    /// Capture samples analysed across those runs.
+    pub samples: u64,
+    /// Highest minus lowest accepted run, in microseconds: how stable the
+    /// number is when repeated.
+    pub spread_us: u64,
+    /// The capture rate the delay was measured at.
+    pub sample_rate_hz: u32,
+    /// Unix seconds when the run completed.
+    pub measured_at_unix_s: u64,
+    /// Each accepted run's measured delay in microseconds, sorted
+    /// ascending (the median is `latency_us`). Re-running and comparing
+    /// these shows whether the number is stable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub run_delays_us: Vec<u64>,
+}
+
+/// One target's progress inside a calibration run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalibrationTargetState {
+    #[default]
+    Pending,
+    Running,
+    /// Measured and applied (confidence `high` or `medium`).
+    Complete,
+    /// Not applied: the target errored, or the measurement was too
+    /// untrustworthy to replace the default.
+    Failed,
+}
+
+/// One output's state inside a calibration run as `GET
+/// /api/sync/calibration` reports it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationTargetStatus {
+    pub transport: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub state: CalibrationTargetState,
+    /// What was measured, including low-confidence attempts that were not
+    /// applied. Absent until the target has finished.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement: Option<CalibrationMeasurement>,
+    /// Why this target produced no applied measurement, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A calibration run's overall state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalibrationRunState {
+    /// Every target has not yet finished.
+    #[default]
+    Running,
+    /// Finished; at least one target produced an applied measurement.
+    Complete,
+    /// Finished; no target produced an applied measurement.
+    Failed,
+}
+
+/// A calibration run as `GET /api/sync/calibration` reports it. Targets are
+/// measured one after another (transports are exclusive), in request order.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationRunView {
+    pub run_id: u64,
+    /// `running` until every target has finished; then `complete` when at
+    /// least one target produced an applied measurement, `failed` when none
+    /// did.
+    pub state: CalibrationRunState,
+    pub targets: Vec<CalibrationTargetStatus>,
+    /// Unix seconds when the run started.
+    pub started_at_unix_s: u64,
+}
+
+/// `POST /api/sync/calibrate`: start an acoustic calibration run (roadmap
+/// B10). The core plays a known probe through each target transport in
+/// turn, listens on the given microphone, and measures the delay by
+/// cross-correlation. The reply is immediate; the run continues in the
+/// background and is monitored with `GET /api/sync/calibration`.
+///
+/// Side effects, deliberately: outputs are exclusive, so the run activates
+/// each target (stopping whatever output was active) and stops it again
+/// afterwards; the input session is suspended while probes play — one
+/// producer per PCM bus — and restored afterwards. The core must be
+/// unpaused.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartCalibrationRequest {
+    /// 1..=16 targets, measured one after another. "All transports" is the
+    /// client sending one target per output.
+    pub targets: Vec<CalibrationTarget>,
+    /// Microphone to listen on: the label `GET /api/inputs` lists. A
+    /// loopback/monitor source is refused — measuring a transport against
+    /// its own digital monitor would report ~0 and be a lie.
+    pub capture_input: String,
+    /// Probe repetitions per target (1..=10). More runs cost time and buy
+    /// stability; 3 is the default.
+    #[serde(default)]
+    pub runs_per_target: Option<u32>,
+    /// Longest playout delay searched for, per target, in milliseconds
+    /// (500..=15000). Defaults per transport (AirPlay searches the
+    /// longest).
+    #[serde(default)]
+    pub max_delay_ms: Option<u32>,
+}
+
+/// One output a calibration run will measure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CalibrationTarget {
+    pub transport: String,
+    pub device_id: String,
+}
+
+/// `GET /api/sync/calibration`: the run in progress, if any, and the most
+/// recently finished run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationStatusResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<CalibrationRunView>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<CalibrationRunView>,
 }
 
 // ---------------------------------------------------------------------------
@@ -724,6 +901,12 @@ pub enum WsEvent {
     /// clients re-read `GET /api/sync`.
     SyncGroupChanged {
         group_id: u64,
+    },
+    /// A calibration run started, made progress, finished or failed. The
+    /// event carries no state; clients re-read `GET /api/sync/calibration`
+    /// and `GET /api/sync`.
+    CalibrationChanged {
+        run_id: u64,
     },
     CdStateChanged {
         present: bool,

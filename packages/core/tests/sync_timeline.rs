@@ -357,7 +357,7 @@ fn a_groups_delay_lines_line_every_member_up_at_the_baseline() {
     // A user trim on the fast transport shrinks its delay line.
     group.set_latency(
         group.member_of(&bluetooth).unwrap(),
-        on_air_core::sync::effective_latency("bluetooth", 700),
+        on_air_core::sync::effective_latency("bluetooth", None, 700),
     );
     assert_eq!(
         group.delay_frames(&bluetooth, 48_000),

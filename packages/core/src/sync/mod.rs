@@ -27,12 +27,18 @@ pub mod lifecycle;
 
 pub use drift::{DriftController, DriftReport};
 pub use group::{delay_frames, MemberId, OutputKey, PresentationEpoch, StartPlan, SyncGroup};
-pub use latency::{default_latency_ms, effective_latency, effective_latency_ms, LatencyEstimate};
+pub use latency::{
+    default_latency_ms, effective_latency, effective_latency_ms, effective_latency_us,
+    LatencyEstimate,
+};
 pub use lifecycle::GroupError;
 
 use crate::session::OutputSession;
 use crate::settings::{SavedSyncGroup, SavedSyncGroupMember};
-use on_air_api::{OutputPhase, OutputSyncStatus, SyncGroupMember, SyncGroupView, SyncState};
+use on_air_api::{
+    CalibrationMeasurement, OutputPhase, OutputSyncStatus, SyncGroupMember, SyncGroupView,
+    SyncState,
+};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -41,12 +47,14 @@ use std::sync::Arc;
 /// size a delay line in a status row.
 const FALLBACK_RATE_HZ: u32 = 48_000;
 
-/// Per-output state the registry remembers: name, trim, the rate its feed
-/// runs at, and the last drift report its feed made.
+/// Per-output state the registry remembers: name, trim, the acoustic
+/// measurement (if one has been applied), the rate its feed runs at, and
+/// the last drift report its feed made.
 #[derive(Default)]
 struct OutputRow {
     name: String,
     trim_ms: i32,
+    measured: Option<CalibrationMeasurement>,
     rate_hz: Option<u32>,
     report: Option<DriftReport>,
 }
@@ -105,10 +113,11 @@ impl SyncController {
         group
     }
 
-    /// Join `output` to `group` at its effective latency (documented default
-    /// plus the user's trim). An output plays in at most one group at a
-    /// time: joining is REFUSED while it is a member of another group, so
-    /// two groups can never pull the same speaker in different directions.
+    /// Join `output` to `group` at its effective latency (the applied
+    /// measurement when one exists, else the documented default, plus the
+    /// user's trim). An output plays in at most one group at a time:
+    /// joining is REFUSED while it is a member of another group, so two
+    /// groups can never pull the same speaker in different directions.
     /// Re-joining the same group is idempotent.
     pub fn join(
         self: &Arc<Self>,
@@ -127,8 +136,8 @@ impl SyncController {
             }
             let row = registry.outputs.entry(key.clone()).or_default();
             row.name = output.device_name.clone();
-            let trim_ms = row.trim_ms;
-            latency::effective_latency(&output.transport, trim_ms)
+            let (trim_ms, measured) = (row.trim_ms, row.measured.as_ref().map(|m| m.latency_us));
+            latency::effective_latency(&output.transport, measured, trim_ms)
         };
         let member = group.join(key.clone(), latency);
         self.registry
@@ -265,14 +274,44 @@ impl SyncController {
     /// feed the next time it opens (the next activation or stream); a live
     /// delay line is not resized underneath a playing speaker.
     pub fn set_trim_ms(&self, key: &OutputKey, transport: &str, trim_ms: i32) -> LatencyEstimate {
-        let estimate = latency::effective_latency(transport, trim_ms);
         let mut registry = self.registry.lock();
         let row = registry.outputs.entry(key.clone()).or_default();
         row.trim_ms = trim_ms;
+        let measured = row.measured.as_ref().map(|m| m.latency_us);
+        let estimate = latency::effective_latency(transport, measured, trim_ms);
         if let Some((group, member)) = registry.membership.get(key) {
             group.set_latency(*member, estimate);
         }
         estimate
+    }
+
+    /// Apply one output's acoustic measurement (roadmap B10). It replaces
+    /// the documented default from here on (`calibrated` becomes true) and
+    /// re-times a live sync-group delay line if the output is playing in
+    /// one.
+    pub fn set_calibration(&self, measurement: &CalibrationMeasurement) -> LatencyEstimate {
+        let key = OutputKey::new(&measurement.transport, &measurement.device_id);
+        let mut registry = self.registry.lock();
+        let row = registry.outputs.entry(key.clone()).or_default();
+        row.measured = Some(measurement.clone());
+        let estimate = latency::effective_latency(
+            &measurement.transport,
+            Some(measurement.latency_us),
+            row.trim_ms,
+        );
+        if let Some((group, member)) = registry.membership.get(&key) {
+            group.set_latency(*member, estimate);
+        }
+        estimate
+    }
+
+    /// The applied measurement for one output, if any.
+    pub fn calibration(&self, key: &OutputKey) -> Option<CalibrationMeasurement> {
+        self.registry
+            .lock()
+            .outputs
+            .get(key)
+            .and_then(|row| row.measured.clone())
     }
 
     /// Remember an output's display name for the sync status.
@@ -294,9 +333,16 @@ impl SyncController {
             .filter(|name| !name.is_empty())
     }
 
-    /// The effective latency (default plus trim) for one output.
+    /// The effective latency (measurement or default, plus trim) for one
+    /// output.
     pub fn effective_latency(&self, transport: &str, key: &OutputKey) -> LatencyEstimate {
-        latency::effective_latency(transport, self.trim_ms(key))
+        let registry = self.registry.lock();
+        let row = registry.outputs.get(key);
+        let (trim_ms, measured) = (
+            row.map(|row| row.trim_ms).unwrap_or_default(),
+            row.and_then(|row| row.measured.as_ref().map(|m| m.latency_us)),
+        );
+        latency::effective_latency(transport, measured, trim_ms)
     }
 
     /// The feed handle for one output, if it is a sync-group member.
@@ -459,8 +505,11 @@ impl SyncController {
                     })
                     .unwrap_or_default();
                 let trim_ms = row.map(|row| row.trim_ms).unwrap_or_default();
+                let measured = row.and_then(|row| row.measured.as_ref().map(|m| m.latency_us));
                 let default_latency_ms = latency::default_latency_ms(&key.transport);
-                let effective_latency_ms = latency::effective_latency_ms(&key.transport, trim_ms);
+                let effective_latency_ms =
+                    latency::effective_latency_ms(&key.transport, measured, trim_ms);
+                let calibration = row.and_then(|row| row.measured.clone());
                 let rate_hz = live_rate
                     .or_else(|| row.and_then(|row| row.rate_hz))
                     .unwrap_or(FALLBACK_RATE_HZ);
@@ -491,7 +540,8 @@ impl SyncController {
                     trim_ms,
                     default_latency_ms,
                     effective_latency_ms,
-                    calibrated: false,
+                    calibrated: calibration.is_some(),
+                    calibration,
                     delay_frames,
                     output_sample_rate_hz: rate_hz,
                     drift_ppm,
