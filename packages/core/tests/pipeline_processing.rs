@@ -130,12 +130,20 @@ async fn stereo_frames_keep_their_sides_through_the_eq() {
         .0
         .iter()
         .any(|[left, _]| left.abs() > 0.1));
+    // The bus encode adds one LSB of TPDF dither to every sample (the L16
+    // noise floor, about -93 dBFS), so a silent channel reads as dither,
+    // never exactly zero. What must not happen is the boosted left tone
+    // leaking across: the right channel stays at the dither floor, three
+    // orders of magnitude below the tone.
+    let loudest_right = out
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[_, right]| right.abs())
+        .fold(0.0f32, f32::max);
     assert!(
-        out.as_chunks::<2>()
-            .0
-            .iter()
-            .all(|[_, right]| *right == 0.0),
-        "the boosted left tone leaked into the right channel"
+        loudest_right <= 1.0 / 32768.0,
+        "the boosted left tone leaked into the right channel: {loudest_right}"
     );
 }
 
