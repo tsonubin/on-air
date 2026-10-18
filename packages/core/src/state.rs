@@ -16,7 +16,8 @@ use crate::sender::sonos::discovery::{DeviceRegistry, SonosDevice};
 use crate::sender::{AudioSender, SenderError};
 use crate::session::OutputSession;
 use crate::settings::{SavedSettings, SettingsPersistence};
-use bytes::Bytes;
+use crate::sync::{OutputKey, SyncController};
+use crate::timeline::PcmChunk;
 use parking_lot::Mutex as StdMutex;
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
@@ -92,9 +93,15 @@ pub struct CoreState {
     pub(crate) cd: CdDeck,
 
     // Buses.
-    /// Pipeline PCM: processed interleaved stereo L16 at the input rate.
-    pub audio_tx: broadcast::Sender<Bytes>,
+    /// Pipeline PCM: processed interleaved stereo L16 at the input rate,
+    /// every chunk stamped with its frame index and capture time on the
+    /// shared playback timeline (`crate::timeline`).
+    pub audio_tx: broadcast::Sender<PcmChunk>,
     pub ws_tx: broadcast::Sender<WsEvent>,
+
+    /// Cross-protocol sync: groups, latency trims and drift reports.
+    /// Shared with patchbay children so a group can span sessions.
+    pub sync: Arc<SyncController>,
 
     // Catalogs.
     pub(crate) sonos: Arc<Mutex<DeviceRegistry>>,
@@ -225,6 +232,14 @@ impl CoreState {
     ) -> Self {
         let (audio_tx, _) = broadcast::channel(AUDIO_BROADCAST_CAPACITY);
         let (ws_tx, _) = broadcast::channel(64);
+        let sync = Arc::new(SyncController::new());
+        for trim in &saved_settings.sync_trims {
+            sync.set_trim_ms(
+                &OutputKey::new(&trim.transport, &trim.device_id),
+                &trim.transport,
+                trim.trim_ms,
+            );
+        }
         let cd = CdDeck::new();
         cd.set_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
@@ -251,6 +266,7 @@ impl CoreState {
             cd,
             audio_tx,
             ws_tx,
+            sync,
             sonos: Arc::new(Mutex::new(DeviceRegistry::new())),
             airplay: Arc::new(StdMutex::new(Vec::new())),
             owntone_base: Arc::new(StdMutex::new("http://127.0.0.1:3689".into())),
@@ -358,7 +374,9 @@ impl CoreState {
     // ---- sessions -------------------------------------------------------
 
     /// Isolated PCM, sender, nonce and stream health for a virtual network
-    /// sink. Discovery and the service flag are shared with the parent.
+    /// sink. Discovery and the service flag are shared with the parent; the
+    /// sync registry is too, so a sync group can span root and patchbay
+    /// sessions.
     pub(crate) fn patchbay_child(&self) -> Self {
         let mut child = self.clone();
         child.patchbay_endpoint = true;
@@ -532,6 +550,24 @@ impl CoreState {
 
     pub(crate) fn remember_eq(&self, gains: [f32; 5]) {
         self.update_saved_settings(|saved| saved.eq_gains_db = gains);
+    }
+
+    /// Persist one output's latency trim (`sync_trims` in settings.json).
+    pub(crate) fn remember_sync_trim(&self, transport: &str, device_id: &str, trim_ms: i32) {
+        self.update_saved_settings(|saved| {
+            match saved
+                .sync_trims
+                .iter_mut()
+                .find(|trim| trim.transport == transport && trim.device_id == device_id)
+            {
+                Some(existing) => existing.trim_ms = trim_ms,
+                None => saved.sync_trims.push(crate::settings::SavedSyncTrim {
+                    transport: transport.to_string(),
+                    device_id: device_id.to_string(),
+                    trim_ms,
+                }),
+            }
+        });
     }
 
     pub(crate) fn remember_sample_rates(&self) {

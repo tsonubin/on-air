@@ -3,12 +3,13 @@ use crate::dsp::eq::GraphicEq;
 use crate::dsp::resample::PcmResampler;
 use crate::dsp::PIPELINE_CHANNELS;
 use crate::events::WsEvent;
+use crate::timeline::{PcmChunk, FRAME_BYTES};
 use bytes::Bytes;
 use parking_lot::Mutex;
 use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 /// A capture ring holding `capacity_frames` interleaved pipeline frames.
@@ -57,7 +58,7 @@ pub fn spawn_processing_task(
     input_rate_hz: u32,
     output_rate_hz: u32,
     eq_gains_db: Arc<Mutex<[f32; 5]>>,
-    audio_tx: broadcast::Sender<Bytes>,
+    audio_tx: broadcast::Sender<PcmChunk>,
     ws_tx: broadcast::Sender<WsEvent>,
 ) -> ProcessingTaskHandle {
     spawn_processing_task_reporting(
@@ -84,7 +85,7 @@ pub struct ProcessingRates {
 
 pub struct ProcessingOutputs {
     pub eq_gains_db: Arc<Mutex<[f32; 5]>>,
-    pub audio_tx: broadcast::Sender<Bytes>,
+    pub audio_tx: broadcast::Sender<PcmChunk>,
     pub ws_tx: broadcast::Sender<WsEvent>,
 }
 
@@ -149,6 +150,8 @@ fn process_until_stopped(
     let mut resampled = Vec::new();
     // One dither per capture, so parallel captures do not share noise.
     let mut dither = TpdfDither::for_stream(rates.input_hz, rates.output_hz, PIPELINE_CHANNELS);
+    // Frames published so far: the bus timeline's frame index origin.
+    let mut frames_emitted = 0u64;
 
     while !stop_flag.load(Ordering::Relaxed) {
         let mut filled = 0;
@@ -182,14 +185,26 @@ fn process_until_stopped(
         }
 
         if audio_receivers > 0 {
-            let pcm_bytes = match resampler.as_mut() {
+            let pcm = match resampler.as_mut() {
                 Some(resampler) => {
                     resampler.process_into(&chunk, &mut resampled);
                     f32_to_le_i16_bytes(&resampled, &mut dither)
                 }
                 None => f32_to_le_i16_bytes(&chunk, &mut dither),
             };
-            let _ = audio_tx.send(pcm_bytes);
+            // Publish on the timeline: contiguous frame indices, one
+            // capture stamp, the same buffer the free-running path used.
+            // Empty chunks (a resampler catch-up produced no frames) are
+            // skipped so frame indices stay strictly contiguous.
+            if !pcm.is_empty() {
+                let frames = (pcm.len() / FRAME_BYTES) as u64;
+                let _ = audio_tx.send(PcmChunk {
+                    first_frame: frames_emitted,
+                    captured_at: Instant::now(),
+                    pcm,
+                });
+                frames_emitted += frames;
+            }
         }
     }
 }

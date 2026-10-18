@@ -29,13 +29,20 @@ async fn bluetooth_sender_pumps_pipeline_pcm_into_the_sink() {
             pipeline_hz: 44_100,
             output_hz: 44_100,
             volume: 100,
+            sync: None,
         },
     );
     sender.start().await.unwrap();
     assert!(adapter.list()[0].connected);
 
     let pcm = Bytes::from_static(&[0x00, 0x10, 0x00, 0x20]);
-    audio_tx.send(pcm.clone()).unwrap();
+    audio_tx
+        .send(on_air_core::timeline::PcmChunk {
+            first_frame: 0,
+            captured_at: std::time::Instant::now(),
+            pcm: pcm.clone(),
+        })
+        .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
     assert!(

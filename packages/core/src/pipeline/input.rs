@@ -15,7 +15,6 @@ use super::{
 use crate::cd::{CdDeck, ProducerGeneration, AUDIO_CD_INPUT, CD_SAMPLE_RATE_HZ};
 use crate::dsp::rates;
 use crate::events::WsEvent;
-use bytes::Bytes;
 use parking_lot::Mutex as SyncMutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
@@ -118,7 +117,7 @@ impl InputState {
 
 /// What the input session feeds and reads.
 pub struct InputWiring {
-    pub audio_tx: broadcast::Sender<Bytes>,
+    pub audio_tx: broadcast::Sender<crate::timeline::PcmChunk>,
     pub ws_tx: broadcast::Sender<WsEvent>,
     pub eq_gains_db: Arc<SyncMutex<[f32; 5]>>,
     /// The pipeline (input) rate the capture is converted to.

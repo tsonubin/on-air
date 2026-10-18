@@ -4,10 +4,7 @@
 // `Option<T>` is `T | null`; everything else is required.
 //
 // Source of truth, by section:
-//   packages/core/src/lib.rs            StatusResponse
-//   packages/core/src/api/*.rs          request and response bodies
-//   packages/core/src/state.rs          ActiveOutput
-//   packages/core/src/cd/mod.rs         CdStatus, CdTrackInfo
+//   packages/api/src/lib.rs            all serde wire structs mirrored below
 //   packages/core/src/pipeline/capture.rs  InputBackend
 //   packages/core/src/sender/airplay.rs    AirPlayMode
 
@@ -173,7 +170,7 @@ export interface ActiveOutput {
   device_name: string;
 }
 
-/** Lifecycle of the exclusive output (`session::output::OutputPhase`). */
+/** Lifecycle of the root session's output (`session::output::OutputPhase`). */
 export type OutputPhase = "starting" | "live" | "failed";
 
 /** The active output as `GET /api/outputs/active` reports it. */
@@ -204,6 +201,72 @@ export interface SetVolumeRequest {
 
 export interface OutputVolumeResponse {
   volume: number;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-protocol sync (roadmap: mixed protocols playing in sync)
+// ---------------------------------------------------------------------------
+
+/**
+ * Coarse per-output playout sync state (`packages/core/src/sync`).
+ * `free-running`: outside any sync group — no delay line, no drift steering;
+ * such outputs drift apart from each other, which is fine and expected.
+ * `syncing` / `locked`: in a sync group, held to the shared presentation
+ * epoch and the delay line; `locked` once drift measurements have settled.
+ */
+export type SyncState = "free_running" | "syncing" | "locked";
+
+/** One output's sync state as `GET /api/sync` reports it. */
+export interface OutputSyncStatus {
+  transport: Transport;
+  device_id: string;
+  device_name: string;
+  state: SyncState;
+  /** The user's latency trim in milliseconds; may be negative. */
+  trim_ms: number;
+  /**
+   * The documented per-transport default latency in milliseconds. NOT a
+   * measurement: the design spec requires acoustic (mic loopback)
+   * verification, and none of these figures has been measured on hardware.
+   */
+  default_latency_ms: number;
+  /** `default_latency_ms + trim_ms`, clamped at zero. Still uncalibrated. */
+  effective_latency_ms: number;
+  /**
+   * Whether the latency figure is a calibrated measurement. Never true
+   * today: the trim control exists precisely because it is not.
+   */
+  calibrated: boolean;
+  /** Delay line this output's feed holds, in frames; 0 when free-running. */
+  delay_frames: number;
+  output_sample_rate_hz: number;
+  /**
+   * Measured consumption drift against the timeline in ppm; positive means
+   * the speaker consumes samples faster than nominal. Absent until a feed
+   * has measured a window.
+   */
+  drift_ppm?: number;
+}
+
+/** `GET /api/sync`. */
+export interface SyncResponse {
+  outputs: OutputSyncStatus[];
+}
+
+/**
+ * `PUT /api/sync/trim`: manually calibrate one output's latency in
+ * milliseconds against what the user actually hears.
+ */
+export interface SetSyncTrimRequest {
+  transport: Transport;
+  device_id: string;
+  /** -10000..=10000. */
+  trim_ms: number;
+}
+
+export interface SyncTrimResponse {
+  trim_ms: number;
+  effective_latency_ms: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -304,6 +304,77 @@ pub struct OutputVolumeResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-protocol sync (roadmap: mixed protocols playing in sync)
+// ---------------------------------------------------------------------------
+
+/// Coarse per-output playout sync state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncState {
+    /// Playing outside any sync group: no delay line and no drift steering.
+    /// Such outputs free-run and drift apart from each other, which is fine
+    /// and expected.
+    #[default]
+    FreeRunning,
+    /// In a sync group: the delay line is applied and drift is still being
+    /// measured and steered.
+    Syncing,
+    /// In a sync group with settled drift measurements.
+    Locked,
+}
+
+/// One output's sync state as `GET /api/sync` reports it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutputSyncStatus {
+    pub transport: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub state: SyncState,
+    /// The user's latency trim in milliseconds, which may be negative.
+    pub trim_ms: i32,
+    /// The documented per-transport default latency in milliseconds. NOT a
+    /// measurement: no latency figure has been verified acoustically on
+    /// hardware, per the design spec's mic-loopback rule.
+    pub default_latency_ms: u32,
+    /// `default_latency_ms + trim_ms`, clamped at zero. Still uncalibrated;
+    /// the trim is manual, not a measurement.
+    pub effective_latency_ms: u32,
+    /// Whether the latency figure is a calibrated measurement. Never true
+    /// today: the trim control exists precisely because it is not.
+    pub calibrated: bool,
+    /// The delay line this output's feed holds, in frames at
+    /// `output_sample_rate_hz` (0 when free-running).
+    pub delay_frames: u64,
+    pub output_sample_rate_hz: u32,
+    /// Measured consumption drift against the timeline, parts per million:
+    /// positive means the speaker consumes samples faster than nominal.
+    /// Absent until a feed has measured a window.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drift_ppm: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SyncResponse {
+    pub outputs: Vec<OutputSyncStatus>,
+}
+
+/// `PUT /api/sync/trim`: manually calibrate one output's latency in
+/// milliseconds against what the user actually hears.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SetSyncTrimRequest {
+    pub transport: String,
+    pub device_id: String,
+    /// -10000..=10000.
+    pub trim_ms: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncTrimResponse {
+    pub trim_ms: i32,
+    pub effective_latency_ms: u32,
+}
+
+// ---------------------------------------------------------------------------
 // EQ and sample rates
 // ---------------------------------------------------------------------------
 

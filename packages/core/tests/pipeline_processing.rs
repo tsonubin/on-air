@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use on_air_core::dsp::bridge::l16_le_to_f32;
 use on_air_core::pipeline::{new_ring_buffer, push_frames, spawn_processing_task};
 use parking_lot::Mutex;
@@ -26,10 +25,11 @@ async fn processes_synthetic_frames_into_broadcast_pcm() {
         tokio::time::sleep(Duration::from_millis(1)).await;
     }
 
-    let chunk: Bytes = tokio::time::timeout(Duration::from_secs(2), audio_rx.recv())
+    let chunk = tokio::time::timeout(Duration::from_secs(2), audio_rx.recv())
         .await
         .expect("received a chunk before timing out")
-        .expect("channel not closed");
+        .expect("channel not closed")
+        .pcm;
 
     assert!(!chunk.is_empty());
     assert_eq!(
@@ -81,7 +81,8 @@ async fn through_the_pipeline(
         let chunk = tokio::time::timeout(Duration::from_secs(2), audio_rx.recv())
             .await
             .unwrap()
-            .unwrap();
+            .unwrap()
+            .pcm;
         assert_eq!(
             chunk.len() % 4,
             0,

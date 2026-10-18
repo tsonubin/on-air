@@ -288,10 +288,12 @@ async fn build_local(state: &CoreState, device_id: &str) -> Result<Built, Activa
         device_id: device.id.clone(),
         device_name: device.name.clone(),
     };
+    let pipeline_hz = *state.target_sample_rate_hz.lock();
     let config = BluetoothPlaybackConfig {
-        pipeline_hz: *state.target_sample_rate_hz.lock(),
+        pipeline_hz,
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        sync: state.sync.feed_for(&identity, pipeline_hz),
     };
     Ok(Built {
         sender: Box::new(
@@ -329,10 +331,12 @@ async fn build_bluetooth(state: &CoreState, device_id: &str) -> Result<Built, Ac
     } else {
         std::sync::Arc::new(SystemPcmOutput)
     };
+    let pipeline_hz = *state.target_sample_rate_hz.lock();
     let config = BluetoothPlaybackConfig {
-        pipeline_hz: *state.target_sample_rate_hz.lock(),
+        pipeline_hz,
         output_hz: *state.output_sample_rate_hz.lock(),
         volume: state.output_volume(),
+        sync: state.sync.feed_for(&identity, pipeline_hz),
     };
     Ok(Built {
         sender: Box::new(BluetoothSender::new(
