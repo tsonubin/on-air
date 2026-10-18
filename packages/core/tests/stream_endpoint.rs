@@ -943,12 +943,23 @@ async fn a_mono_channel_mode_serves_a_genuine_mono_wav_and_auto_stays_stereo() {
     make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     let app = on_air_core::build_router(state.clone());
 
+    // /api/outputs/channel-mode is a paired-client endpoint, unlike the
+    // public radio stream read below. Pair against this state's own PIN so
+    // the request carries the same credentials a real client would.
+    let token = {
+        let mut pairing = state.pairing();
+        let pin = pairing.pin().to_string();
+        pairing.verify(&pin).unwrap()
+    };
+
     let set_mode = |mode: &'static str| {
         let app = app.clone();
+        let token = token.clone();
         async move {
             app.oneshot(
                 Request::put("/api/outputs/channel-mode")
                     .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
                     .body(Body::from(format!(
                         r#"{{"transport":"sonos","device_id":"uuid:test","mode":"{mode}"}}"#
                     )))
