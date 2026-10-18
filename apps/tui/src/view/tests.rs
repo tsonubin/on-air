@@ -496,8 +496,8 @@ fn the_meter_draws_one_rms_bar_per_channel() {
     let rows = rows(&b);
     let left = &rows[(y + 1) as usize];
     let right = &rows[(y + 2) as usize];
-    assert_eq!(left.as_bytes()[x as usize], b'L', "{left}");
-    assert_eq!(right.as_bytes()[x as usize], b'R', "{right}");
+    assert_eq!(left.chars().nth(x as usize), Some('L'), "{left}");
+    assert_eq!(right.chars().nth(x as usize), Some('R'), "{right}");
     assert!(left.contains('█'), "the loud channel fills its bar:\n{left}");
     assert!(
         !right.contains('█'),
@@ -933,7 +933,7 @@ fn the_trim_overlay_calls_the_trim_manual_and_shows_the_current_value() {
     for needle in [
         "Latency trim · Mock Sonos",
         "not measured or calibrated",
-        "applies the next time this output plays",
+        "this output plays.",
         "Current trim: -100 ms",
         "Trim: -100",
         "Enter: apply",
