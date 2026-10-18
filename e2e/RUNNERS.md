@@ -9,8 +9,8 @@ root after `pnpm install`.
 
 | Suite | Command | What it covers |
 |---|---|---|
-| Phone (headless) | `pnpm test:mobile:e2e` | The shared control client as the Expo app uses it: status probe, PIN pairing, source, destination, volume, EQ, sample rates, AirPlay/Bluetooth pairing, discovery of a known desktop address |
-| Desktop API | `pnpm --filter @on-air/e2e test:desktop:api` | HTTP golden paths (`e2e/shared/scenarios.ts`) through the control client |
+| Phone (headless) | `pnpm test:mobile:e2e` | The shared control client as the Expo app uses it: status probe, PIN pairing, source, destination, volume, EQ, sample rates, AirPlay/Bluetooth pairing, latency trim, sync groups, DSP quality, discovery of a known desktop address |
+| Desktop API | `pnpm --filter @on-air/e2e test:desktop:api` | HTTP golden paths (`e2e/shared/scenarios.ts`) through the control client, and the newer surface: sync trim and the sync read model, sync-group lifecycle (one epoch, the 409 conflict, leaving), DSP quality and the audio check's verdict, first-use tuning status, and the one error envelope every refusal carries |
 | Desktop UI | `pnpm --filter @on-air/e2e test:desktop:ui` | The desktop frontend in Chromium, served by Vite on `127.0.0.1:1420` |
 | Both desktop projects | `pnpm test:desktop:e2e` | `api` then `ui` |
 | Typecheck | `pnpm --filter @on-air/e2e typecheck` | Every `e2e/**/*.ts`, fixtures checked against `@on-air/api-types` |
@@ -34,6 +34,9 @@ pnpm --filter @on-air/e2e exec playwright install --with-deps chromium
   server is reused.
 - The phone suites use `47992` (companion) and `47993` (Expo Go pairing).
   `E2E_PORT` overrides the port for a single file.
+- The desktop API suite starts a scratch mock core on `47994` for the tests
+  that must see a fresh machine (first-use tuning). `E2E_ISOLATED_PORT`
+  overrides it.
 
 ## Real LAN sweep
 

@@ -28,7 +28,7 @@ export default defineConfig({
   projects: [
     {
       name: "api",
-      testMatch: "golden-path.spec.ts",
+      testMatch: ["golden-path.spec.ts", "audio-surface.spec.ts"],
       grep: /@api/,
     },
     {

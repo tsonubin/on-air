@@ -3,18 +3,20 @@
  *
  * Covers the phone contract: reach the LAN control plane, PIN-pair, then
  * drive every mixer control the desktop UI exposes (source, destination,
- * exclusive transports, volume, EQ, sample rates, AirPlay/Bluetooth pairing).
- * No simulator is needed.
+ * exclusive transports, volume, EQ, sample rates, AirPlay/Bluetooth
+ * pairing, latency trim, sync groups, DSP quality). No simulator is needed.
  */
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import {
   activateInput,
   connectBluetooth,
+  dissolveSyncGroup,
   fetchStatus,
   getActiveInput,
   getActiveOutput,
   getAirplayMode,
+  getAudioQuality,
   getEq,
   getSampleRate,
   listBluetooth,
@@ -24,12 +26,13 @@ import {
   pairAirplay,
   pairBluetooth,
   probeOnAir,
+  setAudioQuality,
   setSampleRate,
   verifyPin,
   wsUrl,
 } from "../../packages/control-client/src/index.ts";
 import { type MockCore, startMockCore } from "../shared/mockCore.ts";
-import { goldenPathSonos, switchTransports } from "../shared/scenarios.ts";
+import { goldenPathSonos, playSyncGroup, switchTransports, trimFirstOutput } from "../shared/scenarios.ts";
 
 const PORT = Number(process.env.E2E_PORT ?? 47992);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -106,5 +109,33 @@ describe("expo companion against mock core", { concurrency: 1 }, () => {
     const mode = await getAirplayMode(BASE, token);
     assert.ok(mode.length > 0);
     await activateInput(BASE, "Mock Monitor", token);
+  });
+
+  test("companion calibrates latency by ear and plays speakers in sync", async () => {
+    // A trim is a manual correction against what the user hears, never a
+    // measurement; the read model says so.
+    const { trimmed, row } = await trimFirstOutput(BASE, "sonos", 300, token);
+    assert.deepEqual(trimmed, { trim_ms: 300, effective_latency_ms: 1300 });
+    assert.equal(row.calibrated, false);
+    assert.equal(row.state, "free_running");
+
+    // SEVERAL SPEAKERS playing in sync — not one merged device.
+    const { groupId, group } = await playSyncGroup(BASE, "Downstairs", token);
+    assert.equal(group.playing, true);
+    assert.deepEqual(
+      group.members.map((m) => [m.transport, m.playing]),
+      [
+        ["sonos", true],
+        ["airplay", true],
+      ],
+    );
+    await dissolveSyncGroup(BASE, groupId, token);
+  });
+
+  test("companion picks a DSP quality profile", async () => {
+    const before = await getAudioQuality(BASE, token);
+    assert.deepEqual(before.profiles, ["economy", "balanced", "high"]);
+    await setAudioQuality(BASE, "high", token);
+    assert.equal((await getAudioQuality(BASE, token)).quality, "high");
   });
 });

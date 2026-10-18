@@ -2,15 +2,25 @@
 // mobile e2e suites. They live here, not in the production control client,
 // so the client ships no test choreography. Import the client the way the
 // other e2e files do: by relative path, so no build step is needed.
+import type {
+  OutputSyncStatus,
+  SyncGroupView,
+  Transport,
+} from "@on-air/api-types";
 import {
   activateInput,
   activateOutput,
   fetchStatus,
+  getSync,
   listInputs,
   listOutputs,
   type RequestOptions,
   setEq,
+  setSyncTrim,
   setVolume,
+  addSyncGroupMember,
+  createSyncGroup,
+  startSyncGroup,
 } from "../../packages/control-client/src/index.ts";
 
 /**
@@ -50,4 +60,60 @@ export async function switchTransports(
     activated.push(transport);
   }
   return activated;
+}
+
+/**
+ * Put a manual latency trim on the first output of `transport` and re-read
+ * that output's row from `GET /api/sync`. The trim is a correction against
+ * what the user actually hears — never a measurement.
+ */
+export async function trimFirstOutput(
+  base: string,
+  transport: Transport,
+  trimMs: number,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<{ trimmed: { trim_ms: number; effective_latency_ms: number }; row: OutputSyncStatus }> {
+  const outputs = await listOutputs(base, token, opts);
+  const device = outputs.find((o) => o.transport === transport);
+  if (!device) throw new Error(`missing ${transport}`);
+  const trimmed = await setSyncTrim(
+    base,
+    { transport, device_id: device.id, trim_ms: trimMs },
+    token,
+    opts,
+  );
+  const sync = await getSync(base, token, opts);
+  const row = sync.outputs.find((o) => o.transport === transport && o.device_id === device.id);
+  if (!row) throw new Error(`${transport} ${device.id} missing from GET /api/sync`);
+  return { trimmed, row };
+}
+
+/**
+ * Create a named sync group out of the first `sonos` and `airplay` outputs
+ * and start them together at ONE presentation epoch: several speakers
+ * playing in sync, not one merged device. Returns the group as
+ * `GET /api/sync` reports it after the start.
+ */
+export async function playSyncGroup(
+  base: string,
+  name: string,
+  token?: string,
+  opts?: RequestOptions,
+): Promise<{ groupId: number; group: SyncGroupView }> {
+  const outputs = await listOutputs(base, token, opts);
+  const members = ["sonos", "airplay"].map((transport) => {
+    const device = outputs.find((o) => o.transport === transport);
+    if (!device) throw new Error(`missing ${transport}`);
+    return { transport: transport as Transport, device_id: device.id };
+  });
+  const created = await createSyncGroup(base, name, token, opts);
+  for (const member of members) {
+    await addSyncGroupMember(base, created.id, member, token, opts);
+  }
+  await startSyncGroup(base, created.id, token, opts);
+  const sync = await getSync(base, token, opts);
+  const group = sync.groups?.find((candidate) => candidate.id === created.id);
+  if (!group) throw new Error(`group ${created.id} missing from GET /api/sync`);
+  return { groupId: created.id, group };
 }

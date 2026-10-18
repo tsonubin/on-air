@@ -24,6 +24,12 @@ export interface MockCoreOptions {
   bind?: string;
   /** How long to wait for the first build and `/api/status`. Default 180 s. */
   startTimeoutMs?: number;
+  /**
+   * Extra environment for the core, on top of `ON_AIR_MOCK=1`, `PORT` and
+   * `BIND`. `ON_AIR_CONFIG_DIR` is how a test pins the core to a scratch
+   * settings directory instead of the user's.
+   */
+  env?: Record<string, string>;
 }
 
 export interface MockCore {
@@ -62,7 +68,7 @@ function stopChild(child: ChildProcess): Promise<void> {
  * with the captured output if the process exits or the timeout passes first.
  */
 export async function startMockCore(opts: MockCoreOptions): Promise<MockCore> {
-  const { port, bind = "127.0.0.1", startTimeoutMs = 180_000 } = opts;
+  const { port, bind = "127.0.0.1", startTimeoutMs = 180_000, env: extraEnv } = opts;
   const base = `http://127.0.0.1:${port}`;
   if (await statusOk(base)) {
     throw new Error(`port ${port} already answers /api/status; stop that core first`);
@@ -70,7 +76,7 @@ export async function startMockCore(opts: MockCoreOptions): Promise<MockCore> {
 
   const child = spawn("cargo", [...MOCK_CORE_CARGO_ARGS], {
     cwd: REPO_ROOT,
-    env: { ...process.env, ON_AIR_MOCK: "1", PORT: String(port), BIND: bind },
+    env: { ...process.env, ON_AIR_MOCK: "1", PORT: String(port), BIND: bind, ...extraEnv },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const output: Buffer[] = [];

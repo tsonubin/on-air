@@ -141,6 +141,44 @@ export interface SetAudioQualityRequest {
   quality: DspQuality;
 }
 
+/**
+ * What the automatic first-use tuning measured and applied on this machine
+ * (`settings.json`, `first_run_tuning`). Present only once tuning has run.
+ */
+export interface FirstRunTuning {
+  /** Unix seconds when the automatic check ran. */
+  ran_at_unix_s: number;
+  /** The check's capture-buffer verdict, in milliseconds. */
+  recommended_buffer_ms: number;
+  /** Whether the buffer verdict was applied (only to untouched settings). */
+  applied_buffer: boolean;
+  /** Whether the quality verdict was applied (only to untouched settings). */
+  applied_quality: boolean;
+}
+
+/**
+ * `GET /api/audio/tuning`: whether an audio check has completed on this
+ * machine, what the automatic first-run tuning measured and applied, and
+ * the profile currently in effect. Local to the core; the TUI mirrors the
+ * shape.
+ */
+export interface TuningStatus {
+  /** Whether any audio check has completed here (automatic or manual). */
+  tuned: boolean;
+  /** What the automatic first-run tuning measured and applied, if it ran. */
+  automatic: FirstRunTuning | null;
+  /** The profile currently in effect. */
+  quality: DspQuality;
+  /** The user's explicit profile choice, if any. */
+  quality_override: DspQuality | null;
+  /** The most recent check's quality verdict, if any. */
+  recommended_quality: DspQuality | null;
+  /** The capture buffer currently requested (0 = system default). */
+  capture_buffer_ms: number;
+  /** All selectable profiles, cheapest first. */
+  profiles: DspQuality[];
+}
+
 export interface PinResponse {
   pin: string;
 }
