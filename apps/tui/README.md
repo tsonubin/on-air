@@ -2,19 +2,20 @@
 
 `on-air` is the Linux control surface: a ratatui terminal UI over the
 `on-air-core` service on `http://127.0.0.1:47990`, plus `bar`, `status`,
-`monitor` and `service` subcommands for Omarchy's bar and menu. It owns no
-audio; quitting it never stops streaming. Keys, mouse, the Omarchy launcher
-entry, keybinding, menu rows and bar module are documented in
-[`docs/omarchy.md`](../../docs/omarchy.md).
+`monitor`, `service`, `audio` and `firewall` subcommands for Omarchy's bar,
+menu and diagnostics. It owns no audio; quitting it never stops streaming.
+Keys, mouse, the Omarchy launcher entry, keybinding, menu rows and bar module
+are documented in [`docs/omarchy.md`](../../docs/omarchy.md).
 
 ```bash
 # dev loop: a hardware-free core in one terminal, the UI in another
 ON_AIR_MOCK=1 PORT=47990 cargo run -p on-air-core --bin on-air-core
 cargo run -p on-air-tui                            # the UI
-cargo run -p on-air-tui -- bar                     # one Waybar-style JSON line
 cargo run -p on-air-tui -- status [--json]         # the core's state
 cargo run -p on-air-tui -- monitor on|off|toggle   # audio capture and streaming
 cargo run -p on-air-tui -- service start|stop|restart   # the systemd user unit
+cargo run -p on-air-tui -- audio check [--json]   # benchmark capture buffering
+cargo run -p on-air-tui -- firewall [allow]       # show or repair UFW access
 
 cargo test -p on-air-tui                      # unit tests + the mock core in-process
 cargo clippy --locked -p on-air-tui --all-targets -- -D warnings

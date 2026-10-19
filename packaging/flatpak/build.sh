@@ -5,9 +5,11 @@ set -euo pipefail
 export PATH="/usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin:${PATH}"
 export CARGO_HOME="${CARGO_HOME:-/run/build/on-air/cargo}"
 
-npm install --prefix /run/build/on-air/pnpm-prefix pnpm@9.15.0
-export PATH="/run/build/on-air/pnpm-prefix/node_modules/.bin:${PATH}"
-
+# corepack ships with the Node SDK and resolves pnpm without npm, so the
+# build stays pnpm-only end to end.
+corepack enable --install-directory /run/build/on-air/pnpm-bin
+corepack prepare pnpm@9.15.0 --activate
+export PATH="/run/build/on-air/pnpm-bin:${PATH}"
 pnpm install --frozen-lockfile --filter 'desktop...'
 pnpm --filter desktop build
 cargo build --locked --release -p on-air-desktop

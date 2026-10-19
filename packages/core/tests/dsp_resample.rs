@@ -130,5 +130,8 @@ fn same_rate_streaming_stereo_is_lossless() {
 #[test]
 fn a_zero_input_rate_passes_through_instead_of_panicking() {
     let mut r = StreamingResampler::new(0, 48_000, 2);
-    assert_eq!(r.process(&[0.1, -0.1, 0.2, -0.2]), vec![0.1, -0.1, 0.2, -0.2]);
+    assert_eq!(
+        r.process(&[0.1, -0.1, 0.2, -0.2]),
+        vec![0.1, -0.1, 0.2, -0.2]
+    );
 }

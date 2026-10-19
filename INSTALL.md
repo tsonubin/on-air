@@ -164,10 +164,10 @@ The full asset list and how the recipes pick their checksums up is in
 
 ## Build from source
 
-Needs Rust stable, Node 22, pnpm 9 (`corepack enable` reads the pinned
-version from `package.json`), and on Linux: `libwebkit2gtk-4.1-dev`,
-`libgtk-3-dev`, `libappindicator3-dev`, `librsvg2-dev`, `libasound2-dev`,
-`pkg-config`, `libssl-dev`.
+Needs Rust 1.99.1 (the pinned toolchain includes clippy and rustfmt), Node 22,
+pnpm 9 (`corepack enable` reads the pinned version from `package.json`), and on
+Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libappindicator3-dev`,
+`librsvg2-dev`, `libasound2-dev`, `pkg-config`, `libssl-dev`.
 
 ```bash
 pnpm install

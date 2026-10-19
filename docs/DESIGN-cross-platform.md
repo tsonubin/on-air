@@ -1,10 +1,10 @@
 # Cross-platform TUI / GUI architecture
 
-Sketch, 2026-10-19 · `omp/improve-2026-10-19`
+Architecture note, 2026-10-19 · `omp/improve-2026-10-19`
 
-This describes how on-air is shaped across Linux, macOS and Windows today, and
-where the seams are if it grows. It is a design note, not a plan of record:
-nothing here is committed to.
+This describes how on-air is shaped across Linux, macOS and Windows today and
+records the boundaries already enforced in code. Unchecked checklist items
+remain future work.
 
 ## The one rule everything else follows
 
@@ -120,10 +120,11 @@ as a decision, not by accident.
 
 ## Where the seams are if this grows
 
-1. **A platform capability matrix in one place.** Today the answer to "does this
-   platform support X" is spread across the shell code and the docs tables. If a
-   UI ever needs to grey out a control per platform, that knowledge should live
-   in one shared constant rather than being re-derived per surface.
+1. **Core capability gates have one owner.** `packages/core/src/platform.rs`
+   answers the two support questions with production callers today: whether
+   UFW repair and the Linux patchbay are available. It intentionally does not
+   export a generic OS enum or speculative flags. A new capability belongs
+   there only when a real caller needs the answer.
 2. **The TUI and the desktop must not diverge on behaviour.** They already
    share the wire types; they do not share rendering, which is correct. What
    they must share is *semantics* — the same action means the same thing.
@@ -206,11 +207,21 @@ What has to be true at each stage. Later phases assume earlier ones hold.
 **Phase 2 — the OS bindings are isolated**
 - [x] Capture, Bluetooth, local speakers and the sleep inhibitor each live in
       one module per platform.
-- [ ] **A single platform capability matrix** — the same "is X supported here"
-      answer currently re-derived at six call sites. *(the extract below)*
-- [ ] A documented list of what each binding may and may not assume.
+- [x] Core capability gates live in `packages/core/src/platform.rs`; only
+      capabilities with production callers are exported.
+- [x] Binding assumptions are documented below and enforced by core-owned
+      `cfg` boundaries.
+
+The binding rules are deliberately small:
+
+- Client crates use the HTTP/WebSocket contract and never invoke an OS helper.
+- Linux-only commands (`pactl`, `parec`, `bluetoothctl`, `pkexec`) stay behind
+  Linux modules or the core capability gates.
+- Non-Linux implementations return their platform-specific result or an
+  explicit unsupported error; they do not pretend Linux services exist.
 
 **Phase 3 — several speakers, together**
+
 - [x] A shared timeline every chunk carries its place on.
 - [x] Sync groups with a presentation epoch and per-output delay lines.
 - [x] Per-output latency trim and sync state.

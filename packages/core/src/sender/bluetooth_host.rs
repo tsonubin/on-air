@@ -143,7 +143,9 @@ mod platform {
     pub fn list() -> Vec<BluetoothDevice> {
         let deadline = Instant::now() + LISTING_BUDGET;
         let mut devices = pulse_a2dp_sinks();
-        for (addr, name) in parse_bluetoothctl_devices(&bluetoothctl(&["devices", "Paired"], deadline)) {
+        for (addr, name) in
+            parse_bluetoothctl_devices(&bluetoothctl(&["devices", "Paired"], deadline))
+        {
             let info = parse_bluetoothctl_info(&bluetoothctl(&["info", &addr], deadline));
             if !info.audio_sink && info.paired {
                 // Some adapters omit UUID text until connected; keep paired devices

@@ -19,10 +19,13 @@ setup_toolchain() {
     export PATH="${HOME}/.cargo/bin:${PATH}"
   fi
   if ! command -v pnpm >/dev/null 2>&1; then
-    command -v npm >/dev/null 2>&1 || die "pnpm or npm is required"
-    local prefix="${HOME}/.local/share/on-air-pnpm"
-    npm install --prefix "$prefix" pnpm@9.15.0
-    export PATH="${prefix}/node_modules/.bin:${PATH}"
+    command -v corepack >/dev/null 2>&1 || die "pnpm or corepack is required"
+    local bindir="${HOME}/.local/bin"
+    mkdir -p "$bindir"
+    corepack enable --install-directory "$bindir" 2>/dev/null ||
+      die "could not enable corepack"
+    corepack prepare pnpm@9.15.0 --activate || die "could not fetch pnpm 9.15.0"
+    export PATH="${bindir}:${PATH}"
   fi
   command -v cargo >/dev/null 2>&1 || die "cargo is required"
   command -v pnpm >/dev/null 2>&1 || die "pnpm is required"

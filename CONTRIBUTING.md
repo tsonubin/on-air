@@ -6,10 +6,12 @@ pull request against `main`.
 
 ## Set up
 
-You need Rust stable, Node 22 and pnpm 9 (`corepack enable` picks the pinned
-version up from `package.json`). On Linux the core also needs
-`libasound2-dev`, `libssl-dev` and `pkg-config`; the desktop shell needs the
-Tauri WebKitGTK packages listed in [INSTALL.md](INSTALL.md#build-from-source).
+You need Rust 1.99.1 (with clippy and rustfmt), Node 22 and pnpm 9
+(`corepack enable` picks the pinned version up from `package.json`). The root
+`rust-toolchain.toml` keeps local Cargo commands aligned with CI. On Linux the
+core also needs `libasound2-dev`, `libssl-dev` and `pkg-config`; the desktop
+shell needs the Tauri WebKitGTK packages listed in
+[INSTALL.md](INSTALL.md#build-from-source).
 
 ```bash
 pnpm install
@@ -17,18 +19,20 @@ pnpm install
 
 ## Check before you push
 
-CI runs exactly these; running them locally first saves a round trip.
+The checks are split across CI jobs; run the relevant commands locally:
 
 ```bash
-pnpm check:ci                 # Biome: format, lint, import order (pnpm format fixes)
-pnpm typecheck                # every TypeScript package, tests and e2e included
-pnpm test                     # control client, desktop (Vitest), mobile (Jest)
+pnpm check:ci
+pnpm typecheck:web
+pnpm test:mobile
+pnpm --filter desktop test
+pnpm --filter desktop build
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets -- -D warnings
 cargo test --locked --workspace
-sh packaging/omarchy/test.sh  # Omarchy unit, launcher entry, snippets, PKGBUILD
-pnpm test:mobile:e2e          # phone client against the mock core
-pnpm test:desktop:e2e         # Playwright against the mock core (see e2e/RUNNERS.md)
+sh packaging/omarchy/test.sh
+pnpm test:mobile:e2e
+pnpm test:desktop:e2e
 ```
 
 None of them need audio hardware or a running desktop app; the e2e suites

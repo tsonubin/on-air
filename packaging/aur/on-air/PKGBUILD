@@ -21,20 +21,20 @@ sha256sums=('SKIP')
 
 prepare() {
   cd "${pkgname}-${pkgver}"
-  export RUSTUP_TOOLCHAIN=stable
+  export RUSTUP_TOOLCHAIN=1.99.1
   cargo fetch --locked --target "$CARCH-unknown-linux-gnu"
 }
 
 build() {
   cd "${pkgname}-${pkgver}"
-  export RUSTUP_TOOLCHAIN=stable
+  export RUSTUP_TOOLCHAIN=1.99.1
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release -p on-air-core -p on-air-tui
 }
 
 check() {
   cd "${pkgname}-${pkgver}"
-  export RUSTUP_TOOLCHAIN=stable
+  export RUSTUP_TOOLCHAIN=1.99.1
   cargo test --frozen -p on-air-core -p on-air-tui
 }
 

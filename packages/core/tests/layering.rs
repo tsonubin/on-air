@@ -53,7 +53,12 @@ fn no_module_outside_api_imports_the_api_layer() {
     // `> 20` breaks if the crate ever gets smaller, and says nothing about
     // *which* files were visited; naming modules that must be present
     // survives either way and is the real concern.
-    for known in ["dsp/mod.rs", "session/mod.rs", "pipeline/mod.rs", "sender/mod.rs"] {
+    for known in [
+        "dsp/mod.rs",
+        "session/mod.rs",
+        "pipeline/mod.rs",
+        "sender/mod.rs",
+    ] {
         assert!(
             files.iter().any(|p| p.ends_with(known)),
             "the walk missed {known}, so the check above proved nothing"

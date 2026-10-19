@@ -1,0 +1,5 @@
+# Keep local checks, CI, and distro source builds on the clippy version used by this tree.
+# Bump deliberately when the current stable toolchain changes.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
