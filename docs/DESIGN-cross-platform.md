@@ -130,6 +130,106 @@ as a decision, not by accident.
 3. **New transports belong in `packages/core/src/sender/`**, not in a shell. The
    shells enumerate what the core reports.
 
+## Module boundaries
+
+Everything below `packages/` is portable. Everything platform-specific sits at
+the edges, behind a small number of OS binding modules.
+
+```mermaid
+graph TD
+    subgraph clients ["Clients — no playback"]
+        TUI["apps/tui<br/>ratatui"]
+        DESKTOP["apps/desktop<br/>Tauri webview + shell"]
+        MOBILE["apps/mobile<br/>Expo phone remote"]
+        QS["apps/quickshell<br/>Omarchy QML panel"]
+    end
+
+    subgraph shared ["Shared — portable"]
+        CC["packages/control-client<br/>HTTP/WS client, snapshot, refresh"]
+        API["packages/api + api-types<br/>wire contract"]
+    end
+
+    subgraph core ["packages/core — owns playback"]
+        PLANE["control plane<br/>HTTP + WS on 47990"]
+        PIPE["pipeline<br/>capture → EQ → rate bridge → bus"]
+        DSP["dsp<br/>resample · eq · dither · quality"]
+        TIME["timeline · sync groups<br/>delay lines · drift"]
+        SEND["senders<br/>sonos · airplay · bluetooth · local"]
+        SUBJ["state · settings · pairing<br/>cd · mdns · keep-awake"]
+    end
+
+    subgraph os ["OS bindings — the only platform code"]
+        PULSE["Pulse / PipeWire"]
+        BLUEZ["BlueZ"]
+        COREAUDIO["CoreAudio / IOKit"]
+        WINRT["WinRT / WASAPI"]
+    end
+
+    TUI --> PLANE
+    DESKTOP --> PLANE
+    MOBILE --> PLANE
+    QS --> PLANE
+    TUI -. mirrors .-> API
+    DESKTOP --> CC --> API
+    MOBILE --> CC
+    API -. wire .-> PLANE
+    PLANE --> PIPE --> DSP --> SEND
+    PIPE --> TIME
+    SEND --> SUBJ
+    PIPE --> PULSE
+    SEND --> BLUEZ
+    SEND --> COREAUDIO
+    SEND --> WINRT
+    SUBJ --> PULSE
+```
+
+The rule the diagram is drawn to enforce: **arrows cross the `os` boundary only
+from `packages/core`**, never from a client. A UI that reaches for an OS binding
+directly has broken the design.
+
+## Phased MVP checklist
+
+What has to be true at each stage. Later phases assume earlier ones hold.
+
+**Phase 0 — one platform works end to end (Linux)**
+- [x] Core captures, processes and sends to one transport.
+- [x] Control plane exposes state and commands over HTTP + WS.
+- [x] A UI drives it and owns no playback.
+- [x] Settings and pairing survive a restart.
+
+**Phase 1 — the client surface is portable**
+- [x] The wire contract is shared (`packages/api` / `api-types`).
+- [x] One HTTP/WS client serves every client (`control-client`).
+- [x] The TUI and the tray app share semantics, not rendering.
+- [x] The mock core runs everywhere, so `e2e/` needs no audio hardware.
+
+**Phase 2 — the OS bindings are isolated**
+- [x] Capture, Bluetooth, local speakers and the sleep inhibitor each live in
+      one module per platform.
+- [ ] **A single platform capability matrix** — the same "is X supported here"
+      answer currently re-derived at six call sites. *(the extract below)*
+- [ ] A documented list of what each binding may and may not assume.
+
+**Phase 3 — several speakers, together**
+- [x] A shared timeline every chunk carries its place on.
+- [x] Sync groups with a presentation epoch and per-output delay lines.
+- [x] Per-output latency trim and sync state.
+- [ ] **Measured latency.** Every figure is still an uncalibrated default; the
+      calibration harness ships but has not been run against real hardware.
+- [ ] A listening pass confirming the speakers actually sound aligned.
+
+**Phase 4 — the shell feels native**
+- [x] Omarchy: native QML panel, media widget, toasts.
+- [ ] macOS: tray behaviour verified by hand, including the route picker.
+- [ ] Windows: Bluetooth device detection is incomplete.
+- [ ] A `doctor`-style diagnostic so "why is nothing playing" is answerable
+      without reading the service log.
+
+**Phase 5 — distribution**
+- [ ] One-line installer exercised against a published release.
+- [ ] AUR / Homebrew / winget / Flatpak pins filled from real artifacts.
+- [ ] A clean-machine install on each supported platform.
+
 ## Related
 
 - [glossary](glossary.md) — domain vocabulary

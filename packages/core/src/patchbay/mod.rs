@@ -83,7 +83,7 @@ impl Patchbay {
                 networks: HashMap::new(),
                 running_sinks: Vec::new(),
                 snapshot: PatchbaySnapshot {
-                    supported: cfg!(target_os = "linux") || mock,
+                    supported: crate::platform::PATCHBAY || mock,
                     enabled: true,
                     nodes: Vec::new(),
                     links: Vec::new(),

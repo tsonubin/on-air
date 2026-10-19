@@ -25,7 +25,7 @@ pub async fn repair(
         return Err(ApiError::validation("invalid firewall repair scope"));
     }
     if !state.mock {
-        if !cfg!(target_os = "linux") {
+        if !crate::platform::FIREWALL_REPAIR {
             return Err(ApiError::not_ready("UFW repair is only available on Linux"));
         }
         let output = tokio::time::timeout(
