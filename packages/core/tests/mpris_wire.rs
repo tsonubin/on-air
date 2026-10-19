@@ -75,7 +75,10 @@ async fn transport_methods_reach_the_control_endpoint() {
     assert_eq!(cd.track, 1, "Stop does not move tracks");
 
     let cd = via_the_control_endpoint(&app, MprisCommand::Next, &cd).await;
-    assert_eq!((cd.track, cd.title.as_deref()), (2, Some("Freddie Freeloader")));
+    assert_eq!(
+        (cd.track, cd.title.as_deref()),
+        (2, Some("Freddie Freeloader"))
+    );
 
     let cd = via_the_control_endpoint(&app, MprisCommand::Next, &cd).await;
     assert_eq!(cd.track, 3);
@@ -91,10 +94,24 @@ async fn seek_and_set_position_reach_the_control_endpoint() {
     let (app, cd) = disc_app().await;
     assert_eq!(cd.position_ms, 0, "the mock deck holds still until seeked");
 
-    let cd = via_the_control_endpoint(&app, MprisCommand::Seek { offset_us: 30_000_000 }, &cd).await;
+    let cd = via_the_control_endpoint(
+        &app,
+        MprisCommand::Seek {
+            offset_us: 30_000_000,
+        },
+        &cd,
+    )
+    .await;
     assert_eq!(cd.position_ms, 30_000, "Seek lands 30 s in");
 
-    let cd = via_the_control_endpoint(&app, MprisCommand::Seek { offset_us: -10_000_000 }, &cd).await;
+    let cd = via_the_control_endpoint(
+        &app,
+        MprisCommand::Seek {
+            offset_us: -10_000_000,
+        },
+        &cd,
+    )
+    .await;
     assert_eq!(cd.position_ms, 20_000, "a negative Seek backs up");
 
     // 12_320 ms is a whole number of CD sectors (75/s), so the deck lands
@@ -108,11 +125,21 @@ async fn seek_and_set_position_reach_the_control_endpoint() {
         &cd,
     )
     .await;
-    assert_eq!(cd.position_ms, 12_320, "SetPosition seeks to the absolute spot");
+    assert_eq!(
+        cd.position_ms, 12_320,
+        "SetPosition seeks to the absolute spot"
+    );
 
     // Beyond the track's end clamps to it, and `goto`-style stepping is
     // what `Next` plans.
-    let cd = via_the_control_endpoint(&app, MprisCommand::Seek { offset_us: 900_000_000 }, &cd).await;
+    let cd = via_the_control_endpoint(
+        &app,
+        MprisCommand::Seek {
+            offset_us: 900_000_000,
+        },
+        &cd,
+    )
+    .await;
     assert_eq!(cd.position_ms, 60_000, "seek past the end lands at the end");
 
     let cd = via_the_control_endpoint(&app, MprisCommand::Next, &cd).await;

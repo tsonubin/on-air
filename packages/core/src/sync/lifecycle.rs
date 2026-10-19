@@ -101,17 +101,23 @@ pub async fn add_member(
         .map(|info| info.name)
         .ok_or(GroupError::OutputNotFound)?;
     let _configuration = state.config_lock.lock().await;
-    let group = state.sync.group_by_id(group_id).ok_or(GroupError::NotFound)?;
+    let group = state
+        .sync
+        .group_by_id(group_id)
+        .ok_or(GroupError::NotFound)?;
     let output = ActiveOutput {
         transport: transport.to_string(),
         device_id: device_id.to_string(),
         device_name,
     };
-    state.sync.join(&group, &output).map_err(|error| match error {
-        JoinError::AlreadyInGroup => GroupError::AlreadyInGroup {
-            group: current_group_name(state, &output),
-        },
-    })?;
+    state
+        .sync
+        .join(&group, &output)
+        .map_err(|error| match error {
+            JoinError::AlreadyInGroup => GroupError::AlreadyInGroup {
+                group: current_group_name(state, &output),
+            },
+        })?;
     state.remember_sync_groups();
     emit_changed(state, group_id);
     Ok(())
@@ -127,7 +133,10 @@ pub async fn remove_member(
     device_id: &str,
 ) -> Result<(), GroupError> {
     let _configuration = state.config_lock.lock().await;
-    state.sync.group_by_id(group_id).ok_or(GroupError::NotFound)?;
+    state
+        .sync
+        .group_by_id(group_id)
+        .ok_or(GroupError::NotFound)?;
     let key = OutputKey::new(transport, device_id);
     if state.sync.group_of(&key).map(|group| group.id()) != Some(group_id) {
         return Err(GroupError::NotAMember);
@@ -143,7 +152,10 @@ pub async fn remove_member(
 /// group and its membership.
 pub async fn dissolve(state: &CoreState, group_id: u64) -> Result<(), GroupError> {
     let _configuration = state.config_lock.lock().await;
-    let group = state.sync.group_by_id(group_id).ok_or(GroupError::NotFound)?;
+    let group = state
+        .sync
+        .group_by_id(group_id)
+        .ok_or(GroupError::NotFound)?;
     let keys: Vec<OutputKey> = group
         .members()
         .into_iter()
@@ -162,7 +174,10 @@ pub async fn dissolve(state: &CoreState, group_id: u64) -> Result<(), GroupError
 /// simply no longer playing.
 pub async fn stop(state: &CoreState, group_id: u64) -> Result<(), GroupError> {
     let _configuration = state.config_lock.lock().await;
-    let group = state.sync.group_by_id(group_id).ok_or(GroupError::NotFound)?;
+    let group = state
+        .sync
+        .group_by_id(group_id)
+        .ok_or(GroupError::NotFound)?;
     let keys: Vec<OutputKey> = group
         .members()
         .into_iter()
@@ -191,7 +206,10 @@ pub async fn start(state: &CoreState, group_id: u64) -> Result<(), GroupError> {
     {
         return Err(GroupError::Paused);
     }
-    let group = state.sync.group_by_id(group_id).ok_or(GroupError::NotFound)?;
+    let group = state
+        .sync
+        .group_by_id(group_id)
+        .ok_or(GroupError::NotFound)?;
     let members = group.members();
     if members.is_empty() {
         return Err(GroupError::Empty);
@@ -230,7 +248,8 @@ pub async fn start(state: &CoreState, group_id: u64) -> Result<(), GroupError> {
 
     // One shared presentation epoch for the whole group.
     let epoch = Instant::now() + START_PRE_ROLL;
-    let plans: HashMap<super::MemberId, StartPlan> = group.schedule_start(epoch).into_iter().collect();
+    let plans: HashMap<super::MemberId, StartPlan> =
+        group.schedule_start(epoch).into_iter().collect();
 
     let mut starts = tokio::task::JoinSet::new();
     for (member, key, _latency) in &members {

@@ -107,9 +107,9 @@ pub fn parse_args(args: &[String]) -> Result<Invocation, String> {
                     .next()
                     .cloned()
                     .ok_or_else(|| format!("--runs needs a count\n{USAGE}"))?;
-                let count = value
-                    .parse::<u32>()
-                    .map_err(|_| format!("--runs must be a number from 1 to 10, got {value:?}\n{USAGE}"))?;
+                let count = value.parse::<u32>().map_err(|_| {
+                    format!("--runs must be a number from 1 to 10, got {value:?}\n{USAGE}")
+                })?;
                 if !(1..=10).contains(&count) {
                     return Err(format!(
                         "--runs must be a number from 1 to 10, got {value:?}\n{USAGE}"
@@ -252,14 +252,8 @@ async fn main() {
             json,
         } => {
             let target = target.as_ref().map(|(t, d)| (t.as_str(), d.as_str()));
-            return match cli::calibrate(
-                &Client::new(&base),
-                target,
-                input.as_deref(),
-                runs,
-                json,
-            )
-            .await
+            return match cli::calibrate(&Client::new(&base), target, input.as_deref(), runs, json)
+                .await
             {
                 Ok(report) => {
                     println!("{}", report.output);

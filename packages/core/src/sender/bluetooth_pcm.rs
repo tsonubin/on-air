@@ -470,7 +470,14 @@ where
             move |data: &mut [T], _| {
                 // Apply gain at playback, including samples queued before a mute request.
                 let gain = f32::from(volume.load(Ordering::Acquire)) / 100.0;
-                fill_output(data, &mut consumer, stream_channels, channels, gain, &delivered);
+                fill_output(
+                    data,
+                    &mut consumer,
+                    stream_channels,
+                    channels,
+                    gain,
+                    &delivered,
+                );
             },
             |e| eprintln!("bluetooth audio output error: {e}"),
             None,
@@ -568,8 +575,10 @@ impl PcmSink for PacatPcmSink {
             .map_err(|e| SenderError::internal(format!("pacat playback failed: {e}")))?;
         // Frames, not samples or bytes: a genuinely mono stream carries two
         // bytes per frame, the historical stereo wire four.
-        self.consumed
-            .fetch_add((bytes.len() / (channels.max(1) * 2)) as u64, Ordering::Relaxed);
+        self.consumed.fetch_add(
+            (bytes.len() / (channels.max(1) * 2)) as u64,
+            Ordering::Relaxed,
+        );
         Ok(())
     }
     fn set_volume(&self, volume: u8) -> Result<(), SenderError> {
@@ -659,7 +668,8 @@ mod tests {
             rate_control: None,
             delivered: Arc::new(AtomicU64::new(0)),
         };
-        sink.write(&l16(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3])).unwrap();
+        sink.write(&l16(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3]))
+            .unwrap();
         assert_eq!(consumer.occupied_len(), 4, "a frame was split");
     }
 

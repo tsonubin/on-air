@@ -177,9 +177,8 @@ impl SavedSettings {
         self.sync_calibrations
             .retain(|m| !m.transport.trim().is_empty() && !m.device_id.trim().is_empty());
         let mut seen = std::collections::HashSet::new();
-        self.sync_calibrations.retain(|m| {
-            seen.insert((m.transport.clone(), m.device_id.clone()))
-        });
+        self.sync_calibrations
+            .retain(|m| seen.insert((m.transport.clone(), m.device_id.clone())));
         self.sync_groups.retain_mut(|group| {
             group.name = group.name.trim().chars().take(64).collect();
             group.members.retain(|member| {
@@ -315,7 +314,10 @@ impl SettingsPersistence {
     pub(crate) fn save_now(&self, settings: &SavedSettings) -> io::Result<()> {
         let (completion, result) = mpsc::sync_channel(0);
         self.sender
-            .send(SettingsCommand::Flush(Box::new(settings.clone()), completion))
+            .send(SettingsCommand::Flush(
+                Box::new(settings.clone()),
+                completion,
+            ))
             .map_err(|error| io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()))?;
         result
             .recv()

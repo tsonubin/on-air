@@ -329,13 +329,8 @@ async fn run_all(state: CoreState, resolved: Resolved, run_id: u64) {
             Err(error) => (None, Some(error)),
             Ok((runs, rate_hz)) => {
                 match aggregate(&transport, &device_id, &runs, rate_hz, unix_now()) {
-                    None => (
-                        None,
-                        Some(no_arrival_message(&runs)),
-                    ),
-                    Some(measurement)
-                        if measurement.confidence == CalibrationConfidence::Low =>
-                    {
+                    None => (None, Some(no_arrival_message(&runs))),
+                    Some(measurement) if measurement.confidence == CalibrationConfidence::Low => {
                         let error = format!(
                             "low confidence ({} of {} runs trustworthy, spread {} ms); \
                              the default is kept — re-run with the mic closer to the speaker",
@@ -379,10 +374,7 @@ async fn run_all(state: CoreState, resolved: Resolved, run_id: u64) {
 }
 
 fn no_arrival_message(runs: &[RunOutcome]) -> String {
-    let best = runs
-        .iter()
-        .map(|run| run.prominence)
-        .fold(0.0f64, f64::max);
+    let best = runs.iter().map(|run| run.prominence).fold(0.0f64, f64::max);
     format!(
         "no trustworthy probe arrival in {} run(s) (best peak/sidelobe {:.1}, need {:.0}); \
          is the microphone hearing the speaker?",
@@ -440,7 +432,16 @@ async fn drive_and_record(
     let capture_rate = recorder.rate_hz();
 
     // The transport, through the product's own activation path.
-    let drive = drive_probes(state, resolved, transport, device_id, spec, max_delay, capture_rate).await;
+    let drive = drive_probes(
+        state,
+        resolved,
+        transport,
+        device_id,
+        spec,
+        max_delay,
+        capture_rate,
+    )
+    .await;
     let _ = state.output().deactivate().await;
     let probe_runs = drive?;
 
@@ -496,9 +497,8 @@ async fn drive_probes(
     let bus_rate = state.input_sample_rate_hz();
     let probe_bus = spec.render(bus_rate);
     let reference = spec.render(capture_rate);
-    let gap_frames = chunk_aligned(
-        ((max_delay + RUN_MARGIN).as_secs_f64() * f64::from(bus_rate)) as usize,
-    );
+    let gap_frames =
+        chunk_aligned(((max_delay + RUN_MARGIN).as_secs_f64() * f64::from(bus_rate)) as usize);
     let window = probe_window_frames(reference.len(), max_delay, capture_rate);
 
     // One continuous stream: probe, then silence for the arrival window
@@ -525,8 +525,7 @@ async fn drive_probes(
     for (chunk_index, chunk) in sequence.chunks(CHUNK_FRAMES).enumerate() {
         let frame = chunk_index * CHUNK_FRAMES;
         if !state.mock {
-            let due = published_at
-                + Duration::from_secs_f64(frame as f64 / f64::from(bus_rate));
+            let due = published_at + Duration::from_secs_f64(frame as f64 / f64::from(bus_rate));
             tokio::time::sleep_until(tokio::time::Instant::from_std(due)).await;
         }
         if next_mark < marks.len() && frame == marks[next_mark].0 {
@@ -536,9 +535,8 @@ async fn drive_probes(
                 // whole stream at once and plan the timeline in sample
                 // space, with a deliberate sub-sample fraction so the
                 // window-fraction correction is exercised.
-                let planned = PRE_ROLL.as_secs_f64() * f64::from(capture_rate)
-                    + run as f64 * window
-                    + 0.37;
+                let planned =
+                    PRE_ROLL.as_secs_f64() * f64::from(capture_rate) + run as f64 * window + 0.37;
                 published_at + Duration::from_secs_f64(planned / f64::from(capture_rate))
             } else {
                 // The probe's first frame is chunk-aligned: its pipeline
@@ -730,13 +728,11 @@ fn synthesize_loopback(
         seed ^= seed << 13;
         seed ^= seed >> 7;
         seed ^= seed << 17;
-        let jitter = ((seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5)
-            * 2.0
-            * world.jitter_us as f64
-            / 1_000_000.0;
+        let jitter =
+            ((seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 2.0 * world.jitter_us as f64
+                / 1_000_000.0;
         let end = (index * BLOCK + block.len()) as f64;
-        let at = origin
-            + Duration::from_secs_f64(end / rate + jitter.max(-end / rate));
+        let at = origin + Duration::from_secs_f64(end / rate + jitter.max(-end / rate));
         recorder.push_mock(at, block.to_vec());
     }
 }

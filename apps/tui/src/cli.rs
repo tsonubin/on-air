@@ -184,7 +184,9 @@ pub async fn calibrate(
                 ));
             }
             Some(name) => name,
-            None => return Err("No capture source is active. Name the microphone with --input.".into()),
+            None => {
+                return Err("No capture source is active. Name the microphone with --input.".into())
+            }
         },
     };
     let targets = match target {
@@ -236,7 +238,10 @@ pub async fn calibrate(
         .start_calibration(&targets, &capture_input, runs_per_target)
         .await
         .map_err(|error| copy(&error))?;
-    let run = client.wait_for_calibration().await.map_err(|error| copy(&error))?;
+    let run = client
+        .wait_for_calibration()
+        .await
+        .map_err(|error| copy(&error))?;
     let applied = run
         .targets
         .iter()
@@ -429,9 +434,7 @@ pub async fn monitor(client: &Client, arg: &str) -> Result<String, ClientError> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::{
-        ActiveOutput, CalibrationMeasurement, CalibrationRunState, OutputPhase,
-    };
+    use crate::api::{ActiveOutput, CalibrationMeasurement, CalibrationRunState, OutputPhase};
 
     fn measurement(
         latency_us: u64,
