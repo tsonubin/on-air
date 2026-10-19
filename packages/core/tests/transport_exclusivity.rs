@@ -402,7 +402,11 @@ async fn starting_a_sync_group_begins_every_member_at_one_presentation_epoch() {
     let views = state.sync.group_views();
     assert!(views[0].playing);
     for member in &views[0].members {
-        assert!(member.playing, "{} began with the group", member.device_name);
+        assert!(
+            member.playing,
+            "{} began with the group",
+            member.device_name
+        );
     }
     let log = state.mock_log.lock().await.clone();
     assert!(log.iter().any(|line| line == "Mock Sonos:start"), "{log:?}");
@@ -440,7 +444,9 @@ async fn leaving_a_sync_group_stops_that_member_cleanly_and_the_others_keep_play
         "the leaver stopped exactly once: {log:?}"
     );
     assert_eq!(
-        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        log.iter()
+            .filter(|line| line.as_str() == "Mock Sonos:stop")
+            .count(),
         0,
         "the other member keeps playing: {log:?}"
     );
@@ -479,12 +485,17 @@ async fn a_free_running_output_is_unaffected_by_grouping() {
     );
     let log = state.mock_log.lock().await.clone();
     assert_eq!(
-        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        log.iter()
+            .filter(|line| line.as_str() == "Mock Sonos:stop")
+            .count(),
         0,
         "starting the group did not disturb the free-running output: {log:?}"
     );
     assert_eq!(
-        state.active_output().map(|active| active.device_id).as_deref(),
+        state
+            .active_output()
+            .map(|active| active.device_id)
+            .as_deref(),
         Some("uuid:mock-sonos"),
         "the free-running output is still the root's"
     );
@@ -492,7 +503,9 @@ async fn a_free_running_output_is_unaffected_by_grouping() {
     lifecycle::stop(&state, group).await.unwrap();
     let log = state.mock_log.lock().await.clone();
     assert_eq!(
-        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        log.iter()
+            .filter(|line| line.as_str() == "Mock Sonos:stop")
+            .count(),
         0,
         "stopping the group did not disturb it either: {log:?}"
     );
@@ -531,19 +544,27 @@ async fn starting_a_sync_group_takes_over_a_free_running_member() {
     );
     let log = state.mock_log.lock().await.clone();
     assert_eq!(
-        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        log.iter()
+            .filter(|line| line.as_str() == "Mock Sonos:stop")
+            .count(),
         1,
         "the free-running sender stopped exactly once: {log:?}"
     );
     assert_eq!(
-        log.iter().filter(|line| line.as_str() == "Mock Sonos:start").count(),
+        log.iter()
+            .filter(|line| line.as_str() == "Mock Sonos:start")
+            .count(),
         2,
         "free-running start plus the group's scheduled start: {log:?}"
     );
     let views = state.sync.group_views();
     assert!(views[0].playing);
     for member in &views[0].members {
-        assert!(member.playing, "{} plays with the group", member.device_name);
+        assert!(
+            member.playing,
+            "{} plays with the group",
+            member.device_name
+        );
     }
     state.shutdown().await;
 }

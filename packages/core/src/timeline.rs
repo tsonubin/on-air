@@ -147,10 +147,7 @@ impl PcmDelayLine {
     fn take(&mut self, take: usize, out: &mut Vec<Bytes>) {
         let mut remaining = take.min((self.accepted - self.held_start) as usize);
         while remaining > 0 {
-            let head = self
-                .held
-                .front_mut()
-                .expect("held covers the taken bytes");
+            let head = self.held.front_mut().expect("held covers the taken bytes");
             let part = head.split_to(remaining.min(head.len()));
             remaining -= part.len();
             self.held_start += part.len() as u64;

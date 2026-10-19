@@ -233,7 +233,9 @@ pub(super) fn trim_overlay(
 ) -> Rect {
     let mut lines = vec![
         Line::from("Manual latency correction against what you hear, in milliseconds."),
-        Line::from("It is not measured or calibrated, and applies the next time this output plays."),
+        Line::from(
+            "It is not measured or calibrated, and applies the next time this output plays.",
+        ),
     ];
     lines.push(Line::from(match current {
         Some(trim) => format!("Current trim: {trim:+} ms"),
@@ -298,10 +300,12 @@ pub(super) fn group_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Rec
         Line::from("Several speakers play the same audio in sync — not one merged device."),
         Line::from("Each keeps its own volume and latency trim, typed by ear."),
         Line::from("Nothing here is measured or calibrated."),
-        Line::from(match current.and_then(|id| groups.iter().find(|g| g.id == id)) {
-            Some(group) => format!("This output: {name} — in \"{}\"", group.name),
-            None => format!("This output: {name} — not in a group yet"),
-        }),
+        Line::from(
+            match current.and_then(|id| groups.iter().find(|g| g.id == id)) {
+                Some(group) => format!("This output: {name} — in \"{}\"", group.name),
+                None => format!("This output: {name} — not in a group yet"),
+            },
+        ),
     ];
     if groups.is_empty() {
         lines.push(Line::from("No groups yet — press n to name one."));

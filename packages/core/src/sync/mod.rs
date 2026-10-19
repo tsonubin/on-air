@@ -479,10 +479,7 @@ impl SyncController {
                     .get(key)
                     .and_then(|(group, _)| group.delay_frames(key, rate_hz))
                     .unwrap_or_default();
-                let group_id = registry
-                    .membership
-                    .get(key)
-                    .map(|(group, _)| group.id());
+                let group_id = registry.membership.get(key).map(|(group, _)| group.id());
                 OutputSyncStatus {
                     transport: key.transport.clone(),
                     device_id: key.device_id.clone(),

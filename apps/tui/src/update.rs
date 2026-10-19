@@ -96,7 +96,9 @@ pub enum Cmd {
     StartSyncGroup(u64),
     StopSyncGroup(u64),
     /// Stop the members and forget the group.
-    DissolveSyncGroup { group_id: u64 },
+    DissolveSyncGroup {
+        group_id: u64,
+    },
     ActivateInput(String),
     ActivateOutput {
         transport: String,
@@ -723,9 +725,11 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                     LABEL_BUFFER,
                     vec![Cmd::SetCaptureBuffer(model.buffer_choice_ms)],
                 ),
-                KeyCode::Char('q') if model.pending.is_none() => {
-                    pending(model, LABEL_QUALITY, vec![Cmd::SetQuality(model.quality_choice)])
-                }
+                KeyCode::Char('q') if model.pending.is_none() => pending(
+                    model,
+                    LABEL_QUALITY,
+                    vec![Cmd::SetQuality(model.quality_choice)],
+                ),
                 KeyCode::Left | KeyCode::Right if model.pending.is_none() => {
                     model.buffer_choice_ms = next_in_catalog(
                         &[0, 50, 100, 200, 400],
@@ -870,7 +874,8 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
                     vec![]
                 }
                 KeyCode::Char(c)
-                    if (c.is_ascii_digit() || (c == '-' && input.is_empty())) && input.len() < 6 =>
+                    if (c.is_ascii_digit() || (c == '-' && input.is_empty()))
+                        && input.len() < 6 =>
                 {
                     input.push(c);
                     *error = None;
