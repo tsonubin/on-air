@@ -1047,11 +1047,7 @@ fn audio_check_selects_quality_and_q_applies_the_selection() {
     m.snapshot.audio_quality = Some(AudioQualityResponse {
         quality: DspQuality::Balanced,
         recommended: DspQuality::High,
-        profiles: vec![
-            DspQuality::Economy,
-            DspQuality::Balanced,
-            DspQuality::High,
-        ],
+        profiles: vec![DspQuality::Economy, DspQuality::Balanced, DspQuality::High],
     });
     assert!(update(&mut m, key('t')).is_empty());
     assert_eq!(
@@ -1069,10 +1065,19 @@ fn audio_check_selects_quality_and_q_applies_the_selection() {
         update(&mut m, key('q')),
         vec![Cmd::SetQuality(DspQuality::High)]
     );
-    assert_eq!(m.pending, Some(Pending { label: LABEL_QUALITY.into() }));
+    assert_eq!(
+        m.pending,
+        Some(Pending {
+            label: LABEL_QUALITY.into()
+        })
+    );
     update(&mut m, done(LABEL_QUALITY, Ok(())));
     assert_eq!(m.pending, None);
-    assert_eq!(m.modal, Modal::AudioCheck, "the overlay stays for more checks");
+    assert_eq!(
+        m.modal,
+        Modal::AudioCheck,
+        "the overlay stays for more checks"
+    );
 }
 
 #[test]
@@ -1227,8 +1232,14 @@ fn cd_and_monitor_events_unchanged() {
         update(
             &mut m,
             ev(WsEvent::LevelMeter {
-                left: MeterLevel { rms: 0.1, peak: 0.2 },
-                right: MeterLevel { rms: 0.1, peak: 0.2 },
+                left: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
+                right: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
             })
         ),
         vec![]
@@ -1425,8 +1436,14 @@ fn each_channel_meters_independently() {
     update(
         &mut m,
         Msg::Ws(Incoming::Event(WsEvent::LevelMeter {
-            left: MeterLevel { rms: 0.5, peak: 1.0 },
-            right: MeterLevel { rms: 0.0, peak: 0.0 },
+            left: MeterLevel {
+                rms: 0.5,
+                peak: 1.0,
+            },
+            right: MeterLevel {
+                rms: 0.0,
+                peak: 0.0,
+            },
         })),
     );
     assert!((m.meter.left.rms_db + 6.02).abs() < 0.01, "{:?}", m.meter);
@@ -1471,10 +1488,7 @@ fn meter_times_out() {
     for _ in 0..20 {
         update(&mut m, Msg::Frame);
     }
-    assert_eq!(
-        (m.meter.left.rms_db, m.meter.left.peak_db),
-        (-60.0, -60.0)
-    );
+    assert_eq!((m.meter.left.rms_db, m.meter.left.peak_db), (-60.0, -60.0));
     assert_eq!(
         (m.meter.right.rms_db, m.meter.right.peak_db),
         (-60.0, -60.0),
@@ -1557,7 +1571,9 @@ fn d_trims_the_selected_output_and_enter_sends_the_manual_value() {
     );
     assert_eq!(
         m.pending,
-        Some(Pending { label: LABEL_TRIM.into() }),
+        Some(Pending {
+            label: LABEL_TRIM.into()
+        }),
         "the prompt stays open while the write is in flight"
     );
     // Success closes the prompt; the follow-up refresh lands the value.

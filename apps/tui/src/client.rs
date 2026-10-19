@@ -7,8 +7,8 @@ use crate::api::{
     ActiveInputResponse, ActiveOutputResponse, ActiveOutputView, AirPlayModeResponse, ApiErrorBody,
     AudioQualityResponse, BluetoothDeviceInfo, BluetoothListResponse, CdAction, CdStatus,
     DspQuality, EqResponse, InputsResponse, OutputInfo, OutputSyncStatus, OutputVolumeResponse,
-    OutputsResponse, PinResponse, SampleRateResponse, ServiceResponse, StatusResponse, SyncResponse,
-    SyncTrimResponse,
+    OutputsResponse, PinResponse, SampleRateResponse, ServiceResponse, StatusResponse,
+    SyncResponse, SyncTrimResponse,
 };
 use crate::error_copy;
 use crate::model::{MixerControl, Snapshot};
@@ -516,7 +516,9 @@ impl Client {
 
     /// Every output's latency trim and sync state.
     pub async fn sync_status(&self) -> Result<Vec<OutputSyncStatus>, ClientError> {
-        self.get::<SyncResponse>("/api/sync").await.map(|r| r.outputs)
+        self.get::<SyncResponse>("/api/sync")
+            .await
+            .map(|r| r.outputs)
     }
 
     /// One output's manual latency trim in milliseconds.

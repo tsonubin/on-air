@@ -233,7 +233,9 @@ pub(super) fn trim_overlay(
 ) -> Rect {
     let mut lines = vec![
         Line::from("Manual latency correction against what you hear, in milliseconds."),
-        Line::from("It is not measured or calibrated, and applies the next time this output plays."),
+        Line::from(
+            "It is not measured or calibrated, and applies the next time this output plays.",
+        ),
     ];
     lines.push(Line::from(match current {
         Some(trim) => format!("Current trim: {trim:+} ms"),
