@@ -55,8 +55,12 @@ mod pulse {
     static SAVED_MUTE_STATES: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
     static SAVED_DEFAULT: Mutex<Option<String>> = Mutex::new(None);
 
+    /// Bounded like `listed_sinks` below and the `pactl` helper in
+    /// `sender/local.rs`: these run on the output activation path, so a
+    /// `pactl` that wedges would otherwise stall it.
     fn pactl(args: &[&str]) -> bool {
-        Command::new("pactl")
+        Command::new("timeout")
+            .args(["2", "pactl"])
             .args(args)
             .status()
             .map(|s| s.success())
@@ -75,8 +79,8 @@ mod pulse {
     }
 
     fn current_default_sink() -> Option<String> {
-        let output = Command::new("pactl")
-            .args(["get-default-sink"])
+        let output = Command::new("timeout")
+            .args(["2", "pactl", "get-default-sink"])
             .output()
             .ok()?;
         if !output.status.success() {
@@ -91,8 +95,9 @@ mod pulse {
     }
 
     fn sink_is_muted(name: &str) -> Option<bool> {
-        let output = Command::new("pactl")
-            .args(["get-sink-mute", name])
+        let output = Command::new("timeout")
+            .args(["2", "pactl", "get-sink-mute"])
+            .arg(name)
             .output()
             .ok()?;
         if !output.status.success() {
