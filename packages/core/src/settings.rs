@@ -75,9 +75,10 @@ impl SavedSettings {
             self.output_sample_rate_hz = crate::state::TARGET_SAMPLE_RATE_DEFAULT_HZ;
         }
         self.sync_trims.retain_mut(|trim| {
-            trim.trim_ms = trim
-                .trim_ms
-                .clamp(-crate::sync::latency::TRIM_LIMIT_MS, crate::sync::latency::TRIM_LIMIT_MS);
+            trim.trim_ms = trim.trim_ms.clamp(
+                -crate::sync::latency::TRIM_LIMIT_MS,
+                crate::sync::latency::TRIM_LIMIT_MS,
+            );
             !trim.transport.trim().is_empty() && !trim.device_id.trim().is_empty()
         });
         self

@@ -142,7 +142,12 @@ impl PcmOutput for SystemPcmOutput {
             BluetoothEndpoint::Pulse(name) => {
                 let sample_rate_hz = rates::snap_rate(preferred_hz, BLUETOOTH_RATES_HZ);
                 Ok(OpenedPcmSink {
-                    sink: Arc::new(PacatPcmSink::new(name, pipeline_hz, sample_rate_hz, steered)?),
+                    sink: Arc::new(PacatPcmSink::new(
+                        name,
+                        pipeline_hz,
+                        sample_rate_hz,
+                        steered,
+                    )?),
                     format: OutputFormat {
                         sample_rate_hz,
                         supported_hz: BLUETOOTH_RATES_HZ.to_vec(),
@@ -234,48 +239,93 @@ impl CpalPcmSink {
             let (bridge, control) = RateBridge::new_steered(pipeline_hz, sample_rate_hz, channels);
             (bridge, Some(control))
         } else {
-            (
-                RateBridge::new(pipeline_hz, sample_rate_hz, channels),
-                None,
-            )
+            (RateBridge::new(pipeline_hz, sample_rate_hz, channels), None)
         };
         let stream = match sample_format {
-            SampleFormat::I8 => {
-                build_output_stream::<i8>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I16 => {
-                build_output_stream::<i16>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I24 => {
-                build_output_stream::<I24>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I32 => {
-                build_output_stream::<i32>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::I64 => {
-                build_output_stream::<i64>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U8 => {
-                build_output_stream::<u8>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U16 => {
-                build_output_stream::<u16>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U24 => {
-                build_output_stream::<U24>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U32 => {
-                build_output_stream::<u32>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::U64 => {
-                build_output_stream::<u64>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::F32 => {
-                build_output_stream::<f32>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
-            SampleFormat::F64 => {
-                build_output_stream::<f64>(&device, config, consumer, volume.clone(), delivered.clone())?
-            }
+            SampleFormat::I8 => build_output_stream::<i8>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I16 => build_output_stream::<i16>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I24 => build_output_stream::<I24>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I32 => build_output_stream::<i32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::I64 => build_output_stream::<i64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U8 => build_output_stream::<u8>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U16 => build_output_stream::<u16>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U24 => build_output_stream::<U24>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U32 => build_output_stream::<u32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::U64 => build_output_stream::<u64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::F32 => build_output_stream::<f32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
+            SampleFormat::F64 => build_output_stream::<f64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                delivered.clone(),
+            )?,
             other => {
                 return Err(SenderError::internal(format!(
                     "unsupported output sample format: {other:?}"
@@ -531,7 +581,11 @@ mod tests {
         producer.push_slice(&[-0.2]);
         fill_output(&mut data, &mut consumer, 2, 1.0, &delivered);
         assert_eq!(data, [0.2, -0.2, 0.0, 0.0], "left and right swapped");
-        assert_eq!(delivered.load(Ordering::Relaxed), 2, "played frames are counted");
+        assert_eq!(
+            delivered.load(Ordering::Relaxed),
+            2,
+            "played frames are counted"
+        );
     }
 
     #[test]

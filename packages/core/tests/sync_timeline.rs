@@ -290,10 +290,7 @@ async fn two_outputs_in_a_sync_group_start_at_the_same_epoch() {
         tokio::spawn(async move {
             session
                 .activate_scheduled(
-                    Box::new(EpochSender {
-                        name: "A",
-                        log,
-                    }),
+                    Box::new(EpochSender { name: "A", log }),
                     Some(kitchen.clone()),
                     None,
                     plan,
@@ -306,10 +303,7 @@ async fn two_outputs_in_a_sync_group_start_at_the_same_epoch() {
         tokio::spawn(async move {
             session
                 .activate_scheduled(
-                    Box::new(EpochSender {
-                        name: "B",
-                        log,
-                    }),
+                    Box::new(EpochSender { name: "B", log }),
                     Some(patio.clone()),
                     None,
                     plan,

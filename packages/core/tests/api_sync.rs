@@ -63,8 +63,8 @@ async fn sync_trim_validates_range_and_transport() {
 
 #[tokio::test]
 async fn a_sync_group_member_reports_its_delay_line_state_and_drift() {
-    use on_air_core::sync::{DriftReport, OutputKey};
     use on_air_api::SyncState;
+    use on_air_core::sync::{DriftReport, OutputKey};
 
     let (app, state) = mock_app().await;
     let group = state.sync.create_group();

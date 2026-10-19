@@ -78,14 +78,15 @@ impl SyncController {
 
     /// Join `output` to `group` at its effective latency (documented default
     /// plus the user's trim). The previous group, if any, is left behind.
-    pub fn join(self: &Arc<Self>, group: &Arc<SyncGroup>, output: &on_air_api::ActiveOutput) -> MemberId {
+    pub fn join(
+        self: &Arc<Self>,
+        group: &Arc<SyncGroup>,
+        output: &on_air_api::ActiveOutput,
+    ) -> MemberId {
         let key = OutputKey::new(&output.transport, &output.device_id);
         let latency = {
             let mut registry = self.registry.lock();
-            let row = registry
-                .outputs
-                .entry(key.clone())
-                .or_default();
+            let row = registry.outputs.entry(key.clone()).or_default();
             row.name = output.device_name.clone();
             let trim_ms = row.trim_ms;
             latency::effective_latency(&output.transport, trim_ms)
@@ -130,12 +131,7 @@ impl SyncController {
     /// Set one output's latency trim. The change applies to that output's
     /// feed the next time it opens (the next activation or stream); a live
     /// delay line is not resized underneath a playing speaker.
-    pub fn set_trim_ms(
-        &self,
-        key: &OutputKey,
-        transport: &str,
-        trim_ms: i32,
-    ) -> LatencyEstimate {
+    pub fn set_trim_ms(&self, key: &OutputKey, transport: &str, trim_ms: i32) -> LatencyEstimate {
         let estimate = latency::effective_latency(transport, trim_ms);
         let mut registry = self.registry.lock();
         let row = registry.outputs.entry(key.clone()).or_default();
@@ -216,15 +212,19 @@ impl SyncController {
                 let row = registry.outputs.get(key);
                 let live_rate = live
                     .iter()
-                    .find(|(output, _)| output.transport == key.transport && output.device_id == key.device_id)
+                    .find(|(output, _)| {
+                        output.transport == key.transport && output.device_id == key.device_id
+                    })
                     .map(|(_, rate)| *rate);
                 let name = row
                     .map(|row| row.name.clone())
                     .or_else(|| {
-                        live.iter().find(|(output, _)| {
-                            output.transport == key.transport && output.device_id == key.device_id
-                        })
-                        .map(|(output, _)| output.device_name.clone())
+                        live.iter()
+                            .find(|(output, _)| {
+                                output.transport == key.transport
+                                    && output.device_id == key.device_id
+                            })
+                            .map(|(output, _)| output.device_name.clone())
                     })
                     .unwrap_or_default();
                 let trim_ms = row.map(|row| row.trim_ms).unwrap_or_default();

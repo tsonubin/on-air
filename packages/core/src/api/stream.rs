@@ -226,10 +226,7 @@ pub async fn stream_audio(
                 served_frames: 0,
                 next_report: Instant::now(),
             };
-            (
-                RateStage::Sync { bridge, delay },
-                Some(observer),
-            )
+            (RateStage::Sync { bridge, delay }, Some(observer))
         }
         None if pipeline_hz == output_hz => (RateStage::Passthrough, None),
         None => (

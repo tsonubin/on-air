@@ -354,7 +354,11 @@ impl AudioSender for BluetoothSender {
             }
         }));
         let pump_stop = live.stop.clone();
-        let delay_frames = config.sync.as_ref().map(SyncFeed::delay_frames).unwrap_or(0);
+        let delay_frames = config
+            .sync
+            .as_ref()
+            .map(SyncFeed::delay_frames)
+            .unwrap_or(0);
         live.pump = Some(tokio::spawn(async move {
             // The sync-group member's delay line: a fast transport holds the
             // timeline back so it waits for the slowest member. Steady state

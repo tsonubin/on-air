@@ -257,9 +257,12 @@ impl SteerableResampler {
             if self.pending.len() - consumed < need {
                 break;
             }
-            let in_adapter =
-                InterleavedSlice::new(&self.pending[consumed..consumed + need], self.channels, frames)
-                    .expect("valid input adapter shape");
+            let in_adapter = InterleavedSlice::new(
+                &self.pending[consumed..consumed + need],
+                self.channels,
+                frames,
+            )
+            .expect("valid input adapter shape");
             let out_capacity = self.inner.output_frames_max();
             let mut out_adapter =
                 InterleavedSlice::new_mut(&mut self.output_data, self.channels, out_capacity)
