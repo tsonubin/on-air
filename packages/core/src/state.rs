@@ -289,7 +289,9 @@ impl CoreState {
         let cd = CdDeck::new();
         cd.add_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
-        let dsp_quality = Arc::new(StdMutex::new(saved_settings.dsp_quality.unwrap_or_default()));
+        let dsp_quality = Arc::new(StdMutex::new(
+            saved_settings.dsp_quality.unwrap_or_default(),
+        ));
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
         let output_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz));
         let output = OutputSession::new(ws_tx.clone(), output_sample_rate_hz.clone());
@@ -386,12 +388,11 @@ impl CoreState {
     /// E2E / CI: a mock core that also persists settings to `path`, so a
     /// test can restart it and assert what was saved survived.
     pub async fn new_mock_persistent(path: impl Into<PathBuf>) -> Self {
-        let mut state =
-            Self::new_persistent(path).with_keep_awake(KeepAwake::with_spawner(
-                None,
-                Box::new(crate::keep_awake::NoopSpawner),
-                true,
-            ));
+        let mut state = Self::new_persistent(path).with_keep_awake(KeepAwake::with_spawner(
+            None,
+            Box::new(crate::keep_awake::NoopSpawner),
+            true,
+        ));
         state.set_mock(true);
         state.seed_mock_hardware().await;
         state
@@ -439,10 +440,7 @@ impl CoreState {
     /// Hardware-free mode: senders are fakes, inputs come from the mock
     /// list, and "This computer" outputs come from
     /// [`Self::mock_local_outputs`] instead of probing Pulse.
-    pub fn set_mock_local_outputs(
-        &self,
-        outputs: Vec<crate::sender::local::LocalOutput>,
-    ) {
+    pub fn set_mock_local_outputs(&self, outputs: Vec<crate::sender::local::LocalOutput>) {
         *self.mock_local_outputs.lock() = outputs;
     }
 
@@ -899,8 +897,7 @@ impl CoreState {
         self.sync.set_calibration(measurement);
         self.update_saved_settings(|saved| {
             match saved.sync_calibrations.iter_mut().find(|saved| {
-                saved.transport == measurement.transport
-                    && saved.device_id == measurement.device_id
+                saved.transport == measurement.transport && saved.device_id == measurement.device_id
             }) {
                 Some(existing) => *existing = measurement.clone(),
                 None => saved.sync_calibrations.push(measurement.clone()),

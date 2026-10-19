@@ -22,8 +22,8 @@ use axum::http::StatusCode;
 use axum::Json;
 
 pub use on_air_api::{
-    CreateSyncGroupRequest, SetSyncTrimRequest, SyncGroupMemberRequest, SyncGroupView, SyncResponse,
-    SyncTrimResponse,
+    CreateSyncGroupRequest, SetSyncTrimRequest, SyncGroupMemberRequest, SyncGroupView,
+    SyncResponse, SyncTrimResponse,
 };
 
 /// `GET /api/sync`: every output's latency model, delay line, measured

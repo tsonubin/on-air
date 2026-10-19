@@ -201,7 +201,9 @@ async fn a_sync_group_members_stream_is_served_from_its_member_session() {
     on_air_core::sync::lifecycle::add_member(&state, group, "sonos", "uuid:mock-sonos")
         .await
         .unwrap();
-    on_air_core::sync::lifecycle::start(&state, group).await.unwrap();
+    on_air_core::sync::lifecycle::start(&state, group)
+        .await
+        .unwrap();
     let key = on_air_core::sync::OutputKey::new("sonos", "uuid:mock-sonos");
     let nonce = state
         .sync
@@ -219,10 +221,7 @@ async fn a_sync_group_members_stream_is_served_from_its_member_session() {
     .await
     .unwrap();
     assert_eq!(response.status(), axum::http::StatusCode::OK);
-    assert_eq!(
-        response.headers().get("content-type").unwrap(),
-        "audio/wav"
-    );
+    assert_eq!(response.headers().get("content-type").unwrap(), "audio/wav");
 }
 
 #[tokio::test]

@@ -118,13 +118,19 @@ async fn a_measured_latency_replaces_the_default_persists_and_is_used() {
         .find(|output| output["device_id"] == "uuid:mock-sonos")
         .expect("the measured output is reported");
     assert_eq!(sonos["calibrated"], true, "a measurement flips calibrated");
-    assert_eq!(sonos["default_latency_ms"], 1_000, "the guess is still shown");
+    assert_eq!(
+        sonos["default_latency_ms"], 1_000,
+        "the guess is still shown"
+    );
     let effective = sonos["effective_latency_ms"].as_f64().unwrap();
     assert!(
         (effective - latency_us / 1000.0).abs() <= 1.0,
         "the measurement, not the 1000 ms default, is used: {effective}"
     );
-    assert_eq!(sonos["calibration"]["latency_us"], measurement["latency_us"]);
+    assert_eq!(
+        sonos["calibration"]["latency_us"],
+        measurement["latency_us"]
+    );
 
     // And it is used by the sync machinery: the Sonos member's delay line
     // is sized from the measurement, not from the 1000 ms placeholder. A
@@ -164,7 +170,10 @@ async fn a_measured_latency_replaces_the_default_persists_and_is_used() {
         .iter()
         .find(|o| o["device_id"] == "uuid:mock-sonos")
         .unwrap();
-    assert_eq!(slow["delay_frames"], 0, "the slowest member waits for nobody");
+    assert_eq!(
+        slow["delay_frames"], 0,
+        "the slowest member waits for nobody"
+    );
     // Nothing is live, so the sync status sizes delay lines at its fallback
     // rate of 48 kHz.
     let rate = 48_000.0;
@@ -190,10 +199,12 @@ async fn a_measured_latency_replaces_the_default_persists_and_is_used() {
         .iter()
         .find(|output| output["device_id"] == "uuid:mock-sonos")
         .unwrap();
-    assert_eq!(sonos["calibrated"], true, "the measurement survived a restart");
     assert_eq!(
-        sonos["calibration"]["latency_us"],
-        measurement["latency_us"],
+        sonos["calibrated"], true,
+        "the measurement survived a restart"
+    );
+    assert_eq!(
+        sonos["calibration"]["latency_us"], measurement["latency_us"],
         "exactly the figure that was measured"
     );
     let _ = std::fs::remove_file(path);

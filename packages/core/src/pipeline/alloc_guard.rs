@@ -79,7 +79,11 @@ fn chunk_allocations(
         .collect();
     for _ in 0..total {
         let pushed = push_frames(&mut producer, &chunk, PIPELINE_CHANNELS);
-        assert_eq!(pushed, CHUNK_FRAMES * PIPELINE_CHANNELS, "ring fits all chunks");
+        assert_eq!(
+            pushed,
+            CHUNK_FRAMES * PIPELINE_CHANNELS,
+            "ring fits all chunks"
+        );
     }
 
     let (audio_tx, audio_rx) = broadcast::channel(8);
@@ -157,7 +161,14 @@ fn assert_steady(marks: &[u64], expected: u64, what: &str) {
 #[test]
 fn the_processing_thread_allocates_only_the_payload_per_chunk() {
     for quality in DspQuality::ALL {
-        let marks = chunk_allocations(44_100, 48_000, [3.0, -2.0, 0.0, 4.5, -1.0], quality, true, true);
+        let marks = chunk_allocations(
+            44_100,
+            48_000,
+            [3.0, -2.0, 0.0, 4.5, -1.0],
+            quality,
+            true,
+            true,
+        );
         assert_steady(
             &marks,
             PAYLOAD_ALLOCATIONS_PER_CHUNK,
@@ -173,7 +184,14 @@ fn the_processing_thread_allocates_nothing_per_chunk_without_a_receiver() {
     assert_steady(&marks, 0, "chunk loop without receivers");
     // A meter-only subscriber runs the EQ and the meter but hands off no
     // payload: still zero.
-    let marks = chunk_allocations(44_100, 48_000, [3.0, -2.0, 0.0, 4.5, -1.0], DspQuality::Economy, false, true);
+    let marks = chunk_allocations(
+        44_100,
+        48_000,
+        [3.0, -2.0, 0.0, 4.5, -1.0],
+        DspQuality::Economy,
+        false,
+        true,
+    );
     assert_steady(&marks, 0, "chunk loop with a meter-only receiver");
 }
 
@@ -226,17 +244,15 @@ fn the_eq_allocates_nothing_per_chunk() {
 #[test]
 fn the_meter_allocates_nothing_per_chunk() {
     // The level event's broadcast handoff: the meter's per-chunk output.
-    let event = || {
-        WsEvent::LevelMeter {
-            left: MeterLevel {
-                rms: 0.1,
-                peak: 0.2,
-            },
-            right: MeterLevel {
-                rms: 0.1,
-                peak: 0.2,
-            },
-        }
+    let event = || WsEvent::LevelMeter {
+        left: MeterLevel {
+            rms: 0.1,
+            peak: 0.2,
+        },
+        right: MeterLevel {
+            rms: 0.1,
+            peak: 0.2,
+        },
     };
     let (ws_tx, _ws_rx) = broadcast::channel(8);
     for _ in 0..64 {

@@ -309,13 +309,8 @@ mod tests {
             for delay_s in [0.050, 0.150, 2.0, 0.150_253, 2.000_041] {
                 let capture = delayed_probe(&spec, rate, delay_s, delay_s + 1.0);
                 let reference = spec.render(rate);
-                let found = detect_delay(
-                    &reference,
-                    &capture,
-                    rate,
-                    Duration::from_millis(2_500),
-                )
-                .unwrap_or_else(|e| panic!("{rate} Hz / {delay_s} s: {e}"));
+                let found = detect_delay(&reference, &capture, rate, Duration::from_millis(2_500))
+                    .unwrap_or_else(|e| panic!("{rate} Hz / {delay_s} s: {e}"));
                 let error_us = (found.delay_us as f64 - expected_us(delay_s)).abs();
                 worst_us = worst_us.max(error_us);
                 assert!(
@@ -388,7 +383,10 @@ mod tests {
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
             let want = expected_us(delay_s + group_delay_s);
             let error_us = (found.delay_us as f64 - want).abs();
-            println!("{name}: error {error_us} µs (prominence {:.1})", found.prominence);
+            println!(
+                "{name}: error {error_us} µs (prominence {:.1})",
+                found.prominence
+            );
             assert!(error_us < 1_000.0, "{name}: error {error_us} µs");
             assert!(
                 found.prominence > 12.0 && found.correlation > 0.2,

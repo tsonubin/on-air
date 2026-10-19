@@ -157,7 +157,9 @@ pub fn spawn_first_run_watcher(state: CoreState) -> tokio::task::JoinHandle<()> 
             );
             match action {
                 TuningAction::Never("mock mode has no audio hardware to tune") => {
-                    eprintln!("first-run audio tuning skipped: mock mode has no audio hardware to tune");
+                    eprintln!(
+                        "first-run audio tuning skipped: mock mode has no audio hardware to tune"
+                    );
                     return;
                 }
                 TuningAction::Never(_) => return,
@@ -221,10 +223,7 @@ async fn run_and_apply(state: &CoreState) -> bool {
             eprintln!(
                 "first-run audio tuning complete: capture buffer {} ms, DSP quality {:?} \
                  (applied buffer: {}, applied quality: {})",
-                report.recommended_buffer_ms,
-                recommended_quality,
-                applied.buffer,
-                applied.quality
+                report.recommended_buffer_ms, recommended_quality, applied.buffer, applied.quality
             );
             true
         }
@@ -249,10 +248,7 @@ mod tests {
 
     #[test]
     fn first_use_triggers_tuning_once_capture_is_live() {
-        assert_eq!(
-            decide(&pending(), true, false, true),
-            TuningAction::Run
-        );
+        assert_eq!(decide(&pending(), true, false, true), TuningAction::Run);
     }
 
     #[test]

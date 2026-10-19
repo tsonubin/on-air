@@ -72,10 +72,7 @@ pub async fn benchmark(
     Ok(Json(outcome.report))
 }
 
-pub async fn tuning_status(
-    Paired: Paired,
-    State(state): State<CoreState>,
-) -> Json<TuningStatus> {
+pub async fn tuning_status(Paired: Paired, State(state): State<CoreState>) -> Json<TuningStatus> {
     let saved = state.saved_settings();
     Json(TuningStatus {
         tuned: saved.recommended_dsp_quality.is_some(),
@@ -121,13 +118,13 @@ pub async fn set_buffer(
             "capture buffer must be default (0), 50, 100, 200 or 400 ms",
         ));
     }
-    tokio::spawn(async move { apply_error_result(state.apply_capture_buffer(request.buffer_ms).await) })
-        .await
-        .map_err(|_| ApiError::internal("capture buffer change stopped unexpectedly"))?
+    tokio::spawn(
+        async move { apply_error_result(state.apply_capture_buffer(request.buffer_ms).await) },
+    )
+    .await
+    .map_err(|_| ApiError::internal("capture buffer change stopped unexpectedly"))?
 }
 
 fn apply_error_result(result: Result<(), ApplyError>) -> Result<StatusCode, ApiError> {
-    result
-        .map(|()| StatusCode::NO_CONTENT)
-        .map_err(apply_error)
+    result.map(|()| StatusCode::NO_CONTENT).map_err(apply_error)
 }

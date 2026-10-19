@@ -120,7 +120,9 @@ mod tests {
         // (`detect::PROBE_BANDWIDTH_HZ`); the two must agree.
         assert_eq!(spec.bandwidth_hz(), 5_700.0);
         assert!(
-            rendered.iter().all(|s| s.is_finite() && s.abs() <= spec.amplitude),
+            rendered
+                .iter()
+                .all(|s| s.is_finite() && s.abs() <= spec.amplitude),
             "the probe never exceeds its stated peak"
         );
         // The rendered energy sits in the sweep band: a tone test at the

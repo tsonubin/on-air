@@ -219,7 +219,11 @@ impl TpdfDither {
     /// different seeds; see [`TpdfDither::for_stream`].
     pub const fn new(seed: u64) -> Self {
         TpdfDither {
-            state: if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed },
+            state: if seed == 0 {
+                0x9E37_79B9_7F4A_7C15
+            } else {
+                seed
+            },
         }
     }
 
@@ -423,8 +427,7 @@ mod tests {
         const N: usize = 16_384;
         let wanted = vec![0.5 * LSB; N];
         let decoded = l16_le_to_f32(&f32_to_l16_le(&wanted, &mut dither));
-        let mean_error =
-            decoded.iter().zip(&wanted).map(|(d, s)| d - s).sum::<f32>() / N as f32;
+        let mean_error = decoded.iter().zip(&wanted).map(|(d, s)| d - s).sum::<f32>() / N as f32;
         // A truncating converter lands on -0.5 LSB here, which is 2.5x this
         // bound. The dithered mean sits within a few thousandths of an LSB.
         assert!(

@@ -189,11 +189,7 @@ mod tests {
 
     #[test]
     fn one_good_run_among_bad_ones_is_low_confidence_and_must_not_be_applied() {
-        let runs = [
-            run(150_250, 400.0),
-            run(71_000, 4.0),
-            run(233_000, 5.0),
-        ];
+        let runs = [run(150_250, 400.0), run(71_000, 4.0), run(233_000, 5.0)];
         let m = aggregate("bluetooth", "bt-1", &runs, 48_000, 0).unwrap();
         assert_eq!(m.confidence, CalibrationConfidence::Low);
         assert_eq!(m.runs, 1);
@@ -215,7 +211,11 @@ mod tests {
 
     #[test]
     fn implausible_negative_runs_are_rejected() {
-        let runs = [run(-25_000, 400.0), run(-24_000, 400.0), run(150_250, 400.0)];
+        let runs = [
+            run(-25_000, 400.0),
+            run(-24_000, 400.0),
+            run(150_250, 400.0),
+        ];
         let m = aggregate("bluetooth", "bt-1", &runs, 48_000, 0).unwrap();
         assert_eq!(m.runs, 1);
         assert_eq!(m.latency_us, 150_250);

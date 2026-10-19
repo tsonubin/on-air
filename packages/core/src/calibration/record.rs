@@ -165,7 +165,10 @@ impl Recorder {
 
         let (pulse_running, pulse_source) = match sources::query() {
             Some(sources) => (true, sources.resolve(capture_input)),
-            None => (false, capture::is_pulse_monitor_name(capture_input).then(|| capture_input.to_string())),
+            None => (
+                false,
+                capture::is_pulse_monitor_name(capture_input).then(|| capture_input.to_string()),
+            ),
         };
         if let Some(source) = pulse_source {
             let (handle, rate_hz) = capture::start_pulse_monitor_stamped(

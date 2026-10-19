@@ -62,11 +62,7 @@ pub const TRIM_LIMIT_MS: i32 = 10_000;
 /// The effective latency in microseconds: the measured value when one has
 /// been applied, else the documented default, plus the user's trim, never
 /// negative.
-pub fn effective_latency_us(
-    transport: &str,
-    measured_us: Option<u64>,
-    trim_ms: i32,
-) -> u64 {
+pub fn effective_latency_us(transport: &str, measured_us: Option<u64>, trim_ms: i32) -> u64 {
     let base = measured_us.unwrap_or(u64::from(default_latency_ms(transport)) * 1_000);
     let trimmed = base as i64 + i64::from(trim_ms) * 1_000;
     trimmed.clamp(0, i64::from(u32::MAX) * 1_000) as u64

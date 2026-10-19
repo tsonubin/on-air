@@ -63,8 +63,8 @@ async fn sync_trim_validates_range_and_transport() {
 
 #[tokio::test]
 async fn a_sync_group_member_reports_its_delay_line_state_and_drift() {
-    use on_air_core::sync::{DriftReport, OutputKey};
     use on_air_api::SyncState;
+    use on_air_core::sync::{DriftReport, OutputKey};
 
     let (app, state) = mock_app().await;
     let group = state.sync.create_group("Living room");
@@ -231,7 +231,11 @@ async fn an_output_cannot_be_in_two_groups_at_once() {
         post_json("/api/sync/groups", r#"{"name":"Downstairs"}"#),
     )
     .await;
-    let (_, second) = send(app.clone(), post_json("/api/sync/groups", r#"{"name":"Party"}"#)).await;
+    let (_, second) = send(
+        app.clone(),
+        post_json("/api/sync/groups", r#"{"name":"Party"}"#),
+    )
+    .await;
     let first_id = first["id"].as_u64().unwrap();
     let second_id = second["id"].as_u64().unwrap();
 
@@ -264,10 +268,7 @@ async fn an_output_cannot_be_in_two_groups_at_once() {
     // The refused join changed nothing.
     let (_, body) = send(app, get("/api/sync")).await;
     let groups = body["groups"].as_array().unwrap();
-    let in_first = groups
-        .iter()
-        .find(|group| group["id"] == first_id)
-        .unwrap()["members"]
+    let in_first = groups.iter().find(|group| group["id"] == first_id).unwrap()["members"]
         .as_array()
         .unwrap()
         .len();
@@ -414,7 +415,9 @@ async fn leaving_a_group_stops_that_member_cleanly_and_the_others_keep_playing()
         "the leaver stopped exactly once: {log:?}"
     );
     assert_eq!(
-        log.iter().filter(|line| line.as_str() == "Mock Sonos:stop").count(),
+        log.iter()
+            .filter(|line| line.as_str() == "Mock Sonos:stop")
+            .count(),
         0,
         "the other member never stopped: {log:?}"
     );
@@ -427,7 +430,11 @@ async fn leaving_a_group_stops_that_member_cleanly_and_the_others_keep_playing()
 async fn sync_group_requests_validate_and_refuse_conflicts() {
     let (app, state) = mock_app().await;
 
-    let (status, error) = send(app.clone(), post_json("/api/sync/groups", r#"{"name":"  "}"#)).await;
+    let (status, error) = send(
+        app.clone(),
+        post_json("/api/sync/groups", r#"{"name":"  "}"#),
+    )
+    .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(error["code"], "invalid_request");
 

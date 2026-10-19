@@ -44,11 +44,7 @@ pub fn pick_capture_config(
 /// Reads interleaved f32 LE stereo into `producer` until EOF, an error or
 /// `stop`. Pipe reads need not end on a frame boundary, so up to one frame
 /// less a byte is carried into the next read.
-pub fn pump_f32le_stereo(
-    reader: impl Read,
-    producer: &mut HeapProd<f32>,
-    stop: &AtomicBool,
-) {
+pub fn pump_f32le_stereo(reader: impl Read, producer: &mut HeapProd<f32>, stop: &AtomicBool) {
     pump_f32le_stereo_with(reader, stop, |samples, _at| {
         push_frames(producer, samples, PIPELINE_CHANNELS);
     });
@@ -232,8 +228,7 @@ mod pulse {
         let (child, stdout, rate) = spawn_parec(source, preferred_rate_hz, buffer_ms)?;
         let stop = Arc::new(AtomicBool::new(false));
         let stop_thread = stop.clone();
-        let reader =
-            std::thread::spawn(move || pump_f32le_stereo_with(stdout, &stop_thread, sink));
+        let reader = std::thread::spawn(move || pump_f32le_stereo_with(stdout, &stop_thread, sink));
         Ok((
             PulseMonitorCapture {
                 stop,
