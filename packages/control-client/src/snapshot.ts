@@ -211,7 +211,7 @@ export function mergeResults(
   const next = { ...previous };
   for (const slice of Object.keys(results) as Slice[]) {
     const result = results[slice];
-    if (!result || result.status !== "fulfilled" || isStale(slice)) continue;
+    if (result?.status !== "fulfilled" || isStale(slice)) continue;
     if (slice === "activeInput") {
       next.activeInput = (result.value as ActiveInputResponse).name ?? null;
     } else {

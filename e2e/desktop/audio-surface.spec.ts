@@ -1,8 +1,8 @@
-import type { ApiErrorBody, TuningStatus, Transport, WsEvent } from "@on-air/api-types";
-import { expect, test } from "@playwright/test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { ApiErrorBody, Transport, TuningStatus, WsEvent } from "@on-air/api-types";
+import { expect, test } from "@playwright/test";
 import {
   activateInput,
   activateOutput,
@@ -98,15 +98,17 @@ async function readWavHeader(base: string): Promise<{
   expect(response.status).toBe(200);
   const reader = response.body?.getReader();
   expect(reader).toBeTruthy();
+  if (!reader) throw new Error("expected a readable body");
   const chunks: Uint8Array[] = [];
   let size = 0;
   while (size < 44) {
-    const { value } = await reader!.read();
+    const { value } = await reader.read();
     expect(value).toBeTruthy();
-    chunks.push(value!);
-    size += value!.length;
+    if (!value) break;
+    chunks.push(value);
+    size += value.length;
   }
-  await reader!.cancel();
+  await reader.cancel();
   const buffered = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
@@ -124,7 +126,9 @@ async function readWavHeader(base: string): Promise<{
   };
 }
 
-test("sync: a trim is per output, manual, and clamped at zero latency", { tag: "@api" }, async () => {
+test("sync: a trim is per output, manual, and clamped at zero latency", {
+  tag: "@api",
+}, async () => {
   const { trimmed, row } = await trimFirstOutput(API, "sonos", 250);
   expect(trimmed).toEqual({ trim_ms: 250, effective_latency_ms: 1250 });
   expect(row.trim_ms).toBe(250);
@@ -188,10 +192,7 @@ test("sync groups: one start brings every member to one epoch", { tag: "@api" },
       ["sonos", true],
       ["airplay", true],
     ]);
-    expect(group?.members.map((m) => m.device_name)).toEqual([
-      "Mock Sonos",
-      "Living Room AirPlay",
-    ]);
+    expect(group?.members.map((m) => m.device_name)).toEqual(["Mock Sonos", "Living Room AirPlay"]);
 
     const sync = await getSync(API);
     const rows = sync.outputs.filter((row) => row.group_id === groupId);
@@ -212,7 +213,9 @@ test("sync groups: one start brings every member to one epoch", { tag: "@api" },
 
     // Every lifecycle change tells clients to re-read the one read model.
     await expect
-      .poll(() => events.some((event) => event.type === "SyncGroupChanged" && event.group_id === groupId))
+      .poll(() =>
+        events.some((event) => event.type === "SyncGroupChanged" && event.group_id === groupId),
+      )
       .toBe(true);
 
     // Stopping keeps the group configured — it is simply no longer playing.
@@ -260,7 +263,9 @@ test("sync groups: an output already in another group is refused", { tag: "@api"
   }
 });
 
-test("sync groups: leaving stops just that member; the others keep playing", { tag: "@api" }, async () => {
+test("sync groups: leaving stops just that member; the others keep playing", {
+  tag: "@api",
+}, async () => {
   const sonos = await firstOutputId(API, "sonos");
   const { groupId } = await playSyncGroup(API, "Downstairs");
   try {
@@ -280,7 +285,9 @@ test("sync groups: leaving stops just that member; the others keep playing", { t
   }
 });
 
-test("sync groups: the lifecycle refuses wrong names, members and starts", { tag: "@api" }, async () => {
+test("sync groups: the lifecycle refuses wrong names, members and starts", {
+  tag: "@api",
+}, async () => {
   const sonos = await firstOutputId(API, "sonos");
   const noName = await expectRefusal(createSyncGroup(API, "   "), 400, "invalid_request");
   expect(noName.message).toContain("a group name must be 1 to 64 characters");
@@ -313,7 +320,9 @@ test("sync groups: the lifecycle refuses wrong names, members and starts", { tag
   await expectRefusal(dissolveSyncGroup(API, group.id), 404, "not_found");
 });
 
-test("quality: a profile choice wins; an unknown profile changes nothing", { tag: "@api" }, async () => {
+test("quality: a profile choice wins; an unknown profile changes nothing", {
+  tag: "@api",
+}, async () => {
   const before = await getAudioQuality(API);
   expect(before.profiles).toEqual(["economy", "balanced", "high"]);
 
@@ -380,7 +389,9 @@ test("tuning: a check tunes the machine exactly once", { tag: "@api" }, async ()
   }
 });
 
-test("error envelope: unknown routes, wrong methods and missing outputs", { tag: "@api" }, async () => {
+test("error envelope: unknown routes, wrong methods and missing outputs", {
+  tag: "@api",
+}, async () => {
   const unknownRoute = await fetch(`${API}/api/nope`);
   const body = await expectEnvelope(unknownRoute, 404, "not_found");
   expect(body.error).toBe("no such route");
@@ -404,7 +415,9 @@ test("error envelope: unknown routes, wrong methods and missing outputs", { tag:
   expect(missing.message).toContain("output device not found");
 });
 
-test("channel mode: stereo on a known-mono device is refused with an explanation", { tag: "@api" }, async () => {
+test("channel mode: stereo on a known-mono device is refused with an explanation", {
+  tag: "@api",
+}, async () => {
   // "This computer" outputs report their channel count honestly, so the
   // core knows this one plays mono before anything is sent to it.
   const outputs = await listOutputs(API);
@@ -424,26 +437,38 @@ test("channel mode: stereo on a known-mono device is refused with an explanation
     "Mono Speaker plays mono only; stereo would drop the right channel. Choose Auto or Mono.",
   );
   // The refused selection was not saved.
-  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBeFalsy();
+  expect(
+    (await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode,
+  ).toBeFalsy();
 
   // mono fits a mono device and is saved per output; other outputs are
   // untouched by one output's mode.
   await setChannelMode(API, { transport: "local", device_id: "alsa#mono", mode: "mono" });
-  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBe("mono");
-  expect((await listOutputs(API)).find((output) => output.id === "uuid:mock-sonos")?.channel_mode).toBeFalsy();
+  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBe(
+    "mono",
+  );
+  expect(
+    (await listOutputs(API)).find((output) => output.id === "uuid:mock-sonos")?.channel_mode,
+  ).toBeFalsy();
 
   // auto forgets the entry: the wire reports auto as absent.
   await setChannelMode(API, { transport: "local", device_id: "alsa#mono", mode: "auto" });
-  expect((await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode).toBeFalsy();
+  expect(
+    (await listOutputs(API)).find((output) => output.id === "alsa#mono")?.channel_mode,
+  ).toBeFalsy();
 
   // A destination whose channel count the core cannot probe fits stereo:
   // the radio surface is stereo by construction.
   await setChannelMode(API, { transport: "sonos", device_id: "uuid:mock-sonos", mode: "stereo" });
-  expect((await listOutputs(API)).find((output) => output.id === "uuid:mock-sonos")?.channel_mode).toBe("stereo");
+  expect(
+    (await listOutputs(API)).find((output) => output.id === "uuid:mock-sonos")?.channel_mode,
+  ).toBe("stereo");
   await setChannelMode(API, { transport: "sonos", device_id: "uuid:mock-sonos", mode: "auto" });
 });
 
-test("channel mode: open refuses stereo on a mono endpoint too, never collapsing it", { tag: "@api" }, async () => {
+test("channel mode: open refuses stereo on a mono endpoint too, never collapsing it", {
+  tag: "@api",
+}, async () => {
   try {
     // A Bluetooth endpoint's real channel count is known only when its sink
     // opens, so the selection is accepted (the core cannot probe it here)...
@@ -473,7 +498,9 @@ test("channel mode: open refuses stereo on a mono endpoint too, never collapsing
   }
 });
 
-test("channel mode: mono is a genuine mono stream; auto is byte-identical", { tag: "@api" }, async () => {
+test("channel mode: mono is a genuine mono stream; auto is byte-identical", {
+  tag: "@api",
+}, async () => {
   await activateOutput(API, "sonos", "uuid:mock-sonos");
   // The radio stereo header is the historical behaviour...
   const autoBefore = await readWavHeader(API);
@@ -497,7 +524,9 @@ test("channel mode: mono is a genuine mono stream; auto is byte-identical", { ta
   expect(Array.from(autoAfter.bytes)).toEqual(Array.from(autoBefore.bytes));
 });
 
-test("stereo meter: one LevelMeter reading per channel reaches the client", { tag: "@api" }, async () => {
+test("stereo meter: one LevelMeter reading per channel reaches the client", {
+  tag: "@api",
+}, async () => {
   const events: WsEvent[] = [];
   const { promise: open, resolve: opened } = Promise.withResolvers<void>();
   const subscription = subscribeEvents(API, undefined, {
@@ -510,7 +539,9 @@ test("stereo meter: one LevelMeter reading per channel reaches the client", { ta
     // per-channel meter over its own WebSocket subscription.
     await activateInput(API, "Mock Monitor");
     const meters = () =>
-      events.filter((event): event is Extract<WsEvent, { type: "LevelMeter" }> => event.type === "LevelMeter");
+      events.filter(
+        (event): event is Extract<WsEvent, { type: "LevelMeter" }> => event.type === "LevelMeter",
+      );
     await expect.poll(() => meters().length, { timeout: 15_000 }).toBeGreaterThan(3);
     for (const event of meters()) {
       // The per-channel shape: one reading per channel of the stereo

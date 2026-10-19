@@ -32,7 +32,12 @@ import {
   wsUrl,
 } from "../../packages/control-client/src/index.ts";
 import { type MockCore, startMockCore } from "../shared/mockCore.ts";
-import { goldenPathSonos, playSyncGroup, switchTransports, trimFirstOutput } from "../shared/scenarios.ts";
+import {
+  goldenPathSonos,
+  playSyncGroup,
+  switchTransports,
+  trimFirstOutput,
+} from "../shared/scenarios.ts";
 
 const PORT = Number(process.env.E2E_PORT ?? 47992);
 const BASE = `http://127.0.0.1:${PORT}`;

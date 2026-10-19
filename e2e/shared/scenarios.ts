@@ -2,14 +2,12 @@
 // mobile e2e suites. They live here, not in the production control client,
 // so the client ships no test choreography. Import the client the way the
 // other e2e files do: by relative path, so no build step is needed.
-import type {
-  OutputSyncStatus,
-  SyncGroupView,
-  Transport,
-} from "@on-air/api-types";
+import type { OutputSyncStatus, SyncGroupView, Transport } from "@on-air/api-types";
 import {
   activateInput,
   activateOutput,
+  addSyncGroupMember,
+  createSyncGroup,
   fetchStatus,
   getSync,
   listInputs,
@@ -18,8 +16,6 @@ import {
   setEq,
   setSyncTrim,
   setVolume,
-  addSyncGroupMember,
-  createSyncGroup,
   startSyncGroup,
 } from "../../packages/control-client/src/index.ts";
 
