@@ -358,6 +358,10 @@ pub struct Model {
     /// Frames since the last snapshot.
     pub since_refresh: u16,
     pub modal: Modal,
+    /// Rows scrolled off the top of the help overlay. The key table has
+    /// outgrown a 30-row terminal, so the help scrolls with the wheel
+    /// rather than silently dropping the rows at the bottom.
+    pub help_scroll: u16,
     pub pending: Option<Pending>,
     pub error: Option<String>,
     pub notice: Option<String>,
@@ -403,6 +407,7 @@ impl Model {
             refresh_in: None,
             since_refresh: 0,
             modal: Modal::None,
+            help_scroll: 0,
             pending: None,
             error: None,
             notice: None,
