@@ -108,12 +108,14 @@ mod platform {
     use std::process::Command;
     use std::time::{Duration, Instant};
 
-    /// Total wall-clock budget for one `list()`. The listing makes several
-    /// `bluetoothctl` calls and each is separately bounded, so a wedged bus
-    /// would otherwise cost a full timeout *per device* — 2 + 2N calls for N
-    /// paired devices, serially, on the request path behind
-    /// `GET /api/outputs`. One budget makes the cost independent of how many
-    /// speakers the user owns.
+    /// Total wall-clock budget for the `bluetoothctl` calls in one `list()`.
+    /// The listing makes several of them and each is separately bounded, so a
+    /// wedged bus would otherwise cost a full timeout *per device* — 2 + 2N
+    /// calls for N paired devices, serially, on the request path behind
+    /// `GET /api/outputs`. One budget makes that part of the cost independent
+    /// of how many speakers the user owns. `pulse_a2dp_sinks`, which runs
+    /// first, is bounded separately at 2 s, so the listing's true worst case
+    /// is this budget plus that.
     const LISTING_BUDGET: Duration = Duration::from_secs(3);
 
     /// One `bluetoothctl` query, allowed at most the time left before
