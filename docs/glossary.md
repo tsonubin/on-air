@@ -50,3 +50,51 @@ the desktop app's login item.
 ## Error envelope
 
 Every non-2xx API response is JSON `{"error", "code"}`: clients map the stable snake_case `code` (`ApiErrorCode` in `packages/api-types`) to their own copy and never match on the `error` text.
+
+## Sync group
+
+Outputs joined to play the same instant of audio together. Members share one
+presentation epoch and each holds a delay line, so a transport that would
+otherwise arrive early waits for the slowest member. Joining is exclusive: an
+output already in another group is refused rather than silently moved. A group
+is *more* constrained than two ungrouped outputs, never less — the ungrouped
+ones are free to run at their own pace and drift.
+
+## Presentation epoch
+
+The wall-clock instant every member of a sync group begins at. Starting a group
+pre-rolls each member's delay line and then releases them together, rather than
+telling each transport to start as soon as it happens to be ready.
+
+## Delay line
+
+Per-output buffer holding a feed back by a whole number of frames, so the output
+is the input delayed and nothing is dropped or duplicated. A fast transport's
+delay line is what makes it wait for a slow one. It opens with silence, so the
+feed rate is unchanged and a live stream keeps flowing.
+
+## Latency trim
+
+A per-output correction in milliseconds, applied on top of that transport's
+latency default. It is a **manual** correction: every default in the tree is an
+uncalibrated estimate and the trim exists because of that. A trim is not a
+measurement, and the UI must never present one as such.
+
+## Calibration
+
+Measuring a transport's real latency by playing a known probe signal through it
+and cross-correlating what a microphone hears against what was played. A
+calibrated value replaces the default and is marked as measured. Until one is
+taken, that transport's latency is a documented guess.
+
+## Channel mode
+
+Per-output choice of `auto`, `stereo` or `mono`. `auto` follows the device;
+`mono` is a true `(L+R)/2` downmix to one sample per frame; `stereo` on a device
+that only plays mono is **refused** rather than silently losing a channel.
+
+## DSP quality
+
+Per-machine resampler choice — `economy`, `balanced` or `high` — trading CPU for
+conversion quality. on-air targets old hardware, so the audio check measures
+each profile on the machine and recommends one rather than assuming.
