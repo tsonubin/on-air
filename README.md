@@ -106,7 +106,9 @@ docs                 the Omarchy guide, a domain glossary, design records
 
 The domain vocabulary (exclusive output, rate bridge, stereo pair, error
 envelope) is in [docs/glossary.md](docs/glossary.md); the design records
-behind each milestone are in [docs/design](docs/design).
+behind each milestone are in [docs/design](docs/design), and how the
+terminal UI, tray app and phone remote sit across Linux, macOS and Windows is
+sketched in [docs/DESIGN-cross-platform.md](docs/DESIGN-cross-platform.md).
 
 ## Develop
 
