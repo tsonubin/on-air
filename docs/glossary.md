@@ -1,10 +1,16 @@
 # on-air domain
 
-LAN-only desktop audio: capture, process, and send to **one** live output at a time.
+LAN-only desktop audio: capture, process, and send to live outputs — one per
+session, several at once inside a sync group.
 
 ## Exclusive output
 
-The product invariant. Exactly one of Sonos, AirPlay, or Bluetooth may be playing. Switching tears down the previous sender first. Owned by the output **session** module.
+One live sender per output **session**, and no two sessions may drive the same
+receiver: a second claim is refused with "this speaker is in use by another
+on-air session". The older rule — that only one transport may play at all —
+is retired, because playing several kinds of speaker together is the point of
+a sync group. What is still guaranteed is that two clients cannot fight over
+one speaker. Owned by the output **session** module.
 
 ## Rate bridge
 

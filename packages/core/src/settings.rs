@@ -93,7 +93,13 @@ fn write_file(path: &Path, settings: &SavedSettings) -> io::Result<()> {
             fs::remove_file(path)?;
             fs::rename(temporary, path)
         }
-        Err(error) => Err(error),
+        Err(error) => {
+            // A failed rename leaves the temporary behind; on the next save
+            // it is overwritten, but a persistently failing disk accumulates
+            // one orphan per attempt.
+            let _ = fs::remove_file(&temporary);
+            Err(error)
+        }
     }
 }
 
@@ -133,9 +139,17 @@ impl SettingsPersistence {
                                     break;
                                 }
                                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                                    if let Some(settings) = thread_pending.lock().take() {
+                                    let settings = thread_pending.lock().take();
+                                    if let Some(settings) = settings {
                                         if let Err(error) = write_file(&path, &settings) {
+                                            // Put it back rather than dropping it. The take()
+                                            // happens before the write, so a transient failure
+                                            // -- disk full, a rename that raced something --
+                                            // would otherwise lose the user's change with only
+                                            // a line in the service log to show for it. The next
+                                            // queue() or flush() then writes the newest snapshot.
                                             eprintln!("could not save on-air settings: {error}");
+                                            *thread_pending.lock() = Some(settings);
                                         }
                                     }
                                     break;

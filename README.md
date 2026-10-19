@@ -77,7 +77,7 @@ desktop shows.
 
 The core is one Rust process. Its original exclusive session captures audio, runs it through EQ and a
 rate bridge, publishes PCM on an in-process bus, and owns exactly one
-*sender* at a time. Sonos and AirPlay senders point the speaker at a WAV
+*sender* per session. Sonos and AirPlay senders point the speaker at a WAV
 stream the core serves under a per-activation nonce; the Bluetooth sender
 writes to the OS audio sink. A small HTTP and WebSocket control plane on
 port 47990 is the only way in: the terminal UI, the tray window and the
