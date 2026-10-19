@@ -240,7 +240,9 @@ impl CoreState {
         let cd = CdDeck::new();
         cd.set_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
-        let dsp_quality = Arc::new(StdMutex::new(saved_settings.dsp_quality.unwrap_or_default()));
+        let dsp_quality = Arc::new(StdMutex::new(
+            saved_settings.dsp_quality.unwrap_or_default(),
+        ));
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
         let output_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz));
         let output = OutputSession::new(ws_tx.clone(), output_sample_rate_hz.clone());

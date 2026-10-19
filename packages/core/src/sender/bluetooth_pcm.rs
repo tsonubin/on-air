@@ -121,7 +121,12 @@ impl PcmOutput for SystemPcmOutput {
             BluetoothEndpoint::Pulse(name) => {
                 let sample_rate_hz = rates::snap_rate(preferred_hz, BLUETOOTH_RATES_HZ);
                 Ok(OpenedPcmSink {
-                    sink: Arc::new(PacatPcmSink::new(name, pipeline_hz, sample_rate_hz, quality)?),
+                    sink: Arc::new(PacatPcmSink::new(
+                        name,
+                        pipeline_hz,
+                        sample_rate_hz,
+                        quality,
+                    )?),
                     format: OutputFormat {
                         sample_rate_hz,
                         supported_hz: BLUETOOTH_RATES_HZ.to_vec(),
@@ -386,9 +391,7 @@ impl PacatPcmSink {
 impl PcmSink for PacatPcmSink {
     fn write(&self, pcm: &[u8]) -> Result<(), SenderError> {
         let mut bytes = self.bytes.lock();
-        self.bridge
-            .lock()
-            .process_l16_to_l16_into(pcm, &mut bytes);
+        self.bridge.lock().process_l16_to_l16_into(pcm, &mut bytes);
         scale_l16(&mut bytes, self.volume.load(Ordering::Acquire));
         use std::io::Write;
         self.stdin
@@ -463,7 +466,8 @@ mod tests {
             volume: Arc::new(AtomicU8::new(100)),
             stream: Mutex::new(None),
         };
-        sink.write(&l16(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3])).unwrap();
+        sink.write(&l16(&[0.1, -0.1, 0.2, -0.2, 0.3, -0.3]))
+            .unwrap();
         assert_eq!(consumer.occupied_len(), 4, "a frame was split");
     }
 

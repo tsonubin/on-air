@@ -150,7 +150,9 @@ fn quality_request(quality: &str) -> Request<Body> {
 }
 
 fn tuning_request() -> Request<Body> {
-    Request::get("/api/audio/tuning").body(Body::empty()).unwrap()
+    Request::get("/api/audio/tuning")
+        .body(Body::empty())
+        .unwrap()
 }
 
 async fn tuning_json(app: &axum::Router, request: Request<Body>) -> serde_json::Value {
@@ -187,17 +189,9 @@ async fn a_manual_check_marks_the_machine_as_tuned_without_changing_settings() {
     let state = CoreState::new_mock().await;
     state.input().activate("Mock Monitor").await.unwrap();
     let app = on_air_core::build_router(state.clone());
-    let response = app
-        .clone()
-        .oneshot(buffer_request(100))
-        .await
-        .unwrap();
+    let response = app.clone().oneshot(buffer_request(100)).await.unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    let response = app
-        .clone()
-        .oneshot(quality_request("high"))
-        .await
-        .unwrap();
+    let response = app.clone().oneshot(quality_request("high")).await.unwrap();
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     let response = app

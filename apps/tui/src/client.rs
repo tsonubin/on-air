@@ -214,10 +214,9 @@ impl Client {
                     .await
                     .map_err(|error| error_copy::copy(&error)),
             )],
-            Cmd::SetDspQuality(quality) => done(
-                update::LABEL_QUALITY,
-                self.set_dsp_quality(quality).await,
-            ),
+            Cmd::SetDspQuality(quality) => {
+                done(update::LABEL_QUALITY, self.set_dsp_quality(quality).await)
+            }
             Cmd::RepairFirewall => {
                 let result = self.repair_firewall().await;
                 let mut messages = done(update::LABEL_FIREWALL, result);

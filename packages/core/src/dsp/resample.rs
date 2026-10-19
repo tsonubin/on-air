@@ -1,6 +1,8 @@
 use crate::dsp::DspQuality;
 use audioadapter_buffers::direct::InterleavedSlice;
-use rubato::{Async, FixedAsync, PolynomialDegree, Resampler, SincInterpolationParameters, WindowFunction};
+use rubato::{
+    Async, FixedAsync, PolynomialDegree, Resampler, SincInterpolationParameters, WindowFunction,
+};
 
 const CHUNK_SIZE: usize = 1024;
 
@@ -146,7 +148,12 @@ impl StreamingResampler {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels, quality))
+            Some(PcmResampler::new(
+                input_rate_hz,
+                output_rate_hz,
+                channels,
+                quality,
+            ))
         };
         StreamingResampler {
             input_rate_hz,

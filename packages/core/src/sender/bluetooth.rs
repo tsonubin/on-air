@@ -290,7 +290,12 @@ impl AudioSender for BluetoothSender {
         let config = self.config;
         let opened = tokio::task::spawn_blocking(move || {
             let endpoint = adapter.connect(&id)?;
-            output.open(&endpoint, config.pipeline_hz, config.output_hz, config.dsp_quality)
+            output.open(
+                &endpoint,
+                config.pipeline_hz,
+                config.output_hz,
+                config.dsp_quality,
+            )
         })
         .await
         .map_err(|e| SenderError::internal(format!("Bluetooth preparation task failed: {e}")))??;

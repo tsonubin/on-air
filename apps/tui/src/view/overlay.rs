@@ -201,9 +201,15 @@ pub(super) fn audio_check_overlay(model: &Model, frame: &mut Frame, area: Rect) 
         "DSP quality: {}   q: cycle (economy → balanced → high)",
         model.quality_choice
     )));
-    lines.push(Line::from("Enter: run ~2 second check   a: apply selected settings   Esc: close"));
-    lines.push(Line::from("Check during your usual workload; settings stay unchanged until applied."));
-    lines.push(Line::from("Larger buffers trade more delay for tolerance of scheduling stalls."));
+    lines.push(Line::from(
+        "Enter: run ~2 second check   a: apply selected settings   Esc: close",
+    ));
+    lines.push(Line::from(
+        "Check during your usual workload; settings stay unchanged until applied.",
+    ));
+    lines.push(Line::from(
+        "Larger buffers trade more delay for tolerance of scheduling stalls.",
+    ));
     if let Some(report) = &model.benchmark {
         lines.extend(
             crate::cli::benchmark_text(report)
