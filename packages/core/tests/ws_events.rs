@@ -132,7 +132,10 @@ fn cd_state_event_is_tagged_json() {
 #[test]
 fn sync_group_event_is_tagged_json() {
     let json = serde_json::to_value(WsEvent::SyncGroupChanged { group_id: 7 }).unwrap();
-    assert_eq!(json, serde_json::json!({"type": "SyncGroupChanged", "group_id": 7}));
+    assert_eq!(
+        json,
+        serde_json::json!({"type": "SyncGroupChanged", "group_id": 7})
+    );
 }
 
 /// Every group lifecycle change is announced so the clients re-read
@@ -144,8 +147,13 @@ async fn sync_group_changes_are_announced_to_clients() {
     let group = on_air_core::sync::lifecycle::create(&state, "Downstairs")
         .await
         .unwrap();
-    assert_eq!(rx.try_recv().unwrap(), WsEvent::SyncGroupChanged { group_id: group });
-    on_air_core::sync::lifecycle::start(&state, group).await.unwrap_err();
+    assert_eq!(
+        rx.try_recv().unwrap(),
+        WsEvent::SyncGroupChanged { group_id: group }
+    );
+    on_air_core::sync::lifecycle::start(&state, group)
+        .await
+        .unwrap_err();
     let mut events = Vec::new();
     while let Ok(event) = rx.try_recv() {
         events.push(event);

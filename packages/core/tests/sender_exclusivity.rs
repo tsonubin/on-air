@@ -243,7 +243,10 @@ async fn an_output_cannot_be_in_two_groups_at_once() {
         .group_of(&on_air_core::sync::OutputKey::new("sonos", "uuid:kitchen"))
         .expect("still a member of its first group");
     assert_eq!(current.id(), downstairs.id(), "the first group keeps it");
-    assert_eq!(current.member_of(&on_air_core::sync::OutputKey::new("sonos", "uuid:kitchen")), Some(member));
+    assert_eq!(
+        current.member_of(&on_air_core::sync::OutputKey::new("sonos", "uuid:kitchen")),
+        Some(member)
+    );
 
     // Re-joining the same group is idempotent, not a second membership.
     assert_eq!(state.sync.join(&downstairs, &output).unwrap(), member);
@@ -261,7 +264,9 @@ async fn a_group_members_session_refuses_a_second_claimant() {
     on_air_core::sync::lifecycle::add_member(&state, created, "sonos", "uuid:mock-sonos")
         .await
         .unwrap();
-    on_air_core::sync::lifecycle::start(&state, created).await.unwrap();
+    on_air_core::sync::lifecycle::start(&state, created)
+        .await
+        .unwrap();
 
     let refused = on_air_core::session::activate(&state, "sonos", "uuid:mock-sonos").await;
     let error = refused.expect_err("a second claimant must be refused");

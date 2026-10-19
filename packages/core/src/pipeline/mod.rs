@@ -193,9 +193,8 @@ fn process_until_stopped(
     let mut eq = GraphicEq::new(rates.input_hz as f32, PIPELINE_CHANNELS);
     let pipeline_plan =
         SinkConstruction::ProcessingThread.auto(Destination::stereo("capture pipeline"));
-    let mut resampler = (rates.input_hz != rates.output_hz).then(|| {
-        PcmResampler::new(rates.input_hz, rates.output_hz, &pipeline_plan, dsp_quality)
-    });
+    let mut resampler = (rates.input_hz != rates.output_hz)
+        .then(|| PcmResampler::new(rates.input_hz, rates.output_hz, &pipeline_plan, dsp_quality));
     let chunk_frames = resampler
         .as_ref()
         .map(PcmResampler::input_frames_next)

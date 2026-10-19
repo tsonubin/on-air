@@ -138,11 +138,10 @@ impl DriftController {
     }
 
     pub fn report(&self) -> Option<DriftReport> {
-        self.drift_ppm()
-            .map(|drift_ppm| DriftReport {
-                drift_ppm,
-                state: self.state(),
-            })
+        self.drift_ppm().map(|drift_ppm| DriftReport {
+            drift_ppm,
+            state: self.state(),
+        })
     }
 }
 
@@ -208,6 +207,9 @@ mod tests {
         // A real window after it seeds normally.
         controller.observe(485_100, base + Duration::from_secs(2));
         let drift = controller.drift_ppm().expect("measured");
-        assert!((drift - 0.0).abs() < 1.0, "second window is nominal, got {drift}");
+        assert!(
+            (drift - 0.0).abs() < 1.0,
+            "second window is nominal, got {drift}"
+        );
     }
 }

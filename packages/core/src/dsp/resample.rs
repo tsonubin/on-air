@@ -194,7 +194,12 @@ impl StreamingResampler {
         let inner = if input_rate_hz == output_rate_hz {
             None
         } else {
-            Some(PcmResampler::new(input_rate_hz, output_rate_hz, plan, quality))
+            Some(PcmResampler::new(
+                input_rate_hz,
+                output_rate_hz,
+                plan,
+                quality,
+            ))
         };
         StreamingResampler {
             input_rate_hz,

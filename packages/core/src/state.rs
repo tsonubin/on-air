@@ -281,7 +281,9 @@ impl CoreState {
         let cd = CdDeck::new();
         cd.add_event_sink(ws_tx.clone());
         let eq_gains_db = Arc::new(StdMutex::new(saved_settings.eq_gains_db));
-        let dsp_quality = Arc::new(StdMutex::new(saved_settings.dsp_quality.unwrap_or_default()));
+        let dsp_quality = Arc::new(StdMutex::new(
+            saved_settings.dsp_quality.unwrap_or_default(),
+        ));
         let target_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.input_sample_rate_hz));
         let output_sample_rate_hz = Arc::new(StdMutex::new(saved_settings.output_sample_rate_hz));
         let output = OutputSession::new(ws_tx.clone(), output_sample_rate_hz.clone());
@@ -449,10 +451,7 @@ impl CoreState {
     /// Hardware-free mode: senders are fakes, inputs come from the mock
     /// list, and "This computer" outputs come from
     /// [`Self::mock_local_outputs`] instead of probing Pulse.
-    pub fn set_mock_local_outputs(
-        &self,
-        outputs: Vec<crate::sender::local::LocalOutput>,
-    ) {
+    pub fn set_mock_local_outputs(&self, outputs: Vec<crate::sender::local::LocalOutput>) {
         *self.mock_local_outputs.lock() = outputs;
     }
 
