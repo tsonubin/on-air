@@ -411,7 +411,11 @@ impl Inner {
                 "Network speaker · independent timing; live microphone monitoring will be delayed.",
             );
             if !present {
-                let node = &mut self.endpoints.last_mut().unwrap().node;
+                let node = &mut self
+                    .endpoints
+                    .last_mut()
+                    .expect("add_bus_endpoint just pushed this endpoint")
+                    .node;
                 node.state = "unavailable".into();
                 node.detail =
                     "Speaker unavailable; this route will reconnect when it returns.".into();
