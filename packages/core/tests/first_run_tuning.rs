@@ -109,7 +109,9 @@ async fn first_use_runs_the_real_check_once_and_records_its_verdict() {
         Some(DspQuality::High),
         "the user's quality is kept"
     );
-    let record = saved.first_run_tuning.expect("the automatic run is recorded");
+    let record = saved
+        .first_run_tuning
+        .expect("the automatic run is recorded");
     assert!(record.recommended_buffer_ms >= 50);
     assert!(!record.applied_buffer && !record.applied_quality);
 

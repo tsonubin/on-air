@@ -254,10 +254,7 @@ pub fn plan(command: MprisCommand, cd: &CdStatus) -> Option<CdControlRequest> {
             let target = (cd.position_ms as i64 * 1_000 + offset_us).clamp(0, length_us);
             seek_to(target)
         }
-        MprisCommand::SetPosition {
-            track,
-            position_us,
-        } => {
+        MprisCommand::SetPosition { track, position_us } => {
             if position_us < 0 {
                 return None;
             }
@@ -421,7 +418,10 @@ mod tests {
         assert_eq!(metadata.track_id.as_deref(), Some("/org/on_air/track/3"));
         assert_eq!(metadata.track_number, Some(3));
         // Empty deck: nothing loaded, nothing claimed.
-        assert_eq!(MprisMetadata::from_cd(&CdStatus::empty()), MprisMetadata::default());
+        assert_eq!(
+            MprisMetadata::from_cd(&CdStatus::empty()),
+            MprisMetadata::default()
+        );
     }
 
     #[test]
@@ -464,11 +464,26 @@ mod tests {
     fn transport_commands_reach_the_cd_control_wire_body() {
         let cd = disc();
         let body = |command| serde_json::to_value(plan(command, &cd).unwrap()).unwrap();
-        assert_eq!(body(MprisCommand::Play), serde_json::json!({"action": "play"}));
-        assert_eq!(body(MprisCommand::Pause), serde_json::json!({"action": "pause"}));
-        assert_eq!(body(MprisCommand::Stop), serde_json::json!({"action": "pause"}));
-        assert_eq!(body(MprisCommand::Next), serde_json::json!({"action": "next"}));
-        assert_eq!(body(MprisCommand::Previous), serde_json::json!({"action": "prev"}));
+        assert_eq!(
+            body(MprisCommand::Play),
+            serde_json::json!({"action": "play"})
+        );
+        assert_eq!(
+            body(MprisCommand::Pause),
+            serde_json::json!({"action": "pause"})
+        );
+        assert_eq!(
+            body(MprisCommand::Stop),
+            serde_json::json!({"action": "pause"})
+        );
+        assert_eq!(
+            body(MprisCommand::Next),
+            serde_json::json!({"action": "next"})
+        );
+        assert_eq!(
+            body(MprisCommand::Previous),
+            serde_json::json!({"action": "prev"})
+        );
         let mut paused = disc();
         paused.playing = false;
         assert_eq!(
@@ -489,8 +504,14 @@ mod tests {
         let seek = |offset_us| {
             serde_json::to_value(plan(MprisCommand::Seek { offset_us }, &cd).unwrap()).unwrap()
         };
-        assert_eq!(seek(30_000_000), serde_json::json!({"action": "seek", "position_ms": 75_500}));
-        assert_eq!(seek(-5_500_000), serde_json::json!({"action": "seek", "position_ms": 40_000}));
+        assert_eq!(
+            seek(30_000_000),
+            serde_json::json!({"action": "seek", "position_ms": 75_500})
+        );
+        assert_eq!(
+            seek(-5_500_000),
+            serde_json::json!({"action": "seek", "position_ms": 40_000})
+        );
         assert_eq!(
             seek(-50_000_000),
             serde_json::json!({"action": "seek", "position_ms": 0}),
@@ -523,7 +544,11 @@ mod tests {
             "another track is a no-op, per MPRIS"
         );
         assert_eq!(set(TrackRef::Foreign, 61_000_000), None);
-        assert_eq!(set(TrackRef::NoTrack, -1), None, "a negative position is a no-op");
+        assert_eq!(
+            set(TrackRef::NoTrack, -1),
+            None,
+            "a negative position is a no-op"
+        );
     }
 
     #[test]
@@ -613,7 +638,10 @@ mod tests {
     #[test]
     fn snapshots_map_position_and_volume_from_the_deck() {
         let snapshot = snapshot(&disc(), true, Some("Audio CD"), 42);
-        assert_eq!(snapshot.position_us, 45_500_000, "Position follows the deck in µs");
+        assert_eq!(
+            snapshot.position_us, 45_500_000,
+            "Position follows the deck in µs"
+        );
         assert_eq!(snapshot.volume, 0.42);
     }
 }

@@ -1054,11 +1054,7 @@ fn audio_check_selects_quality_and_q_applies_the_selection() {
     m.snapshot.audio_quality = Some(AudioQualityResponse {
         quality: DspQuality::Balanced,
         recommended: DspQuality::High,
-        profiles: vec![
-            DspQuality::Economy,
-            DspQuality::Balanced,
-            DspQuality::High,
-        ],
+        profiles: vec![DspQuality::Economy, DspQuality::Balanced, DspQuality::High],
     });
     assert_eq!(update(&mut m, key('t')), vec![Cmd::FetchTuning]);
     assert_eq!(
@@ -1076,10 +1072,19 @@ fn audio_check_selects_quality_and_q_applies_the_selection() {
         update(&mut m, key('q')),
         vec![Cmd::SetQuality(DspQuality::High)]
     );
-    assert_eq!(m.pending, Some(Pending { label: LABEL_QUALITY.into() }));
+    assert_eq!(
+        m.pending,
+        Some(Pending {
+            label: LABEL_QUALITY.into()
+        })
+    );
     update(&mut m, done(LABEL_QUALITY, Ok(())));
     assert_eq!(m.pending, None);
-    assert_eq!(m.modal, Modal::AudioCheck, "the overlay stays for more checks");
+    assert_eq!(
+        m.modal,
+        Modal::AudioCheck,
+        "the overlay stays for more checks"
+    );
 }
 
 #[test]
@@ -1114,7 +1119,12 @@ fn the_audio_check_surface_shows_the_first_run_tuning_and_overrides_quality() {
         update(&mut m, key('q')),
         vec![Cmd::SetQuality(DspQuality::Economy)]
     );
-    assert_eq!(m.pending, Some(Pending { label: LABEL_QUALITY.into() }));
+    assert_eq!(
+        m.pending,
+        Some(Pending {
+            label: LABEL_QUALITY.into()
+        })
+    );
     update(&mut m, done(LABEL_QUALITY, Ok(())));
     // While the current quality is unknown (no tuning loaded yet), `a`
     // applies the buffer only: a setting is never clobbered unseen.
@@ -1280,8 +1290,14 @@ fn cd_and_monitor_events_unchanged() {
         update(
             &mut m,
             ev(WsEvent::LevelMeter {
-                left: MeterLevel { rms: 0.1, peak: 0.2 },
-                right: MeterLevel { rms: 0.1, peak: 0.2 },
+                left: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
+                right: MeterLevel {
+                    rms: 0.1,
+                    peak: 0.2
+                },
             })
         ),
         vec![]
@@ -1478,8 +1494,14 @@ fn each_channel_meters_independently() {
     update(
         &mut m,
         Msg::Ws(Incoming::Event(WsEvent::LevelMeter {
-            left: MeterLevel { rms: 0.5, peak: 1.0 },
-            right: MeterLevel { rms: 0.0, peak: 0.0 },
+            left: MeterLevel {
+                rms: 0.5,
+                peak: 1.0,
+            },
+            right: MeterLevel {
+                rms: 0.0,
+                peak: 0.0,
+            },
         })),
     );
     assert!((m.meter.left.rms_db + 6.02).abs() < 0.01, "{:?}", m.meter);
@@ -1524,10 +1546,7 @@ fn meter_times_out() {
     for _ in 0..20 {
         update(&mut m, Msg::Frame);
     }
-    assert_eq!(
-        (m.meter.left.rms_db, m.meter.left.peak_db),
-        (-60.0, -60.0)
-    );
+    assert_eq!((m.meter.left.rms_db, m.meter.left.peak_db), (-60.0, -60.0));
     assert_eq!(
         (m.meter.right.rms_db, m.meter.right.peak_db),
         (-60.0, -60.0),
@@ -1611,7 +1630,9 @@ fn d_trims_the_selected_output_and_enter_sends_the_manual_value() {
     );
     assert_eq!(
         m.pending,
-        Some(Pending { label: LABEL_TRIM.into() }),
+        Some(Pending {
+            label: LABEL_TRIM.into()
+        }),
         "the prompt stays open while the write is in flight"
     );
     // Success closes the prompt; the follow-up refresh lands the value.
@@ -1685,7 +1706,10 @@ fn in_group(group_id: u64) -> OutputSyncStatus {
 fn g_on_an_output_opens_the_sync_group_prompt_on_its_group() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.sync = Some(vec![in_group(2)]);
-    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", true)]);
+    m.snapshot.sync_groups = Some(vec![
+        group(1, "downstairs", false),
+        group(2, "upstairs", true),
+    ]);
     assert!(update(&mut m, key('g')).is_empty());
     let Modal::GroupPrompt {
         transport,
@@ -1720,7 +1744,10 @@ fn g_outside_the_destination_pane_still_goes_to_a_track() {
 fn enter_joins_the_highlighted_group_and_done_closes_and_refreshes() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
-    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", false)]);
+    m.snapshot.sync_groups = Some(vec![
+        group(1, "downstairs", false),
+        group(2, "upstairs", false),
+    ]);
     update(&mut m, key('g'));
     assert_eq!(
         update(&mut m, code(KeyCode::Enter)),
@@ -1766,7 +1793,10 @@ fn enter_takes_the_output_out_of_its_own_group() {
 fn enter_on_another_group_moves_by_leaving_the_old_one_first() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.sync = Some(vec![in_group(1)]);
-    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", false)]);
+    m.snapshot.sync_groups = Some(vec![
+        group(1, "downstairs", false),
+        group(2, "upstairs", false),
+    ]);
     update(&mut m, key('g'));
     update(&mut m, code(KeyCode::Down));
     assert_eq!(
@@ -1785,7 +1815,10 @@ fn enter_on_another_group_moves_by_leaving_the_old_one_first() {
 fn p_plays_the_highlighted_group_together_and_stops_it() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
-    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", true)]);
+    m.snapshot.sync_groups = Some(vec![
+        group(1, "downstairs", false),
+        group(2, "upstairs", true),
+    ]);
     update(&mut m, key('g'));
     assert_eq!(update(&mut m, key('p')), vec![Cmd::StartSyncGroup(1)]);
     assert_eq!(
@@ -1802,7 +1835,10 @@ fn p_plays_the_highlighted_group_together_and_stops_it() {
 fn x_removes_the_highlighted_group_and_done_closes_and_refreshes() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
-    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", true), group(2, "upstairs", true)]);
+    m.snapshot.sync_groups = Some(vec![
+        group(1, "downstairs", true),
+        group(2, "upstairs", true),
+    ]);
     update(&mut m, key('g'));
     update(&mut m, code(KeyCode::Down));
     assert_eq!(
@@ -1884,14 +1920,20 @@ fn a_new_group_name_is_1_to_64_characters() {
     update(&mut m, key('n'));
     // An empty name is refused before anything is sent.
     assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
-    assert!(matches!(&m.modal, Modal::GroupPrompt { error: Some(_), .. }));
+    assert!(matches!(
+        &m.modal,
+        Modal::GroupPrompt { error: Some(_), .. }
+    ));
     assert_eq!(m.pending, None);
     // A name of only spaces is empty too.
     for _ in 0..3 {
         update(&mut m, key(' '));
     }
     assert!(update(&mut m, code(KeyCode::Enter)).is_empty());
-    assert!(matches!(&m.modal, Modal::GroupPrompt { error: Some(_), .. }));
+    assert!(matches!(
+        &m.modal,
+        Modal::GroupPrompt { error: Some(_), .. }
+    ));
     assert_eq!(m.pending, None);
     // Typing stops at the wire's 64 characters.
     for _ in 0..70 {
@@ -1937,7 +1979,10 @@ fn a_refused_group_write_keeps_the_prompt_with_the_error() {
 fn the_group_prompt_moves_the_highlighter_and_esc_closes_it() {
     let mut m = on_dest("uuid:mock-sonos");
     m.snapshot.sync = Some(vec![sync_row("sonos", "uuid:mock-sonos", 0)]);
-    m.snapshot.sync_groups = Some(vec![group(1, "downstairs", false), group(2, "upstairs", false)]);
+    m.snapshot.sync_groups = Some(vec![
+        group(1, "downstairs", false),
+        group(2, "upstairs", false),
+    ]);
     update(&mut m, key('g'));
     assert_eq!(update(&mut m, code(KeyCode::Down)), vec![]);
     assert!(matches!(&m.modal, Modal::GroupPrompt { index: 1, .. }));

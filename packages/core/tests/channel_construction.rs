@@ -147,7 +147,10 @@ fn mono_mode_downmixes_a_stereo_destination_to_a_genuine_mono_stream() {
 fn the_radio_wav_follows_the_active_output_channel_mode() {
     // `auto` is byte-identical to the historical stereo stream.
     assert_eq!(radio_plan(ChannelMode::Auto).channels(), PIPELINE_CHANNELS);
-    assert_eq!(radio_plan(ChannelMode::Stereo).channels(), PIPELINE_CHANNELS);
+    assert_eq!(
+        radio_plan(ChannelMode::Stereo).channels(),
+        PIPELINE_CHANNELS
+    );
     // Mono becomes a genuine one-channel WAV.
     assert_eq!(radio_plan(ChannelMode::Mono).channels(), 1);
 }

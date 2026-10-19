@@ -515,7 +515,10 @@ fn the_meter_draws_one_rms_bar_per_channel() {
     let right = &rows[(y + 2) as usize];
     assert_eq!(left.chars().nth(x as usize), Some('L'), "{left}");
     assert_eq!(right.chars().nth(x as usize), Some('R'), "{right}");
-    assert!(left.contains('█'), "the loud channel fills its bar:\n{left}");
+    assert!(
+        left.contains('█'),
+        "the loud channel fills its bar:\n{left}"
+    );
     assert!(
         !right.contains('█'),
         "the silent channel keeps its bar empty:\n{right}"
@@ -904,7 +907,12 @@ fn status_overlay_uses_the_cores_port() {
     assert!(t.contains("Port: 47990"), "falls back:\n{t}");
 }
 
-fn sync_status(transport: &str, device_id: &str, state: SyncState, trim_ms: i32) -> OutputSyncStatus {
+fn sync_status(
+    transport: &str,
+    device_id: &str,
+    state: SyncState,
+    trim_ms: i32,
+) -> OutputSyncStatus {
     OutputSyncStatus {
         transport: transport.into(),
         device_id: device_id.into(),
@@ -939,7 +947,12 @@ fn destination_rows_show_sync_state_drift_and_manual_trim() {
 #[test]
 fn the_trim_overlay_calls_the_trim_manual_and_shows_the_current_value() {
     let mut m = model();
-    m.snapshot.sync = Some(vec![sync_status("sonos", "uuid:mock-sonos", SyncState::Locked, -100)]);
+    m.snapshot.sync = Some(vec![sync_status(
+        "sonos",
+        "uuid:mock-sonos",
+        SyncState::Locked,
+        -100,
+    )]);
     m.modal = Modal::TrimPrompt {
         transport: "sonos".into(),
         device_id: "uuid:mock-sonos".into(),
@@ -1055,11 +1068,7 @@ fn the_audio_check_overlay_offers_the_quality_profiles() {
     m.snapshot.audio_quality = Some(AudioQualityResponse {
         quality: DspQuality::Balanced,
         recommended: DspQuality::High,
-        profiles: vec![
-            DspQuality::Economy,
-            DspQuality::Balanced,
-            DspQuality::High,
-        ],
+        profiles: vec![DspQuality::Economy, DspQuality::Balanced, DspQuality::High],
     });
     m.quality_choice = DspQuality::High;
     m.modal = Modal::AudioCheck;

@@ -300,7 +300,10 @@ impl SettingsPersistence {
     pub(crate) fn save_now(&self, settings: &SavedSettings) -> io::Result<()> {
         let (completion, result) = mpsc::sync_channel(0);
         self.sender
-            .send(SettingsCommand::Flush(Box::new(settings.clone()), completion))
+            .send(SettingsCommand::Flush(
+                Box::new(settings.clone()),
+                completion,
+            ))
             .map_err(|error| io::Error::new(io::ErrorKind::BrokenPipe, error.to_string()))?;
         result
             .recv()
