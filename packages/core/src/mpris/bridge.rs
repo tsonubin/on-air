@@ -166,14 +166,20 @@ async fn run(state: CoreState, address: Option<String>) {
     loop {
         if !face_visible(&state) {
             // Gate closed: no bus connection, no name, nothing to cost.
-            if matches!(wait_for_wake(&mut deck, &mut input, &mut output, &mut changes).await, Wake::Closed) {
+            if matches!(
+                wait_for_wake(&mut deck, &mut input, &mut output, &mut changes).await,
+                Wake::Closed
+            ) {
                 return;
             }
             continue;
         }
         let Some(connection) = connect(&state, address.as_deref(), &playhead_moved).await else {
             // No usable bus right now; try again on the next state change.
-            if matches!(wait_for_wake(&mut deck, &mut input, &mut output, &mut changes).await, Wake::Closed) {
+            if matches!(
+                wait_for_wake(&mut deck, &mut input, &mut output, &mut changes).await,
+                Wake::Closed
+            ) {
                 return;
             }
             continue;
@@ -355,7 +361,9 @@ fn raise_tui() {
             }
         }
     }
-    eprintln!("on-air mpris: Raise found no launcher (omarchy-launch-or-focus-tui, xdg-terminal-exec)");
+    eprintln!(
+        "on-air mpris: Raise found no launcher (omarchy-launch-or-focus-tui, xdg-terminal-exec)"
+    );
 }
 
 fn fdo_error(error: impl std::fmt::Display) -> zbus::fdo::Error {
@@ -451,7 +459,11 @@ impl Player {
     }
 }
 
-#[interface(name = "org.mpris.MediaPlayer2.Player", spawn = false, introspection_docs = false)]
+#[interface(
+    name = "org.mpris.MediaPlayer2.Player",
+    spawn = false,
+    introspection_docs = false
+)]
 impl Player {
     async fn next(&self) -> zbus::fdo::Result<()> {
         self.command(MprisCommand::Next).await
@@ -535,8 +547,8 @@ impl Player {
         let mut map = HashMap::new();
         if let Some(track_id) = metadata.track_id {
             // A per-track object path id, `o` on the wire.
-            let path = zbus::ObjectPath::try_from(track_id)
-                .expect("track_path builds valid object paths");
+            let path =
+                zbus::ObjectPath::try_from(track_id).expect("track_path builds valid object paths");
             map.insert("mpris:trackid".to_string(), OwnedVariant::from(path));
         }
         if let Some(title) = metadata.title {

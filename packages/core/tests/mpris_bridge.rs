@@ -99,7 +99,11 @@ async fn wait_for_names(conn: &zbus::Connection, want: &[String]) {
     panic!("the bus never settled at the expected names");
 }
 
-async fn get_property(conn: &zbus::Connection, interface: &str, property: &str) -> zbus::OwnedVariant {
+async fn get_property(
+    conn: &zbus::Connection,
+    interface: &str,
+    property: &str,
+) -> zbus::OwnedVariant {
     let reply = conn
         .call_method(
             Some(SERVICE_NAME),
@@ -114,12 +118,7 @@ async fn get_property(conn: &zbus::Connection, interface: &str, property: &str) 
     value
 }
 
-async fn set(
-    conn: &zbus::Connection,
-    interface: &str,
-    property: &str,
-    value: zbus::Variant<'_>,
-) {
+async fn set(conn: &zbus::Connection, interface: &str, property: &str, value: zbus::Variant<'_>) {
     conn.call_method(
         Some(SERVICE_NAME),
         OBJECT_PATH,
@@ -184,7 +183,12 @@ fn list(value: &zbus::OwnedVariant) -> Vec<String> {
 /// runtime, and the mock Sonos output activated so the face exists before
 /// any disc does. The returned state is the one the router serves: the
 /// bridge must watch that same core.
-async fn served() -> (zbus::Connection, axum::Router, String, on_air_core::state::CoreState) {
+async fn served() -> (
+    zbus::Connection,
+    axum::Router,
+    String,
+    on_air_core::state::CoreState,
+) {
     let Some(bus) = private_bus() else {
         panic!("skipped: no dbus-daemon on this host");
     };
@@ -292,8 +296,8 @@ async fn next_changed(stream: &mut zbus::MessageStream, wanted: &str) -> Vec<Str
             .expect("PropertiesChanged stream closed")
             .expect("PropertiesChanged stream error");
         let body = message.body();
-        if let Ok((_, changed, _)) = body
-            .deserialize::<(String, HashMap<String, zbus::OwnedVariant>, Vec<String>)>()
+        if let Ok((_, changed, _)) =
+            body.deserialize::<(String, HashMap<String, zbus::OwnedVariant>, Vec<String>)>()
         {
             let keys: Vec<String> = changed.keys().cloned().collect();
             if keys.iter().any(|key| key == wanted) {
@@ -328,7 +332,10 @@ async fn idle_bridge_holds_no_bus_connection_until_a_disc_appears() {
         text(&get_property(&conn, PLAYER_INTERFACE, "PlaybackStatus").await),
         "Playing"
     );
-    assert_eq!(text(&get_property(&conn, ROOT_INTERFACE, "Identity").await), "on-air");
+    assert_eq!(
+        text(&get_property(&conn, ROOT_INTERFACE, "Identity").await),
+        "on-air"
+    );
 
     eject_disc(&app).await;
     wait_for_name(&conn, false).await;
@@ -342,14 +349,19 @@ async fn properties_and_methods_follow_the_contract() {
     wait_for_name(&conn, true).await;
 
     // Root: exactly what docs/omarchy.md "Media" demands.
-    assert_eq!(text(&get_property(&conn, ROOT_INTERFACE, "Identity").await), "on-air");
+    assert_eq!(
+        text(&get_property(&conn, ROOT_INTERFACE, "Identity").await),
+        "on-air"
+    );
     assert_eq!(
         text(&get_property(&conn, ROOT_INTERFACE, "DesktopEntry").await),
         "on-air"
     );
     assert!(flag(&get_property(&conn, ROOT_INTERFACE, "CanRaise").await));
     assert!(!flag(&get_property(&conn, ROOT_INTERFACE, "CanQuit").await));
-    assert!(!flag(&get_property(&conn, ROOT_INTERFACE, "HasTrackList").await));
+    assert!(!flag(
+        &get_property(&conn, ROOT_INTERFACE, "HasTrackList").await
+    ));
     assert!(list(&get_property(&conn, ROOT_INTERFACE, "SupportedUriSchemes").await).is_empty());
     assert!(list(&get_property(&conn, ROOT_INTERFACE, "SupportedMimeTypes").await).is_empty());
 
@@ -359,18 +371,38 @@ async fn properties_and_methods_follow_the_contract() {
         "Stopped"
     );
     assert!(table(&get_property(&conn, PLAYER_INTERFACE, "Metadata").await).is_empty());
-    assert!(!flag(&get_property(&conn, PLAYER_INTERFACE, "CanGoNext").await));
-    assert!(!flag(&get_property(&conn, PLAYER_INTERFACE, "CanPlay").await));
-    assert!(!flag(&get_property(&conn, PLAYER_INTERFACE, "CanSeek").await));
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanControl").await));
+    assert!(!flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanGoNext").await
+    ));
+    assert!(!flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanPlay").await
+    ));
+    assert!(!flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanSeek").await
+    ));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanControl").await
+    ));
 
     // Rates are fixed at 1.
-    assert_eq!(real(&get_property(&conn, PLAYER_INTERFACE, "Rate").await), 1.0);
-    assert_eq!(real(&get_property(&conn, PLAYER_INTERFACE, "MinimumRate").await), 1.0);
-    assert_eq!(real(&get_property(&conn, PLAYER_INTERFACE, "MaximumRate").await), 1.0);
+    assert_eq!(
+        real(&get_property(&conn, PLAYER_INTERFACE, "Rate").await),
+        1.0
+    );
+    assert_eq!(
+        real(&get_property(&conn, PLAYER_INTERFACE, "MinimumRate").await),
+        1.0
+    );
+    assert_eq!(
+        real(&get_property(&conn, PLAYER_INTERFACE, "MaximumRate").await),
+        1.0
+    );
 
     // Volume maps 0..=1 to the active output's percent.
-    assert_eq!(real(&get_property(&conn, PLAYER_INTERFACE, "Volume").await), 0.5);
+    assert_eq!(
+        real(&get_property(&conn, PLAYER_INTERFACE, "Volume").await),
+        0.5
+    );
     set(
         &conn,
         PLAYER_INTERFACE,
@@ -384,7 +416,10 @@ async fn properties_and_methods_follow_the_contract() {
         body["volume"], 42,
         "Volume reaches POST /api/outputs/active/volume"
     );
-    assert_eq!(real(&get_property(&conn, PLAYER_INTERFACE, "Volume").await), 0.42);
+    assert_eq!(
+        real(&get_property(&conn, PLAYER_INTERFACE, "Volume").await),
+        0.42
+    );
 
     // A disc appears: Playing and full metadata from GET /api/cd.
     insert_disc(&app).await;
@@ -392,16 +427,30 @@ async fn properties_and_methods_follow_the_contract() {
         text(value) == "Playing"
     })
     .await;
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanGoNext").await));
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanGoPrevious").await));
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanPlay").await));
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanPause").await));
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanSeek").await));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanGoNext").await
+    ));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanGoPrevious").await
+    ));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanPlay").await
+    ));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanPause").await
+    ));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanSeek").await
+    ));
     let metadata = table(&get_property(&conn, PLAYER_INTERFACE, "Metadata").await);
     assert_eq!(text(&metadata["xesam:title"]), "So What");
     assert_eq!(text(&metadata["xesam:album"]), "Kind of Blue");
     assert_eq!(integer(&metadata["xesam:trackNumber"]), 1);
-    assert_eq!(integer(&metadata["mpris:length"]), 60_000_000, "length is µs");
+    assert_eq!(
+        integer(&metadata["mpris:length"]),
+        60_000_000,
+        "length is µs"
+    );
     assert_eq!(
         object_path(&metadata["mpris:trackid"]),
         "/org/on_air/track/1",
@@ -411,7 +460,10 @@ async fn properties_and_methods_follow_the_contract() {
         !metadata.contains_key("mpris:artUrl"),
         "artUrl only if cover art exists, and none does"
     );
-    assert_eq!(integer(&get_property(&conn, PLAYER_INTERFACE, "Position").await), 0);
+    assert_eq!(
+        integer(&get_property(&conn, PLAYER_INTERFACE, "Position").await),
+        0
+    );
 
     // Methods cross the wire and drive the deck through the same path
     // `POST /api/cd/control` takes.
@@ -490,11 +542,7 @@ async fn playback_status_transitions_across_enabled_paused_and_empty() {
     .await;
 
     // Back on and playing again...
-    let (status, _) = send(
-        app.clone(),
-        put_json("/api/service", r#"{"enabled":true}"#),
-    )
-    .await;
+    let (status, _) = send(app.clone(), put_json("/api/service", r#"{"enabled":true}"#)).await;
     assert_eq!(status, StatusCode::OK);
     call(&conn, "Play", &()).await;
     wait_for(&conn, PLAYER_INTERFACE, "PlaybackStatus", |value| {
@@ -545,7 +593,10 @@ async fn seeked_and_property_signals_track_the_deck() {
     // outside, 30 s forward while the deck plays.
     let (status, _) = send(
         app.clone(),
-        post_json("/api/cd/control", r#"{"action":"seek","position_ms":30000}"#),
+        post_json(
+            "/api/cd/control",
+            r#"{"action":"seek","position_ms":30000}"#,
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -572,9 +623,15 @@ async fn seeked_and_property_signals_track_the_deck() {
     // is observable.
     eject_disc(&app).await;
     wait_for(&conn, PLAYER_INTERFACE, "CanGoNext", |value| !flag(value)).await;
-    assert!(!flag(&get_property(&conn, PLAYER_INTERFACE, "CanPlay").await));
-    assert!(!flag(&get_property(&conn, PLAYER_INTERFACE, "CanSeek").await));
-    assert!(flag(&get_property(&conn, PLAYER_INTERFACE, "CanControl").await));
+    assert!(!flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanPlay").await
+    ));
+    assert!(!flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanSeek").await
+    ));
+    assert!(flag(
+        &get_property(&conn, PLAYER_INTERFACE, "CanControl").await
+    ));
     assert!(table(&get_property(&conn, PLAYER_INTERFACE, "Metadata").await).is_empty());
     let announced = next_changed(&mut changed, "CanGoNext").await;
     assert!(
