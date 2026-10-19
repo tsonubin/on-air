@@ -143,7 +143,8 @@ export function useCoreSnapshot(options: UseCoreSnapshotOptions = {}): CoreSnaps
   }
 
   const refresh = useCallback(
-    (kind: RefreshKind = "all"): Promise<void> => queue.current!.refreshNow(KIND_SLICES[kind]),
+    (kind: RefreshKind = "all"): Promise<void> =>
+      queue.current?.refreshNow(KIND_SLICES[kind]) ?? Promise.resolve(),
     [],
   );
   const refreshRef = useRef(refresh);

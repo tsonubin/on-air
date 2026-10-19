@@ -14,6 +14,7 @@ const report = {
   scheduler_p95_ms: 2,
   worst_case_ms: 25,
   recommended_buffer_ms: 100,
+  recommended_quality: "balanced" as const,
   within_buffer_budget: true,
 };
 beforeEach(() => jest.clearAllMocks());

@@ -19,6 +19,7 @@ it("keeps a recommendation separate from applying it", async () => {
     scheduler_p95_ms: 2,
     worst_case_ms: 25,
     recommended_buffer_ms: 100,
+    recommended_quality: "balanced",
     within_buffer_budget: true,
   });
   vi.mocked(setCaptureBuffer).mockResolvedValue();

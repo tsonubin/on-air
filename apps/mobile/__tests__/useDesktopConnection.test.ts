@@ -182,7 +182,13 @@ test("applies socket payloads directly and refetches only the named slice", asyn
   act(() =>
     FakeSocket.last?.send({ type: "DeviceJoined", transport: "sonos", id: "x", name: "Y" }),
   );
-  act(() => FakeSocket.last?.send({ type: "LevelMeter", rms: 0.1, peak: 0.2 }));
+  act(() =>
+    FakeSocket.last?.send({
+      type: "LevelMeter",
+      left: { rms: 0.1, peak: 0.2 },
+      right: { rms: 0.1, peak: 0.2 },
+    }),
+  );
   expect(callCounts()).toEqual(before);
 
   await tick(150);
