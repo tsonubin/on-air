@@ -354,10 +354,7 @@ impl CoreState {
     /// Hardware-free mode: senders are fakes, inputs come from the mock
     /// list, and "This computer" outputs come from
     /// [`Self::mock_local_outputs`] instead of probing Pulse.
-    pub fn set_mock_local_outputs(
-        &self,
-        outputs: Vec<crate::sender::local::LocalOutput>,
-    ) {
+    pub fn set_mock_local_outputs(&self, outputs: Vec<crate::sender::local::LocalOutput>) {
         *self.mock_local_outputs.lock() = outputs;
     }
 

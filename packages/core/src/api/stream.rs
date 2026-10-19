@@ -196,7 +196,10 @@ mod tests {
     #[test]
     fn the_wav_header_and_silence_follow_the_channel_plan() {
         let auto = radio_plan(ChannelMode::Auto);
-        assert_eq!(u16::try_from(auto.channels()).unwrap(), PIPELINE_CHANNELS as u16);
+        assert_eq!(
+            u16::try_from(auto.channels()).unwrap(),
+            PIPELINE_CHANNELS as u16
+        );
         assert_eq!(header_channels(&wav_header(44_100, &auto)), 2);
         assert_eq!(silence_chunk(44_100, &auto).len() % 4, 0);
         let mono = radio_plan(ChannelMode::Mono);

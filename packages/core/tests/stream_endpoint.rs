@@ -888,7 +888,7 @@ async fn a_mono_channel_mode_serves_a_genuine_mono_wav_and_auto_stays_stereo() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    let state = CoreState::new();
+    let state = CoreState::new_mock().await;
     let nonce = new_stream_nonce();
     make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
     let app = on_air_core::build_router(state.clone());

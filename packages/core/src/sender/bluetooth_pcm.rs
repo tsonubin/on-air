@@ -207,42 +207,90 @@ impl CpalPcmSink {
         let volume = Arc::new(AtomicU8::new(100));
         let stream_channels = plan.channels();
         let stream = match sample_format {
-            SampleFormat::I8 => {
-                build_output_stream::<i8>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::I16 => {
-                build_output_stream::<i16>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::I24 => {
-                build_output_stream::<I24>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::I32 => {
-                build_output_stream::<i32>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::I64 => {
-                build_output_stream::<i64>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::U8 => {
-                build_output_stream::<u8>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::U16 => {
-                build_output_stream::<u16>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::U24 => {
-                build_output_stream::<U24>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::U32 => {
-                build_output_stream::<u32>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::U64 => {
-                build_output_stream::<u64>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::F32 => {
-                build_output_stream::<f32>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
-            SampleFormat::F64 => {
-                build_output_stream::<f64>(&device, config, consumer, volume.clone(), stream_channels)?
-            }
+            SampleFormat::I8 => build_output_stream::<i8>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::I16 => build_output_stream::<i16>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::I24 => build_output_stream::<I24>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::I32 => build_output_stream::<i32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::I64 => build_output_stream::<i64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::U8 => build_output_stream::<u8>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::U16 => build_output_stream::<u16>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::U24 => build_output_stream::<U24>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::U32 => build_output_stream::<u32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::U64 => build_output_stream::<u64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::F32 => build_output_stream::<f32>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
+            SampleFormat::F64 => build_output_stream::<f64>(
+                &device,
+                config,
+                consumer,
+                volume.clone(),
+                stream_channels,
+            )?,
             other => {
                 return Err(SenderError::internal(format!(
                     "unsupported output sample format: {other:?}"
@@ -255,11 +303,7 @@ impl CpalPcmSink {
         Ok(OpenedPcmSink {
             sink: Arc::new(Self {
                 producer: Mutex::new(producer),
-                bridge: Mutex::new(RateBridge::new(
-                    playback.pipeline_hz,
-                    sample_rate_hz,
-                    &plan,
-                )),
+                bridge: Mutex::new(RateBridge::new(playback.pipeline_hz, sample_rate_hz, &plan)),
                 volume,
                 stream: Mutex::new(Some(stream)),
             }),

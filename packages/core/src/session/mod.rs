@@ -59,11 +59,7 @@ pub async fn list(state: &CoreState) -> Vec<OutputInfo> {
     };
     for d in local {
         outputs.push(OutputInfo {
-            channel_mode: saved_channel_mode(
-                state,
-                crate::sender::local::TRANSPORT,
-                &d.id,
-            ),
+            channel_mode: saved_channel_mode(state, crate::sender::local::TRANSPORT, &d.id),
             channels: d.channels,
             id: d.id,
             name: d.name,

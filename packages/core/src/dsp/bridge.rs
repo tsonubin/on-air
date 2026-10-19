@@ -17,7 +17,11 @@ impl RateBridge {
     /// [`super::channel`]).
     pub fn new(input_rate_hz: u32, output_rate_hz: u32, plan: &ChannelPlan) -> Self {
         RateBridge {
-            resampler: StreamingResampler::new(input_rate_hz, output_rate_hz, &plan.pipeline_side()),
+            resampler: StreamingResampler::new(
+                input_rate_hz,
+                output_rate_hz,
+                &plan.pipeline_side(),
+            ),
             channels: plan.channels().max(1),
         }
     }

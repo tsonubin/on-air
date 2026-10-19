@@ -138,10 +138,9 @@ impl SinkConstruction {
             | SinkConstruction::PulsePcm
             | SinkConstruction::ProcessingThread
             | SinkConstruction::Benchmark => PIPELINE_CHANNELS,
-            SinkConstruction::CpalPcm => destination.reported_channels.map_or(
-                PIPELINE_CHANNELS,
-                |channels| usize::from(channels).max(1),
-            ),
+            SinkConstruction::CpalPcm => destination
+                .reported_channels
+                .map_or(PIPELINE_CHANNELS, |channels| usize::from(channels).max(1)),
         }
     }
 
