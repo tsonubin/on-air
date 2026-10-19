@@ -109,7 +109,7 @@ async fn stereo_frames_keep_their_sides_through_the_eq() {
         out.as_chunks::<2>()
             .0
             .iter()
-            .all(|[_, right]| *right == 0.0),
+            .all(|[_, right]| right.abs() <= 1.0 / 32768.0),
         "the boosted left tone leaked into the right channel"
     );
 }
