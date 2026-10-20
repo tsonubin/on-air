@@ -7,6 +7,7 @@ export CARGO_HOME="${CARGO_HOME:-/run/build/on-air/cargo}"
 
 # corepack ships with the Node SDK and resolves pnpm without npm, so the
 # build stays pnpm-only end to end.
+mkdir -p /run/build/on-air/pnpm-bin
 corepack enable --install-directory /run/build/on-air/pnpm-bin
 corepack prepare pnpm@9.15.0 --activate
 export PATH="/run/build/on-air/pnpm-bin:${PATH}"
