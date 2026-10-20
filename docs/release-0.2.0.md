@@ -193,6 +193,8 @@ Do these in order. **Nothing here is done yet.**
 ### Before tagging
 
 - [ ] All waves merged to `main`, or the outstanding ones consciously deferred.
+      Wave 5 (packaging) cannot be deferred: the tag workflow builds the tagged
+      checkout, and these notes advertise the one-line installer from #12.
 - [ ] `main` CI green on the release commit.
 - [ ] Pending decisions in [DECISIONS-PENDING](DECISIONS-PENDING.md) answered —
       especially the `process-wide single-output` invariant (it is in the upgrade
@@ -222,8 +224,12 @@ Do these in order. **Nothing here is done yet.**
 ### Tag and release
 
 - [ ] `CHANGELOG.md` `[Unreleased]` folded into `## [0.2.0] - <date>`.
-- [ ] Tag `v0.2.0`, annotated, on the release commit.
-- [ ] Publish the GitHub release with notes from this document.
+- [ ] Before tagging, put the notes from this document into `releaseBody` in
+      `.github/workflows/release.yml` on the release commit. Pushing the tag
+      runs that workflow, and its final `release` job undrafts the release
+      automatically, so there is no later manual publish step to add notes in.
+- [ ] Tag `v0.2.0`, annotated, on the release commit. The workflow builds,
+      uploads `SHA256SUMS` and publishes the release.
 
 ### Build artifacts
 

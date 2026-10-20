@@ -56,11 +56,14 @@ lockfile anywhere in the repo (`pnpm-lock.yaml` only).
 **Recommendation: switch to corepack.** `corepack prepare pnpm@9.15.0 --activate`
 ships with Node ≥ 16.9, needs no npm, and is the idiomatic answer. It removes the
 last two `npm` invocations in the tree and makes the "pnpm only" rule literally
-true.
+true. It does not remove the network fetch: on a clean machine corepack still
+downloads pnpm 9.15.0 into its cache (offline builds need corepack's separate
+offline workflow).
 
 **Tradeoffs.**
-- *For:* rule compliance with no asterisk; no network install of pnpm (corepack
-  resolves it); fewer moving parts in user-facing installers.
+- *For:* rule compliance with no asterisk; no direct `npm install` command;
+  fewer moving parts in user-facing installers. (pnpm is still downloaded on
+  first use; only the npm step goes away.)
 - *Against:* these two scripts **ship to users**. corepack needs Node ≥ 16.9,
   which is almost certainly already required by the rest of the toolchain but is
   worth confirming. If corepack is disabled by default in some distro's Node
@@ -128,10 +131,12 @@ binaries pinned against the release's `SHA256SUMS`. Only v0.1.0 is published, an
 it predates the TUI binaries, so the prebuilt path is unreachable and several
 checksum pins in AUR/Homebrew/winget remain placeholders.
 
-**Recommendation: publish once waves 1–3 of the merge plan land**, i.e. the core
-stack, the channel modes and the e2e suite. That is the point where the software
-is coherent and tested; the packaging and docs waves can follow without blocking
-the tag.
+**Recommendation: publish once waves 1–3 and wave 5 of the merge plan land**,
+i.e. the core stack, the channel modes, the e2e suite and packaging (#12, #20,
+#27). The release workflow builds the tagged checkout, and these notes advertise
+the one-line prebuilt installer from #12, so packaging has to be on `main` before
+the tag; merging it afterwards cannot add it to v0.2.0. The docs wave can follow
+without blocking the tag.
 
 **Tradeoffs.**
 - *For:* unblocks D3 and the whole prebuilt install story; lets you finally run
@@ -176,7 +181,7 @@ documented-but-dead shortcuts that clippy cannot.
 | 2 | npm → corepack in two installers | Rule compliance | Switch, after confirming Node ≥ 16.9 |
 | 3 | Shared `CARGO_TARGET_DIR` | Build times | Only if builds stay sequential |
 | 4 | Regenerate `preview.png` | PR #15 docs accuracy | Do it before release |
-| 5 | Publish v0.2.0 | D3 and the whole prebuilt story | Tag after waves 1–3 |
+| 5 | Publish v0.2.0 | D3 and the whole prebuilt story | Tag after waves 1–3 and 5 |
 | 6 | #26 vs #28 duplication | Hygiene | Keep both |
 
 Items 1 and 5 are on the critical path for a release. The rest are quality.
