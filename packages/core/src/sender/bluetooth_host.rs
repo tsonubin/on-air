@@ -126,11 +126,11 @@ mod platform {
         if remaining.is_zero() {
             return String::new();
         }
-        // `timeout` wants whole seconds; round up so the last fraction of the
-        // budget still runs a call rather than skipping it.
-        let seconds = remaining.as_secs().clamp(1, 3);
+        // `timeout` accepts fractional seconds, so pass what is actually left
+        // (to the millisecond, never 0, which would disable the timeout).
+        let millis = remaining.as_millis().max(1);
         Command::new("timeout")
-            .arg(seconds.to_string())
+            .arg(format!("{}.{:03}", millis / 1000, millis % 1000))
             .arg("bluetoothctl")
             .args(args)
             .output()
@@ -141,8 +141,9 @@ mod platform {
     }
 
     pub fn list() -> Vec<BluetoothDevice> {
-        let deadline = Instant::now() + LISTING_BUDGET;
         let mut devices = pulse_a2dp_sinks();
+        // Start the budget after Pulse discovery, which has its own timeout.
+        let deadline = Instant::now() + LISTING_BUDGET;
         for (addr, name) in
             parse_bluetoothctl_devices(&bluetoothctl(&["devices", "Paired"], deadline))
         {

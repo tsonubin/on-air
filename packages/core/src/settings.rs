@@ -148,8 +148,13 @@ impl SettingsPersistence {
                                             // would otherwise lose the user's change with only
                                             // a line in the service log to show for it. The next
                                             // queue() or flush() then writes the newest snapshot.
+                                            // A queue() that landed during the write already holds
+                                            // a newer snapshot; keep that one, not this stale one.
                                             eprintln!("could not save on-air settings: {error}");
-                                            *thread_pending.lock() = Some(settings);
+                                            let mut pending = thread_pending.lock();
+                                            if pending.is_none() {
+                                                *pending = Some(settings);
+                                            }
                                         }
                                     }
                                     break;
