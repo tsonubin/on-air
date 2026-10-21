@@ -1494,6 +1494,27 @@ fn click_dest_row_runs_enter_flow() {
 }
 
 #[test]
+fn horizontal_volume_clicks_and_drags_use_the_displayed_percentage_scale() {
+    let rect = Rect::new(10, 5, 21, 1);
+    for (column, kind, value) in [
+        (10, MouseKind::Down, 0),
+        (20, MouseKind::Down, 50),
+        (30, MouseKind::Down, 100),
+        (0, MouseKind::Drag, 0),
+        (500, MouseKind::Drag, 100),
+    ] {
+        let mut m = model_with_mock_snapshot();
+        m.snapshot.volume = 37;
+        assert_eq!(
+            update(&mut m, mouse(Target::VolumeSlider, rect, column, 5, kind)),
+            vec![Cmd::SetVolume(value)]
+        );
+        assert_eq!((m.pane, m.mixer_row), (Pane::Mixer, MixerRow::Volume));
+        assert_eq!(m.snapshot.volume, value);
+    }
+}
+
+#[test]
 fn drag_on_eq_fader_sets_value_through_write() {
     let mut m = model_with_mock_snapshot();
     let rect = Rect::new(30, 8, 3, 5);

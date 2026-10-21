@@ -973,6 +973,20 @@ fn on_mouse(
             }
             select(model)
         }
+        Target::VolumeSlider => {
+            model.pane = Pane::Mixer;
+            model.mixer_row = MixerRow::Volume;
+            if wheel != 0 {
+                return adjust(model, -wheel, true);
+            }
+            if rect.width <= 1 {
+                return vec![];
+            }
+            let offset = column.saturating_sub(rect.x).min(rect.width - 1);
+            let value = (u32::from(offset) * 100 + u32::from(rect.width - 1) / 2)
+                / u32::from(rect.width - 1);
+            set_volume(model, value as i32 - i32::from(model.snapshot.volume))
+        }
         Target::Fader(mixer_row) => {
             let focused = model.pane == Pane::Mixer && model.mixer_row == mixer_row;
             model.pane = Pane::Mixer;

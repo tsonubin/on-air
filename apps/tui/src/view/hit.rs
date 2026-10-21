@@ -18,6 +18,7 @@ pub enum Target {
     SourceRow(usize),
     DestRow(usize),
     Fader(MixerRow),
+    VolumeSlider,
     Rate(MixerRow),
     CdButton(CdButton),
     CdProgress,

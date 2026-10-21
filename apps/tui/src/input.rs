@@ -24,7 +24,7 @@ impl DragState {
                 (MouseKind::Down, self.origin?, row)
             }
             MouseEventKind::Drag(MouseButton::Left) => {
-                let origin @ (Target::Fader(_), rect) = self.origin? else {
+                let origin @ (Target::Fader(_) | Target::VolumeSlider, rect) = self.origin? else {
                     return None;
                 };
                 let row = row.clamp(rect.y, rect.bottom().saturating_sub(1));
@@ -37,6 +37,11 @@ impl DragState {
             MouseEventKind::ScrollUp => (MouseKind::ScrollUp, map.hit(column, row)?, row),
             MouseEventKind::ScrollDown => (MouseKind::ScrollDown, map.hit(column, row)?, row),
             _ => return None,
+        };
+        let column = if target == Target::VolumeSlider {
+            column.clamp(rect.x, rect.right().saturating_sub(1))
+        } else {
+            column
         };
         Some(Msg::Mouse {
             target,
@@ -91,6 +96,23 @@ mod tests {
             row,
             kind,
         }
+    }
+
+    #[test]
+    fn horizontal_volume_drag_stays_on_its_track_and_clamps_both_ends() {
+        let mut map = HitMap::default();
+        let rect = Rect::new(10, 5, 21, 1);
+        map.push(rect, Target::VolumeSlider);
+        let mut state = DragState::default();
+        state.mouse_msg(&map, down(20, 5)).unwrap();
+        assert_eq!(
+            state.mouse_msg(&map, drag(0, 0)),
+            Some(msg(Target::VolumeSlider, rect, 10, 5, MouseKind::Drag))
+        );
+        assert_eq!(
+            state.mouse_msg(&map, drag(500, 300)),
+            Some(msg(Target::VolumeSlider, rect, 30, 5, MouseKind::Drag))
+        );
     }
 
     #[test]

@@ -272,6 +272,13 @@ host. Remote API clients cannot launch host administrator prompts.
 
 ### Mouse
 
+The mixer separates output volume from the signal meter. Volume shows an
+exact percentage; signal RMS and held peak use dBFS before output volume.
+EQ gains stay visible under every band. The audio format section shows the
+capture buffer beside the input and output rates; click the buffer to open
+Audio check. Narrow windows keep volume visible above a scrolling list of
+the remaining controls.
+
 Mouse capture is on; it is turned off again on exit. Hold Shift while
 dragging to select text. If capture cannot be enabled the keyboard still
 works and the help overlay says "mouse off".
@@ -279,7 +286,8 @@ works and the help overlay says "mouse off".
 | Where | Action |
 |---|---|
 | Source or output row | Left click: focus the pane, move the cursor and select (same as `Enter`). Wheel: move the cursor |
-| Volume or EQ fader | Left click: focus the fader; click it again, or drag, to set the value at that cell (the top is the maximum). A drag stays on the fader where the button went down. Wheel: fine step. In the compact mixer a click only focuses the fader and a drag does nothing there |
+| Volume slider | Click or drag to set the percentage from left (0) to right (100). A drag stays on its original slider. Wheel: fine step |
+| EQ fader | Left click: focus the fader; click it again, or drag, to set the value at that cell (the top is the maximum). Wheel: fine step. In the compact mixer a click focuses the EQ row; use the keyboard or wheel to adjust |
 | Rate row | Left click: next rate. Wheel: next or previous |
 | CD buttons | Left click: previous, play / pause, next, eject (eject still asks first) |
 | CD progress bar | Left click: seek to that position |

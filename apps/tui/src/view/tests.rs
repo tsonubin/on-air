@@ -432,8 +432,8 @@ fn mixer_renders_faders_meter_rates() {
     let (b, hits) = render_hits(&m, 100, 30);
     let t = text(&b);
     for needle in [
-        "VOL", "72", "LVL", "60", "250", "1k", "4k", "12k", "In", "Out", "48000 Hz", "44100 Hz",
-        "+2.0 dB",
+        "Volume", "72%", "Signal", "Peak", "dBFS", "EQ · dB", "60", "250", "1k", "4k", "12k", "In",
+        "Out", "48000 Hz", "44100 Hz", "+2.0",
     ] {
         assert!(t.contains(needle), "{needle} missing:\n{t}");
     }
@@ -443,13 +443,11 @@ fn mixer_renders_faders_meter_rates() {
             .find_map(|(x, y)| hits.hit(x, y).filter(|(t, _)| *t == target))
             .map(|(_, rect)| rect)
     };
-    for target in [
-        Target::Fader(crate::model::MixerRow::Volume),
-        Target::Fader(crate::model::MixerRow::Eq(2)),
-    ] {
-        let rect = find(target).unwrap_or_else(|| panic!("{target:?} missing"));
-        assert!(rect.height >= 3, "{target:?} {rect:?}");
-    }
+    let volume = find(Target::VolumeSlider).unwrap();
+    assert!(volume.width >= 20);
+    assert_eq!(volume.height, 1);
+    let eq = find(Target::Fader(crate::model::MixerRow::Eq(2))).unwrap();
+    assert!(eq.height >= 3, "{eq:?}");
     for target in [
         Target::Rate(crate::model::MixerRow::InputRate),
         Target::Rate(crate::model::MixerRow::OutputRate),
@@ -463,24 +461,24 @@ fn the_focused_band_label_fits_the_whole_range() {
     let mut m = model();
     m.pane = Pane::Mixer;
     m.mixer_row = crate::model::MixerRow::Eq(4);
-    for (gain, label) in [(12.0, "+12.0 dB"), (-12.0, "-12.0 dB"), (-10.5, "-10.5 dB")] {
+    for (gain, label) in [(12.0, "+12.0"), (-12.0, "-12.0"), (-10.5, "-10.5")] {
         m.snapshot.eq[4] = gain;
         let t = text(&render(&m, 100, 30));
         assert!(t.contains(label), "{label} missing:\n{t}");
     }
     m.mixer_row = crate::model::MixerRow::Eq(0);
     m.snapshot.eq[0] = -12.0;
-    assert!(text(&render(&m, 100, 30)).contains("-12.0 dB"));
+    assert!(text(&render(&m, 100, 30)).contains("-12.0"));
 }
 
 #[test]
-fn the_focused_band_alone_shows_its_db() {
+fn eq_gains_stay_visible_when_volume_is_focused() {
     let mut m = model();
     m.pane = Pane::Mixer;
     m.mixer_row = crate::model::MixerRow::Eq(2);
-    assert!(text(&render(&m, 100, 30)).contains("+2.0 dB"));
+    assert!(text(&render(&m, 100, 30)).contains("+2.0"));
     m.mixer_row = crate::model::MixerRow::Volume;
-    assert!(!text(&render(&m, 100, 30)).contains("+2.0 dB"));
+    assert!(text(&render(&m, 100, 30)).contains("+2.0"));
 }
 
 #[test]
@@ -739,7 +737,7 @@ fn core_down_dims_but_keeps_rows() {
     assert!(text(&b).contains("Living Room AirPlay"));
     let (x, y) = cell_of(&b, "Living Room AirPlay");
     assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
-    let (x, y) = cell_of(&b, "VOL");
+    let (x, y) = cell_of(&b, "Volume");
     assert!(b[(x, y)].modifier.contains(ratatui::style::Modifier::DIM));
     m.meter.rms_db = -6.0;
     m.meter.peak_db = -6.0;
@@ -831,14 +829,12 @@ fn faders_grow_at_100x30_and_hits_match_what_is_drawn() {
     let mut m = model();
     m.pane = Pane::Mixer;
     let fader_glyph = |b: &Buffer, rect: ratatui::layout::Rect, y: u16| {
-        (rect.x..rect.right()).any(|x| matches!(b[(x, y)].symbol(), "│" | "┃" | "┼"))
+        (rect.x..rect.right()).any(|x| matches!(b[(x, y)].symbol(), "│" | "┃" | "┼" | "●"))
     };
     for (h, min) in [(30, 5), (24, 3)] {
         let (b, hits) = render_hits(&m, 100, h);
-        for target in [
-            Target::Fader(crate::model::MixerRow::Volume),
-            Target::Fader(crate::model::MixerRow::Eq(2)),
-        ] {
+        for band in 0..5 {
+            let target = Target::Fader(crate::model::MixerRow::Eq(band));
             let rect = hit_rect(&hits, 100, h, target);
             assert!(rect.height >= min, "{target:?} {rect:?} at 100x{h}");
             for y in rect.y..rect.bottom() {
@@ -857,6 +853,48 @@ fn faders_grow_at_100x30_and_hits_match_what_is_drawn() {
             }
         }
     }
+}
+
+#[test]
+fn mixer_controls_remain_accessible_after_resizing() {
+    use crate::model::MixerRow;
+    let mut m = model();
+    m.pane = Pane::Mixer;
+    for width in [40, 60, 77, 78, 100] {
+        for height in [18, 24, 30] {
+            for row in MixerRow::ALL {
+                m.mixer_row = row;
+                let target = match row {
+                    MixerRow::Volume => Target::VolumeSlider,
+                    MixerRow::Eq(_) => Target::Fader(row),
+                    MixerRow::InputRate | MixerRow::OutputRate => Target::Rate(row),
+                };
+                let (_, hits) = render_hits(&m, width, height);
+                let rect = hit_rect(&hits, width, height, target);
+                assert!(rect.right() <= width && rect.bottom() <= height);
+            }
+        }
+    }
+}
+
+#[test]
+fn mixer_exposes_the_capture_buffer_without_claiming_default_is_zero_ms() {
+    let mut m = model();
+    m.snapshot.status.as_mut().unwrap().capture_buffer_ms = Some(100);
+    for (width, height) in [(40, 20), (60, 30), (100, 30)] {
+        let rendered = text(&render(&m, width, height));
+        assert!(rendered.contains("100 ms"), "{rendered}");
+    }
+    let (buffer, hits) = render_hits(&m, 100, 30);
+    let (x, y) = cell_of(&buffer, "Buffer 100 ms");
+    assert_eq!(
+        hits.hit(x, y).map(|(target, _)| target),
+        Some(Target::AudioCheck)
+    );
+    m.snapshot.status.as_mut().unwrap().capture_buffer_ms = Some(0);
+    let rendered = text(&render(&m, 100, 30));
+    assert!(rendered.contains("Buffer default"));
+    assert!(!rendered.contains("Buffer 0 ms"));
 }
 
 #[test]

@@ -1,35 +1,35 @@
-//! The Mixer pane: vertical volume and EQ faders, the level meter and the
-//! sample rates; one line per control when the window is short.
+//! The Mixer pane: percentage volume, signal metering, EQ and audio format.
+//! Narrow or short windows use a scrolling list with the same controls.
 
 use super::hit::{HitMap, Target};
-use super::layout::{locked_style, pane_block, row_rect, selection_style};
+use super::layout::{locked_style, pane_block, selection_style, truncate};
 use crate::model::METER_FLOOR_DB;
 use crate::model::{Meter, MixerRow, Model, Pane};
 use crate::update::EQ_RANGE_DB;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
 const EQ_BANDS: [&str; 5] = ["60", "250", "1k", "4k", "12k"];
 const EQ_CELLS: usize = 9;
-const VOLUME_CELLS: usize = 10;
 /// Pane height (with borders) below which the compact form is used.
 const COMPACT_BELOW_HEIGHT: u16 = 7;
 const FADER_ROW: u16 = 1;
-const VOLUME_WIDTH: u16 = 5;
-const BAND_WIDTH: u16 = 5;
-/// Wide enough for "-12.0 dB", centred on the fader.
-const DB_LABEL_WIDTH: u16 = BAND_WIDTH + 4;
-const RATE_WIDTH: u16 = 14;
-const METER_MAX_WIDTH: u16 = 24;
-const METER_MIN_WIDTH: u16 = 4;
+const FULL_MIN_WIDTH: u16 = 78;
+const RATE_WIDTH: u16 = 18;
 const EIGHTHS: [char; 8] = ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'];
 
-pub(super) fn bar(filled: usize, cells: usize) -> String {
-    let filled = filled.min(cells);
-    format!("{}{}", "█".repeat(filled), "░".repeat(cells - filled))
+/// Eighth-cell resolution keeps the displayed percentage and fill aligned.
+fn volume_bar(volume: u8, cells: usize) -> String {
+    let filled = usize::from(volume.min(100)) * cells * 8 / 100;
+    (0..cells)
+        .map(|cell| match filled.saturating_sub(cell * 8).min(8) {
+            0 => '─',
+            n => EIGHTHS[n - 1],
+        })
+        .collect()
 }
 
 pub(super) fn eq_band(gain_db: f32) -> String {
@@ -98,7 +98,7 @@ fn meter_cells(meter: &Meter, width: usize) -> Vec<Span<'static>> {
 }
 
 pub(super) fn mixer_pane(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
-    if area.height < COMPACT_BELOW_HEIGHT {
+    if area.height < COMPACT_BELOW_HEIGHT || area.width < FULL_MIN_WIDTH {
         compact_mixer(model, frame, area, hits);
     } else {
         full_mixer(model, frame, area, hits);
@@ -119,262 +119,368 @@ fn clipped(inner: Rect, rect: Rect) -> Option<Rect> {
     (!rect.is_empty()).then_some(rect)
 }
 
-fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
-    let focused = model.pane == Pane::Mixer;
-    let snapshot = &model.snapshot;
-    frame.render_widget(pane_block("Mixer", focused, model.accent), area);
-    let inner = ratatui::widgets::Block::bordered().inner(area);
-    // The faders take every row between the label row and the value row.
-    let fader_height = inner.height.saturating_sub(2).max(1);
-    let value_row = FADER_ROW + fader_height;
-    let is_focus = |row: MixerRow| focused && row == model.mixer_row;
-    let label_style = |row: MixerRow| {
-        locked_style(
-            model,
-            if is_focus(row) {
-                selection_style(model)
-            } else {
-                Style::new()
-            },
-        )
-    };
-    let fader_style = |row: MixerRow| {
-        locked_style(
-            model,
-            if is_focus(row) {
-                Style::new().fg(model.accent).add_modifier(Modifier::BOLD)
-            } else {
-                Style::new()
-            },
-        )
-    };
+fn control_style(model: &Model, row: MixerRow) -> Style {
+    locked_style(
+        model,
+        if model.pane == Pane::Mixer && model.mixer_row == row {
+            selection_style(model)
+        } else {
+            Style::new()
+        },
+    )
+}
 
-    // Volume.
-    let mut x = inner.x + 1;
+fn full_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
+    frame.render_widget(
+        pane_block("Mixer", model.pane == Pane::Mixer, model.accent),
+        area,
+    );
+    let inner = ratatui::widgets::Block::bordered().inner(area);
+    let volume_width = (inner.width * 3 / 10).clamp(22, 32);
+    let [volume, first_divider, eq, second_divider, format] = Layout::horizontal([
+        Constraint::Length(volume_width),
+        Constraint::Length(1),
+        Constraint::Min(30),
+        Constraint::Length(1),
+        Constraint::Length(RATE_WIDTH),
+    ])
+    .areas(inner);
+    for divider in [first_divider, second_divider] {
+        for y in 0..divider.height {
+            put(
+                frame,
+                divider,
+                divider.x,
+                y,
+                1,
+                Line::styled("│", Style::new().dim()),
+            );
+        }
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(" EQ · dB ").centered()),
+        Rect::new(eq.x, area.y, eq.width, 1),
+    );
+    volume_section(model, frame, volume, hits);
+    eq_section(model, frame, eq, hits);
+    format_section(model, frame, format, hits);
+}
+
+/// Volume is a percentage control. Signal is measured before output volume;
+/// keeping them apart avoids presenting a moving level meter as loudness.
+fn volume_section(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
+    let x = area.x + 1;
+    let width = area.width.saturating_sub(2);
     put(
         frame,
-        inner,
+        area,
         x,
         0,
-        VOLUME_WIDTH,
-        Line::styled(" VOL ", label_style(MixerRow::Volume)),
+        width,
+        Line::styled(
+            format!("Volume {:>3}%", model.snapshot.volume),
+            control_style(model, MixerRow::Volume),
+        ),
     );
-    let filled =
-        (f32::from(snapshot.volume.min(100)) / 100.0 * f32::from(fader_height)).round() as u16;
-    for row in 0..fader_height {
-        let on = fader_height - row <= filled;
-        let glyph = if on { "┃" } else { "│" };
+    let cells: Vec<_> = volume_bar(model.snapshot.volume, width as usize)
+        .chars()
+        .map(|cell| {
+            let style = if cell == '─' {
+                Style::new().dim()
+            } else {
+                Style::new().fg(model.accent)
+            };
+            Span::styled(cell.to_string(), locked_style(model, style))
+        })
+        .collect();
+    put(frame, area, x, 1, width, Line::from(cells));
+    hits.push(Rect::new(x, area.y + 1, width, 1), Target::VolumeSlider);
+    if area.height >= 7 {
+        let output = if model.core_down {
+            "Core unavailable"
+        } else if !model.service_on() {
+            "Monitor off"
+        } else {
+            model
+                .snapshot
+                .active_output
+                .as_ref()
+                .map(|active| active.output.device_name.as_str())
+                .unwrap_or("No output")
+        };
         put(
             frame,
-            inner,
-            x + 2,
-            FADER_ROW + row,
-            1,
-            Line::styled(glyph, fader_style(MixerRow::Volume)),
+            area,
+            x,
+            2,
+            width,
+            Line::styled(
+                truncate(output, width as usize),
+                locked_style(model, Style::new().dim()),
+            ),
         );
     }
+    let signal_row = area.height.saturating_sub(3);
     put(
         frame,
-        inner,
+        area,
         x,
-        value_row,
-        VOLUME_WIDTH,
+        signal_row,
+        width,
         Line::styled(
-            format!("{:^5}", snapshot.volume),
+            format!("Signal {:>5.1} dBFS", model.meter.rms_db),
             locked_style(model, Style::new()),
         ),
     );
-    if let Some(rect) = clipped(
-        inner,
-        Rect::new(x, inner.y + FADER_ROW, VOLUME_WIDTH, fader_height),
-    ) {
-        hits.push(rect, Target::Fader(MixerRow::Volume));
+    let mut cells = meter_cells(&model.meter, width as usize);
+    for cell in &mut cells {
+        cell.style = locked_style(model, cell.style);
     }
-    x += VOLUME_WIDTH + 2;
-
-    // Level meter, sized to what the faders and rates leave over.
-    let fixed = 5 * BAND_WIDTH + 3 + 4 + RATE_WIDTH + 2;
-    let meter_width = inner
-        .width
-        .saturating_sub(VOLUME_WIDTH + 2 + fixed)
-        .clamp(METER_MIN_WIDTH, METER_MAX_WIDTH);
+    put(frame, area, x, signal_row + 1, width, Line::from(cells));
     put(
         frame,
-        inner,
+        area,
         x,
-        0,
-        meter_width,
-        Line::styled("LVL", locked_style(model, Style::new())),
+        signal_row + 2,
+        width,
+        Line::styled(
+            format!("Peak   {:>5.1} dBFS", model.meter.peak_db),
+            locked_style(model, Style::new().fg(meter_color(model.meter.peak_db))),
+        ),
     );
-    let mut cells = meter_cells(&model.meter, usize::from(meter_width));
-    if model.locked() || model.core_down {
-        for cell in &mut cells {
-            cell.style = cell.style.add_modifier(Modifier::DIM);
-        }
-    }
-    put(
-        frame,
-        inner,
-        x,
-        FADER_ROW + 1,
-        meter_width,
-        Line::from(cells),
-    );
-    x += meter_width + 3;
+}
 
-    // EQ.
+fn eq_section(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
+    let band_width = area.width / EQ_BANDS.len() as u16;
+    let start = area.x + (area.width - band_width * EQ_BANDS.len() as u16) / 2;
+    let height = area.height.saturating_sub(2).max(1);
     let (lo, hi) = EQ_RANGE_DB;
     for (band, name) in EQ_BANDS.iter().enumerate() {
         let row = MixerRow::Eq(band);
-        let gain = snapshot.eq[band];
+        let x = start + band as u16 * band_width;
+        let focused = model.pane == Pane::Mixer && model.mixer_row == row;
+        let style = locked_style(
+            model,
+            if focused {
+                Style::new().fg(model.accent).bold()
+            } else {
+                Style::new()
+            },
+        );
+        let gain = model.snapshot.eq[band];
         put(
             frame,
-            inner,
+            area,
             x,
             0,
-            BAND_WIDTH,
-            Line::styled(format!("{name:^5}"), label_style(row)),
+            band_width,
+            Line::styled(*name, control_style(model, row)).centered(),
         );
-        let centre = (fader_height - 1) / 2;
-        let position = fader_offset(gain, fader_height, lo, hi);
-        for line in 0..fader_height {
-            let lit = (position.min(centre)..=position.max(centre)).contains(&line);
-            let glyph = if line == centre {
+        let centre = fader_offset(0.0, height, lo, hi);
+        let position = fader_offset(gain, height, lo, hi);
+        for offset in 0..height {
+            let lit = (position.min(centre)..=position.max(centre)).contains(&offset);
+            let glyph = if offset == position {
+                "●"
+            } else if offset == centre {
                 "┼"
             } else if lit {
                 "┃"
             } else {
                 "│"
             };
-            let style = if lit || line == centre && is_focus(row) {
-                fader_style(row)
-            } else {
-                locked_style(model, Style::new())
-            };
             put(
                 frame,
-                inner,
-                x + 2,
-                FADER_ROW + line,
+                area,
+                x + band_width / 2,
+                FADER_ROW + offset,
                 1,
                 Line::styled(glyph, style),
             );
         }
-        if is_focus(row) {
-            put(
-                frame,
-                inner,
-                x.saturating_sub(2).max(inner.x),
-                value_row,
-                DB_LABEL_WIDTH,
-                Line::styled(format!("{gain:+.1} dB"), fader_style(row)).centered(),
-            );
-        }
-        if let Some(rect) = clipped(
-            inner,
-            Rect::new(x, inner.y + FADER_ROW, BAND_WIDTH, fader_height),
-        ) {
+        put(
+            frame,
+            area,
+            x,
+            area.height - 1,
+            band_width,
+            Line::styled(format!("{gain:+.1}"), control_style(model, row)).centered(),
+        );
+        if let Some(rect) = clipped(area, Rect::new(x, area.y + FADER_ROW, band_width, height)) {
             hits.push(rect, Target::Fader(row));
         }
-        x += BAND_WIDTH;
     }
-    x += 4;
+}
 
-    // Sample rates.
-    let rates = [(MixerRow::InputRate, "In "), (MixerRow::OutputRate, "Out")];
-    for (line, (row, name)) in rates.into_iter().enumerate() {
-        let text = match &snapshot.rates {
+fn format_section(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
+    let x = area.x + 1;
+    let width = area.width.saturating_sub(1);
+    put(
+        frame,
+        area,
+        x,
+        0,
+        width,
+        Line::styled("Audio format", locked_style(model, Style::new().bold())),
+    );
+    for (index, (row, label)) in [(MixerRow::InputRate, "In "), (MixerRow::OutputRate, "Out")]
+        .into_iter()
+        .enumerate()
+    {
+        let text = match &model.snapshot.rates {
             Some(rates) => {
                 let side = if row == MixerRow::InputRate {
                     &rates.input
                 } else {
                     &rates.output
                 };
-                format!("{name} {:>5} Hz", side.sample_rate_hz)
+                format!("{label} {:>5} Hz", side.sample_rate_hz)
             }
-            None => format!("{name} —"),
+            None => format!("{label} —"),
         };
-        let y = FADER_ROW + line as u16;
+        let y = 1 + index as u16;
         put(
             frame,
-            inner,
+            area,
             x,
             y,
-            RATE_WIDTH,
-            Line::styled(text, label_style(row)),
+            width,
+            Line::styled(text, control_style(model, row)),
         );
-        if let Some(rect) = clipped(inner, Rect::new(x, inner.y + y, RATE_WIDTH, 1)) {
-            hits.push(rect, Target::Rate(row));
-        }
+        hits.push(Rect::new(x, area.y + y, width, 1), Target::Rate(row));
     }
+    let buffer = match model
+        .snapshot
+        .status
+        .as_ref()
+        .and_then(|status| status.capture_buffer_ms)
+    {
+        Some(0) => "Buffer default".into(),
+        Some(ms) => format!("Buffer {ms} ms"),
+        None => "Buffer —".into(),
+    };
+    let y = area.height.saturating_sub(1);
+    put(
+        frame,
+        area,
+        x,
+        y,
+        width,
+        Line::styled(buffer, locked_style(model, Style::new())),
+    );
+    hits.push(Rect::new(x, area.y + y, width, 1), Target::AudioCheck);
 }
 
-/// One line per control, scrolled to the cursor; for windows too short for
-/// the faders.
+/// Keep volume visible even while the remaining controls scroll to focus.
 fn compact_mixer(model: &Model, frame: &mut Frame, area: Rect, hits: &mut HitMap) {
     let focused = model.pane == Pane::Mixer;
-    let block = pane_block("Mixer", focused, model.accent);
+    let buffer = model
+        .snapshot
+        .status
+        .as_ref()
+        .and_then(|status| status.capture_buffer_ms)
+        .map(|ms| {
+            if ms == 0 {
+                "default buffer".into()
+            } else {
+                format!("{ms} ms buffer")
+            }
+        });
+    let title = buffer
+        .map(|buffer| format!("Mixer · {buffer}"))
+        .unwrap_or_else(|| "Mixer".into());
+    let block = pane_block(&title, focused, model.accent);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.is_empty() {
+        return;
+    }
+    let volume_cells = usize::from(inner.width.saturating_sub(18)).clamp(8, 24);
     let snapshot = &model.snapshot;
-    let rows = MixerRow::ALL.iter().map(|row| {
+    let marker = if focused && model.mixer_row == MixerRow::Volume {
+        "> "
+    } else {
+        "  "
+    };
+    let volume = Line::styled(
+        format!(
+            "{marker}Volume   {}  {:>3}%",
+            volume_bar(snapshot.volume, volume_cells),
+            snapshot.volume
+        ),
+        control_style(model, MixerRow::Volume),
+    );
+    let volume_rect = Rect::new(inner.x, inner.y, inner.width, 1);
+    frame.render_widget(Paragraph::new(volume), volume_rect);
+    hits.push(volume_rect, Target::Fader(MixerRow::Volume));
+    let bar = Rect::new(inner.x + 11, inner.y, volume_cells as u16, 1).intersection(volume_rect);
+    if !bar.is_empty() {
+        hits.push(bar, Target::VolumeSlider);
+    }
+
+    let controls = &MixerRow::ALL[1..];
+    let content = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
+    let rows = controls.iter().map(|row| {
         let text = match row {
-            MixerRow::Volume => format!(
-                "Volume   {}  {:>3}",
-                bar(
-                    snapshot.volume as usize / (100 / VOLUME_CELLS),
-                    VOLUME_CELLS
-                ),
-                snapshot.volume
-            ),
+            MixerRow::Volume => unreachable!("volume has its own fixed row"),
             MixerRow::Eq(band) => format!(
                 "EQ {:<4} {}  {:+.1} dB",
                 EQ_BANDS[*band],
                 eq_band(snapshot.eq[*band]),
                 snapshot.eq[*band]
             ),
-            MixerRow::InputRate => match &snapshot.rates {
-                Some(rates) => format!("In {} Hz", rates.input.sample_rate_hz),
-                None => "In —".to_string(),
-            },
-            MixerRow::OutputRate => match &snapshot.rates {
-                Some(rates) => format!("Out {} Hz", rates.output.sample_rate_hz),
-                None => "Out —".to_string(),
-            },
+            MixerRow::InputRate => snapshot
+                .rates
+                .as_ref()
+                .map(|rates| format!("In {} Hz", rates.input.sample_rate_hz))
+                .unwrap_or_else(|| "In —".into()),
+            MixerRow::OutputRate => snapshot
+                .rates
+                .as_ref()
+                .map(|rates| format!("Out {} Hz", rates.output.sample_rate_hz))
+                .unwrap_or_else(|| "Out —".into()),
         };
         let selected = focused && *row == model.mixer_row;
         let marker = if selected { "> " } else { "  " };
-        let style = if selected {
-            selection_style(model)
-        } else {
-            Style::new()
-        };
-        ListItem::new(Line::from(vec![Span::raw(marker), Span::raw(text)]))
-            .style(locked_style(model, style))
+        ListItem::new(Line::from(format!("{marker}{text}"))).style(control_style(model, *row))
     });
-    // The state only scrolls the list to the cursor; the marker and
-    // highlight are drawn by the items themselves.
-    let mut state = ListState::default().with_selected(Some(
-        MixerRow::ALL
-            .iter()
-            .position(|row| *row == model.mixer_row)
-            .unwrap_or(0),
-    ));
-    frame.render_stateful_widget(List::new(rows).block(block), area, &mut state);
-    for (index, row) in MixerRow::ALL.iter().enumerate() {
-        if let Some(rect) = row_rect(area, state.offset(), index) {
-            hits.push(
-                rect,
-                match row {
-                    MixerRow::InputRate | MixerRow::OutputRate => Target::Rate(*row),
-                    _ => Target::Fader(*row),
-                },
-            );
+    let selected = controls.iter().position(|row| *row == model.mixer_row);
+    let mut state = ListState::default().with_selected(selected);
+    frame.render_stateful_widget(List::new(rows), content, &mut state);
+    for (index, row) in controls.iter().enumerate().skip(state.offset()) {
+        let y = content.y + (index - state.offset()) as u16;
+        if y >= content.bottom() {
+            break;
         }
+        hits.push(
+            Rect::new(content.x, y, content.width, 1),
+            match row {
+                MixerRow::InputRate | MixerRow::OutputRate => Target::Rate(*row),
+                _ => Target::Fader(*row),
+            },
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn volume_fill_has_precise_endpoints_and_distinguishes_near_maximum() {
+        assert_eq!(volume_bar(0, 20), "─".repeat(20));
+        assert_eq!(
+            volume_bar(80, 20),
+            format!("{}{}", "█".repeat(16), "─".repeat(4))
+        );
+        assert_eq!(volume_bar(100, 20), "█".repeat(20));
+        assert_ne!(volume_bar(99, 20), volume_bar(100, 20));
+    }
 
     #[test]
     fn fader_value_endpoints_and_rounding() {
