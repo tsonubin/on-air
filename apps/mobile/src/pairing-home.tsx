@@ -191,7 +191,7 @@ export function PairingHome({
   const wide = width >= layout.wideBreakpoint;
   const [manual, setManual] = useState(false);
   const pinInputRef = useRef<TextInput>(null);
-  // Lifts the whole code panel, Connect included, above the number pad and its "Done" bar.
+  // Lifts the whole code panel, Connect included, above the number pad (and its iOS "Done" bar).
   const keyboardClearance = useKeyboardClearance(pinInputRef);
   const selected = found.find((hit) => hit.host === host.trim()) ?? null;
   const targetReady = manual ? host.trim().length > 0 : selected !== null;
@@ -208,6 +208,7 @@ export function PairingHome({
       <ScrollView
         ref={keyboardClearance.scrollRef}
         onScroll={keyboardClearance.onScroll}
+        onLayout={keyboardClearance.onLayout}
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
         automaticallyAdjustKeyboardInsets
@@ -343,7 +344,7 @@ export function PairingHome({
             {targetReady ? (
               <View
                 ref={keyboardClearance.targetRef}
-                onLayout={keyboardClearance.onTargetLayout}
+                onLayout={keyboardClearance.onLayout}
                 testID="pairing-code"
                 style={{ width: wide ? undefined : "100%", flex: wide ? 1 : undefined, gap: 10 }}
               >
@@ -372,6 +373,7 @@ export function PairingHome({
                     maxLength={6}
                     returnKeyType="done"
                     onSubmitEditing={onPair}
+                    onFocus={keyboardClearance.onFocus}
                     editable={!pairing}
                     accessibilityLabel="Six-digit pairing code"
                     testID="pin-input"

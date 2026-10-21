@@ -39,6 +39,8 @@ Notable changes to on-air. The format follows
 - On iOS 26 and later the whole pairing-code panel, Connect included, now
   scrolls above the number pad. Connect used to sit behind the keyboard's
   see-through "Done" bar, which took the tap, so only its top edge worked.
+- Android does the same: Connect used to stay clipped below the number pad,
+  since the screen only scrolled until the code field touched the keyboard.
 
 ## [0.2.0] - unreleased
 

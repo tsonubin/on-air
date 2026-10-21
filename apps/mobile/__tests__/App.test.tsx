@@ -508,8 +508,12 @@ test("the code panel scrolls clear of the number pad and its Done bar", async ()
   showKeyboard();
   expect(views.scrollTo).not.toHaveBeenCalled();
 
-  // 30pt already scrolled, plus the panel's 56pt overlap, plus 12pt of room above the bar.
+  // iOS follows every focus change with keyboardDidShow, so the focus itself waits for it.
   views.pinFocused = true;
+  ReactTestRenderer.act(() => host("pin-input").props.onFocus());
+  expect(views.scrollTo).not.toHaveBeenCalled();
+
+  // 30pt already scrolled, plus the panel's 56pt overlap, plus 12pt of room above the bar.
   showKeyboard();
   expect(views.scrollTo).toHaveBeenCalledWith({ y: 98, animated: true });
   views.scrollTo.mockClear();
@@ -545,20 +549,51 @@ test("the code panel stays clear of the number pad when manual setup opens above
   expect(views.scrollTo).not.toHaveBeenCalled();
 });
 
-test("Android leaves the code panel to the padded screen", async () => {
+// A Pixel 8 on Android 16: the number pad, suggestion strip included, starts at y=571.
+const ANDROID_NUMBER_PAD = {
+  endCoordinates: { screenX: 0, screenY: 571, width: 411, height: 295 },
+};
+
+async function onAndroid(check: () => Promise<void>) {
   const original = Platform.OS;
+  (Platform as { OS: string }).OS = "android";
   try {
-    (Platform as { OS: string }).OS = "android";
-    const { views, options } = pairingViews();
-    views.pinFocused = true;
-    await renderApp(options);
-    showKeyboard();
-    ReactTestRenderer.act(() => host("pairing-code").props.onLayout());
-    expect(views.scrollTo).not.toHaveBeenCalled();
+    await check();
   } finally {
     (Platform as { OS: string }).OS = original;
   }
-});
+}
+
+test("on Android the code panel clears the number pad once the screen has padded itself", () =>
+  onAndroid(async () => {
+    const { views, options } = pairingViews();
+    views.pinFocused = true;
+    views.panelBottom = 807;
+    await renderApp(options);
+
+    // keyboardDidShow comes before the padding, so the scroll it starts stops at the old scroll
+    // range. The ScrollView shrinking for the keyboard runs the clearance again.
+    showKeyboard(ANDROID_NUMBER_PAD);
+    views.scrollTo.mockClear();
+    ReactTestRenderer.act(() => host("pairing-scroll").props.onLayout());
+    // The panel's 236pt overlap plus 12pt of room above the number pad.
+    expect(views.scrollTo).toHaveBeenCalledWith({ y: 248, animated: true });
+  }));
+
+test("on Android the code panel clears the keyboard when the code field takes focus under it", () =>
+  onAndroid(async () => {
+    const { views, options } = pairingViews();
+    views.panelBottom = 807;
+    await renderApp(options);
+    showKeyboard(ANDROID_NUMBER_PAD);
+    expect(views.scrollTo).not.toHaveBeenCalled();
+
+    // The address keyboard is as tall as the number pad, so moving on with "next" sends no
+    // keyboard event and changes no layout. Only the focus says the code field is now in use.
+    views.pinFocused = true;
+    ReactTestRenderer.act(() => host("pin-input").props.onFocus());
+    expect(views.scrollTo).toHaveBeenCalledWith({ y: 248, animated: true });
+  }));
 
 test("an expired pairing returns to pairing with the desktop still selected", async () => {
   await renderApp();
