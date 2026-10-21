@@ -120,6 +120,40 @@ async fn bursty_sonos_reader_keeps_buffered_audio_contiguous() {
 }
 
 #[tokio::test]
+async fn default_usb_capture_batching_does_not_insert_silence() {
+    use axum::{body::Body, http::Request};
+    use tower::ServiceExt;
+
+    let state = CoreState::new();
+    let nonce = new_stream_nonce();
+    make_live(&state, "sonos", "uuid:test", "Test", nonce.clone()).await;
+    let audio_tx = state.audio_tx.clone();
+    let response = on_air_core::build_router(state)
+        .oneshot(
+            Request::get(format!("/stream/{nonce}/audio.wav"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut stream = response.into_body().into_data_stream();
+    assert!(stream.next().await.unwrap().unwrap().starts_with(b"RIFF"));
+
+    // Default PipeWire capture requests a 50 ms buffer. Batches and the
+    // processing quantum can leave a normal gap longer than the 40 ms
+    // silence timer. Padding that gap adds time before the real PCM arrives.
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(90), stream.next())
+            .await
+            .is_err(),
+        "default USB batching must not lengthen the audio timeline with silence"
+    );
+    let pcm = bytes::Bytes::from_static(&[1, 2, 3, 4]);
+    audio_tx.send(pcm.clone()).unwrap();
+    assert_eq!(stream.next().await.unwrap().unwrap(), pcm);
+}
+
+#[tokio::test]
 async fn a_larger_capture_buffer_does_not_insert_silence_between_normal_batches() {
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;

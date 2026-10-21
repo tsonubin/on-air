@@ -12,6 +12,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Bytes in one interleaved f32 LE pipeline frame, as `parec` writes it.
 const F32_FRAME_BYTES: usize = 4 * PIPELINE_CHANNELS;
 
+/// PipeWire capture latency when the user selects the default buffer.
+pub(crate) const DEFAULT_PULSE_BUFFER_MS: u32 = 50;
+
 /// The left and right of one captured frame: a mono frame feeds both sides,
 /// and a surround frame keeps its front pair. Panics on an empty frame.
 pub fn stereo_frame<T: Copy>(frame: &[T]) -> [T; 2] {
@@ -143,7 +146,7 @@ pub fn is_pulse_monitor_name(name: &str) -> bool {
 /// capture through `parec`. Other platforms never spawn these binaries.
 #[cfg(target_os = "linux")]
 mod pulse {
-    use super::{parse_pactl_monitor_sources, pump_f32le_stereo};
+    use super::{parse_pactl_monitor_sources, pump_f32le_stereo, DEFAULT_PULSE_BUFFER_MS};
     use ringbuf::HeapProd;
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -199,7 +202,11 @@ mod pulse {
                 "--channels=2",
                 &format!(
                     "--latency-msec={}",
-                    if buffer_ms == 0 { 50 } else { buffer_ms }
+                    if buffer_ms == 0 {
+                        DEFAULT_PULSE_BUFFER_MS
+                    } else {
+                        buffer_ms
+                    }
                 ),
             ])
             .stdout(Stdio::piped())

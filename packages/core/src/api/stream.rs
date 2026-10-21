@@ -1,6 +1,7 @@
 use crate::api::error::ApiError;
 use crate::dsp::bridge::RateBridge;
 use crate::dsp::PIPELINE_CHANNELS;
+use crate::pipeline::capture::DEFAULT_PULSE_BUFFER_MS;
 use crate::state::CoreState;
 use axum::body::Body;
 use axum::extract::{Path, State};
@@ -124,11 +125,16 @@ pub async fn stream_audio(
                     pcm
                 }
                 Err(_) => {
-                    // A larger capture buffer delivers audio in larger,
-                    // less frequent batches. Do not fill normal intervals
-                    // between those batches with extra silence.
+                    // Default PipeWire capture still buffers 50 ms; zero
+                    // means automatic, not unbuffered. Allow normal batches
+                    // to arrive before padding a genuine capture stall.
                     let grace = std::time::Duration::from_millis(
-                        u64::from(capture_buffer_ms.load(Ordering::Acquire)) * 2 + 40,
+                        u64::from(
+                            capture_buffer_ms
+                                .load(Ordering::Acquire)
+                                .max(DEFAULT_PULSE_BUFFER_MS),
+                        ) * 2
+                            + 40,
                     );
                     if last_pcm.elapsed() < grace {
                         return None;

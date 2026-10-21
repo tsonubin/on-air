@@ -113,7 +113,7 @@ async fn inspect(port: u16, repaired_at: u64) -> Option<FirewallWarning> {
         Duration::from_secs(3),
         tokio::process::Command::new("journalctl")
             .args([
-                "--kernel",
+                "--dmesg",
                 "--no-pager",
                 "--since",
                 &since,
