@@ -48,9 +48,9 @@ export const fonts = {
   led: "DSEG14ClassicMini-Regular",
   mono: "IBMPlexMono-Regular",
   monoMedium: "IBMPlexMono-Medium",
-  sans: "IBMPlexSans-Regular",
-  sansMedium: "IBMPlexSans-Medium",
-  sansSemiBold: "IBMPlexSans-SemiBold",
+  sans: "IBMPlexSans",
+  sansMedium: "IBMPlexSans-Medm",
+  sansSemiBold: "IBMPlexSans-SmBld",
 } as const;
 
 export const spacing = {

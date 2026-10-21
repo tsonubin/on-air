@@ -2,6 +2,7 @@ import { DarkTheme, ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { FontGate } from "@/font-gate";
 import { RemoteProvider, useRemoteSession } from "@/remote-session";
 
 function Navigation() {
@@ -23,12 +24,14 @@ function Navigation() {
 export default function RootLayout() {
   return (
     <SafeAreaProvider>
-      <ThemeProvider value={DarkTheme}>
-        <StatusBar style="light" />
-        <RemoteProvider>
-          <Navigation />
-        </RemoteProvider>
-      </ThemeProvider>
+      <FontGate>
+        <ThemeProvider value={DarkTheme}>
+          <StatusBar style="light" />
+          <RemoteProvider>
+            <Navigation />
+          </RemoteProvider>
+        </ThemeProvider>
+      </FontGate>
     </SafeAreaProvider>
   );
 }
