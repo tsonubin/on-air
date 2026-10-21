@@ -20,8 +20,8 @@ describe("sheetProps", () => {
     expect(source.showDragIndicator).toBe(true);
     expect(source.modifiers).toEqual([
       { $type: "environment", key: "colorScheme", value: "dark" },
-      { $type: "presentationBackground", color: "#171719" },
-      { $type: "tint", color: "#ff453a" },
+      { $type: "presentationBackground", color: "#1a1814" },
+      { $type: "tint", color: "#ff3b2a" },
     ]);
     expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 316 }]);
     expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 300 }]);
