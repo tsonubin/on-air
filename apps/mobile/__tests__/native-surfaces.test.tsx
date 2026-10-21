@@ -1,6 +1,11 @@
 import type { ReactElement } from "react";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
-import { navigationTheme, screenHeaderOptions, titledScreen } from "@/navigation-theme";
+import {
+  navigationTheme,
+  screenHeaderOptions,
+  stackScreens,
+  titledScreen,
+} from "@/navigation-theme";
 import { SettingsForm } from "@/settings-form";
 import { sheetProps } from "@/sheets/sheet-props";
 import { FormText } from "@/ui/form-text";
@@ -66,6 +71,17 @@ test("native header titles are uppercase captions; back buttons keep the plain t
     title: "Audio format",
     headerTitle: "AUDIO FORMAT",
   });
+  // iOS builds the back label from the previous screen's headerTitle, so a
+  // screen pushed from Sound names its back button explicitly.
+  expect(titledScreen("Equalizer", "Sound")).toEqual({
+    title: "Equalizer",
+    headerTitle: "EQUALIZER",
+    headerBackTitle: "Sound",
+  });
+  const byName = Object.fromEntries(stackScreens.map((s) => [s.name, s.options]));
+  expect(byName.equalizer.headerBackTitle).toBe("Sound");
+  expect(byName["audio-format"].headerBackTitle).toBe("Sound");
+  expect(Object.keys(byName)).toEqual(["sound", "equalizer", "audio-format", "connection"]);
 });
 
 test("sheets are faceplate-backed and amber-tinted on iOS", () => {
