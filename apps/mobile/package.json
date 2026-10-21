@@ -18,7 +18,6 @@
     "@expo/ui": "~57.0.24",
     "@on-air/api-types": "workspace:*",
     "@on-air/control-client": "workspace:*",
-    "@react-navigation/native": "^7.5.1",
     "expo": "~57.0.29",
     "expo-constants": "~57.0.22",
     "expo-font": "~57.0.4",

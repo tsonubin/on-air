@@ -11,7 +11,6 @@ module.exports = {
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
     "^expo-router(/stack)?$": "<rootDir>/__mocks__/expo-router.js",
-    "^@react-navigation/native$": "<rootDir>/__mocks__/navigation-theme.js",
     "^@on-air/control-client$": "<rootDir>/../../packages/control-client/src/index.ts",
     "^@on-air/control-client/testing$": "<rootDir>/../../packages/control-client/src/testing.ts",
     "^@on-air/api-types$": "<rootDir>/../../packages/api-types/src/index.ts",
