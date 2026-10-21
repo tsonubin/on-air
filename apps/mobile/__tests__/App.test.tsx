@@ -638,3 +638,29 @@ test("volume shows on an LED readout that dims when the desktop is paused", asyn
   expect(host("status-pill").props.accessibilityLabel).toBe("Desktop service is paused");
   expect(flat(value()?.props.style).color).toBe("#9a8f78");
 });
+
+test("pairing: unlit sign, LED code field and an amber Connect key", async () => {
+  await renderApp();
+  expect(host("remote-title").props.accessibilityLabel).toBe("on-air");
+  expect(flat(textsIn(host("remote-title"))[0].props.style).color).toBe("#5a1814");
+  expect(text()).toContain("Pair your Mac");
+
+  const pin = host("pin-input");
+  expect(pin.props).toMatchObject({
+    placeholder: "888888",
+    maxLength: 6,
+    accessibilityLabel: "Six-digit pairing code",
+    maxFontSizeMultiplier: 1.3,
+  });
+  expect(flat(pin.props.style)).toMatchObject({
+    fontFamily: "DSEG14ClassicMini-Regular",
+    color: "#e0a24b",
+    backgroundColor: "#070605",
+  });
+  expect(pin.props.placeholderTextColor).toBe("#1c1812");
+
+  expect(flat(host("pair-button").props.style)).toMatchObject({ backgroundColor: "#1a1814" });
+  ReactTestRenderer.act(() => host("pin-input").props.onChangeText("123456"));
+  expect(flat(host("pair-button").props.style)).toMatchObject({ backgroundColor: "#e0a24b" });
+  expect(flat(textsIn(host("pair-button"))[0].props.style).color).toBe("#141210");
+});

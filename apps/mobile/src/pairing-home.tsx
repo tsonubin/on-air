@@ -13,11 +13,12 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { colors, layout, radius } from "./theme";
+import { colors, fonts, layout, radius, type } from "./theme";
 import { Card } from "./ui/card";
 import { IconTile } from "./ui/icon-tile";
 import { icons } from "./ui/icons";
 import { NativeIcon } from "./ui/native-icon";
+import { Sign } from "./ui/sign";
 
 const DEFAULT_NAME = "on-air on Mac";
 
@@ -50,8 +51,10 @@ function DiscoveredRow({
         gap: 14,
         borderBottomWidth: last ? 0 : 1,
         borderBottomColor: colors.separator,
+        borderWidth: selected ? 1 : 0,
+        borderColor: colors.key,
         backgroundColor: selected
-          ? colors.selectedSurface
+          ? colors.surfaceRaised
           : pressed
             ? colors.surfacePressed
             : "transparent",
@@ -59,17 +62,17 @@ function DiscoveredRow({
     >
       <IconTile name={icons.computer} />
       <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={1} style={{ color: colors.label, fontSize: 18, fontWeight: "700" }}>
+        <Text numberOfLines={1} style={[type.title, { color: colors.label }]}>
           {name}
         </Text>
-        <Text numberOfLines={1} style={{ color: colors.secondaryLabel, fontSize: 15 }}>
+        <Text numberOfLines={1} style={[type.body, { color: colors.secondaryLabel }]}>
           {selected ? "Ready for your code" : "Nearby"}
         </Text>
       </View>
       <NativeIcon
         name={icons.check}
         size={24}
-        color={selected ? colors.accent : colors.tertiaryLabel}
+        color={selected ? colors.amber : colors.tertiaryLabel}
       />
     </Pressable>
   );
@@ -90,22 +93,15 @@ function EmptyDiscovery({ scanning }: { scanning: boolean }) {
       }}
     >
       {scanning ? (
-        <ActivityIndicator size="large" color={colors.accent} />
+        <ActivityIndicator size="large" color={colors.amber} />
       ) : (
         <NativeIcon name={icons.search} size={34} color={colors.secondaryLabel} />
       )}
       <View style={{ alignItems: "center", gap: 4 }}>
-        <Text style={{ color: colors.label, fontSize: 18, fontWeight: "700" }}>
+        <Text style={[type.title, { color: colors.label }]}>
           {scanning ? "Looking for your Mac…" : "No Mac found yet"}
         </Text>
-        <Text
-          style={{
-            color: colors.secondaryLabel,
-            fontSize: 15,
-            lineHeight: 20,
-            textAlign: "center",
-          }}
-        >
+        <Text style={[type.body, { color: colors.secondaryLabel, textAlign: "center" }]}>
           {scanning
             ? "Make sure both devices are on the same Wi-Fi."
             : "Open on-air on your Mac, then search again."}
@@ -147,11 +143,10 @@ function LinkButton({
       })}
     >
       <Text
-        style={
-          tone === "accent"
-            ? { color: colors.accent, fontSize: 16, fontWeight: "600" }
-            : { color: colors.secondaryLabel, fontSize: 16 }
-        }
+        style={[
+          type.body,
+          { fontSize: 16, color: tone === "accent" ? colors.amber : colors.secondaryLabel },
+        ]}
       >
         {label}
       </Text>
@@ -221,32 +216,23 @@ export function PairingHome({
       >
         <View style={{ gap: wide ? 28 : 24 }}>
           <View style={{ gap: 18 }}>
-            <Text
-              accessibilityRole="header"
-              testID="remote-title"
-              style={{ color: colors.label, fontSize: 38, fontWeight: "700" }}
-            >
-              on-air
-            </Text>
+            <Sign lit={false} testID="remote-title" />
             <View style={{ maxWidth: 620, gap: 8 }}>
-              <Text
-                testID="core-status"
-                style={{ color: colors.accent, fontSize: 15, fontWeight: "700" }}
-              >
+              <Text testID="core-status" style={[type.label, { color: colors.amber }]}>
                 Pair your Mac
               </Text>
               <Text
                 accessibilityRole="header"
-                style={{
-                  color: colors.label,
-                  fontSize: wide ? 34 : 30,
-                  lineHeight: wide ? 40 : 36,
-                  fontWeight: "700",
-                }}
+                style={[
+                  type.title,
+                  { color: colors.label, fontSize: wide ? 30 : 26, lineHeight: wide ? 36 : 32 },
+                ]}
               >
                 Connect this device to on-air
               </Text>
-              <Text style={{ color: colors.secondaryLabel, fontSize: 17, lineHeight: 24 }}>
+              <Text
+                style={[type.body, { color: colors.secondaryLabel, fontSize: 16, lineHeight: 22 }]}
+              >
                 Keep on-air open on your Mac and use the code it shows. This is a one-time setup on
                 this device.
               </Text>
@@ -263,8 +249,8 @@ export function PairingHome({
             }}
           >
             <View style={{ width: wide ? undefined : "100%", flex: wide ? 1 : undefined, gap: 10 }}>
-              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Your Mac</Text>
-              <Card rounded="xxl">
+              <Text style={[type.label, { color: colors.tertiaryLabel }]}>Your Mac</Text>
+              <Card>
                 {found.length > 0 ? (
                   found.map((hit, index) => (
                     <DiscoveredRow
@@ -302,8 +288,8 @@ export function PairingHome({
               </View>
 
               {manual ? (
-                <Card testID="manual-setup" rounded="lg" style={{ padding: 16, gap: 8 }}>
-                  <Text style={{ color: colors.label, fontSize: 15, fontWeight: "600" }}>
+                <Card testID="manual-setup" style={{ padding: 16, gap: 8 }}>
+                  <Text style={[type.label, { color: colors.tertiaryLabel }]}>
                     Mac network address
                   </Text>
                   <TextInput
@@ -322,6 +308,7 @@ export function PairingHome({
                     style={{
                       minHeight: 50,
                       paddingHorizontal: 14,
+                      ...type.body,
                       color: colors.label,
                       fontSize: 17,
                       borderRadius: radius.md,
@@ -339,15 +326,15 @@ export function PairingHome({
               <View
                 style={{ width: wide ? undefined : "100%", flex: wide ? 1 : undefined, gap: 10 }}
               >
-                <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Pairing code</Text>
-                <Card rounded="xxl" style={{ padding: 18, gap: 18 }}>
+                <Text style={[type.label, { color: colors.tertiaryLabel }]}>Pairing code</Text>
+                <Card style={{ padding: 18, gap: 18 }}>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
                     <IconTile name={icons.lock} />
                     <View style={{ flex: 1, gap: 3 }}>
-                      <Text style={{ color: colors.label, fontSize: 18, fontWeight: "700" }}>
+                      <Text style={[type.title, { color: colors.label }]}>
                         Enter the code on your Mac
                       </Text>
-                      <Text style={{ color: colors.secondaryLabel, fontSize: 15, lineHeight: 20 }}>
+                      <Text style={[type.body, { color: colors.secondaryLabel }]}>
                         We'll remember this Mac after you connect.
                       </Text>
                     </View>
@@ -357,8 +344,9 @@ export function PairingHome({
                     ref={pinInputRef}
                     value={pin}
                     onChangeText={onChangePin}
-                    placeholder="000000"
-                    placeholderTextColor={colors.tertiaryLabel}
+                    placeholder="888888"
+                    placeholderTextColor={colors.ledGhost}
+                    maxFontSizeMultiplier={1.3}
                     keyboardType="number-pad"
                     inputMode="numeric"
                     maxLength={6}
@@ -370,16 +358,16 @@ export function PairingHome({
                     style={{
                       minHeight: 66,
                       paddingHorizontal: 14,
-                      color: colors.label,
-                      fontSize: compact ? 25 : 28,
-                      fontWeight: "600",
-                      letterSpacing: compact ? 8 : 11,
+                      fontFamily: fonts.led,
+                      color: colors.amber,
+                      fontSize: compact ? 24 : 27,
+                      letterSpacing: compact ? 6 : 9,
                       textAlign: "center",
-                      borderRadius: 16,
+                      borderRadius: radius.md,
                       borderCurve: "continuous",
-                      backgroundColor: colors.iconSurface,
+                      backgroundColor: colors.ledWell,
                       borderWidth: 1,
-                      borderColor: pin.length === 6 ? colors.accent : colors.border,
+                      borderColor: pin.length === 6 ? colors.key : colors.separator,
                     }}
                   />
 
@@ -387,7 +375,7 @@ export function PairingHome({
                     <Text
                       accessibilityRole="alert"
                       testID="pairing-error"
-                      style={{ color: colors.onError, fontSize: 14, lineHeight: 19 }}
+                      style={[type.body, { color: colors.onError, fontSize: 14, lineHeight: 19 }]}
                     >
                       {error}
                     </Text>
@@ -402,23 +390,27 @@ export function PairingHome({
                     testID="pair-button"
                     style={({ pressed }) => ({
                       minHeight: 54,
-                      borderRadius: radius.lg,
+                      borderRadius: radius.md,
                       borderCurve: "continuous",
                       alignItems: "center",
                       justifyContent: "center",
-                      backgroundColor: canPair ? colors.accent : colors.iconSurface,
+                      borderWidth: 1,
+                      borderColor: canPair ? colors.amberBright : colors.border,
+                      backgroundColor: canPair ? colors.amber : colors.surface,
                       opacity: pressed ? 0.7 : 1,
                     })}
                   >
                     {pairing ? (
-                      <ActivityIndicator color={colors.onAccent} />
+                      <ActivityIndicator color={colors.onAmber} />
                     ) : (
                       <Text
-                        style={{
-                          color: canPair ? colors.onAccent : colors.tertiaryLabel,
-                          fontSize: 17,
-                          fontWeight: "700",
-                        }}
+                        style={[
+                          type.label,
+                          {
+                            fontSize: 13,
+                            color: canPair ? colors.onAmber : colors.tertiaryLabel,
+                          },
+                        ]}
                       >
                         Connect
                       </Text>
