@@ -4,13 +4,20 @@ import type React from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { NativeFader } from "./native-fader";
-import { colors, layout, radius } from "./theme";
+import { colors, layout, radius, type } from "./theme";
 import { Card } from "./ui/card";
 import { FirewallNotice } from "./ui/firewall-notice";
 import { IconTile } from "./ui/icon-tile";
 import { icons } from "./ui/icons";
+import { LedReadout } from "./ui/led-readout";
 import { NativeIcon } from "./ui/native-icon";
 import { Notice } from "./ui/notice";
+import { Sign } from "./ui/sign";
+
+/** Section caption ("Now streaming", "Playback"), like the desktop's SOURCE / DESTINATION. */
+function SectionLabel({ children }: { children: string }) {
+  return <Text style={[type.label, { color: colors.tertiaryLabel }]}>{children}</Text>;
+}
 
 const ROW_PADDING = 18;
 const TILE = 58;
@@ -26,6 +33,7 @@ function RouteRow({
   onPress,
   testID,
   dense = false,
+  live = false,
 }: {
   icon: IconName;
   title: string;
@@ -35,6 +43,8 @@ function RouteRow({
   onPress: () => void;
   testID: string;
   dense?: boolean;
+  /** Marks the row carrying live audio with the red lamp dot. */
+  live?: boolean;
 }) {
   return (
     <Pressable
@@ -54,14 +64,29 @@ function RouteRow({
     >
       <IconTile name={icon} size="lg" />
       <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={1} style={{ color: colors.label, fontSize: 20, fontWeight: "700" }}>
-          {title}
-        </Text>
-        <Text numberOfLines={1} style={{ color: colors.secondaryLabel, fontSize: 16 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text
+            numberOfLines={1}
+            style={[type.title, { flexShrink: 1, color: colors.label, fontSize: 19 }]}
+          >
+            {title}
+          </Text>
+          {live ? (
+            <Text
+              testID="live-dot"
+              accessibilityElementsHidden
+              importantForAccessibility="no"
+              style={{ color: colors.accent, fontSize: 10 }}
+            >
+              ●
+            </Text>
+          ) : null}
+        </View>
+        <Text numberOfLines={1} style={[type.body, { color: colors.secondaryLabel }]}>
           {subtitle}
         </Text>
       </View>
-      <NativeIcon name={icons.chevron} size={19} color={colors.secondaryLabel} />
+      <NativeIcon name={icons.chevron} size={19} color={colors.tertiaryLabel} />
     </Pressable>
   );
 }
@@ -93,7 +118,7 @@ function RouteDivider() {
           backgroundColor: colors.surface,
         }}
       >
-        <NativeIcon name={icons.route} size={16} color={colors.accent} />
+        <NativeIcon name={icons.route} size={16} color={colors.amber} />
       </View>
       <View
         style={{
@@ -130,12 +155,9 @@ function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }
           alignItems: "center",
         }}
       >
-        <Text
-          accessibilityRole="header"
-          style={{ flex: 1, color: colors.label, fontSize: 38, fontWeight: "700" }}
-        >
-          on-air
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Sign lit={status.live} testID="mixer-sign" />
+        </View>
         <View
           accessible
           accessibilityRole="text"
@@ -145,19 +167,13 @@ function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }
         >
           <View
             style={{
-              width: 9,
-              height: 9,
-              borderRadius: 5,
-              backgroundColor: status.live ? colors.accent : colors.tertiaryLabel,
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: status.live ? colors.accent : colors.liveDim,
             }}
           />
-          <Text
-            style={{
-              color: status.live ? colors.accent : colors.secondaryLabel,
-              fontSize: 17,
-              fontWeight: "600",
-            }}
-          >
+          <Text style={[type.label, { color: status.live ? colors.accent : colors.tertiaryLabel }]}>
             {status.text}
           </Text>
         </View>
@@ -166,11 +182,11 @@ function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }
           accessibilityLabel="More options"
           onPress={onMore}
           testID="more-button"
-          hitSlop={4}
+          hitSlop={5}
           style={({ pressed }) => ({
-            width: 46,
-            height: 46,
-            borderRadius: 23,
+            width: 36,
+            height: 36,
+            borderRadius: 18,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: pressed ? colors.surfacePressed : colors.surface,
@@ -178,7 +194,7 @@ function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }
             borderColor: colors.border,
           })}
         >
-          <NativeIcon name={icons.more} size={23} />
+          <NativeIcon name={icons.more} size={19} />
         </Pressable>
       </View>
     </View>
@@ -240,13 +256,14 @@ function CdDeck({
         accessibilityLabel={`Track ${status.track} of ${status.track_count}, ${label}`}
         style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
       >
-        <Text testID="cd-track" style={{ color: colors.accent, fontSize: 16, fontWeight: "700" }}>
-          {padTrack(status.track)}/{padTrack(status.track_count)}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={{ flex: 1, color: colors.label, fontSize: 16, fontWeight: "600" }}
-        >
+        <LedReadout
+          value={`${padTrack(status.track)}/${padTrack(status.track_count)}`}
+          digits={5}
+          size={16}
+          accessibilityLabel={`Track ${status.track} of ${status.track_count}`}
+          testID="cd-track"
+        />
+        <Text numberOfLines={1} style={[type.title, { flex: 1, color: colors.label }]}>
           {label}
         </Text>
       </View>
@@ -379,7 +396,7 @@ export function MixerHome({
             }}
           >
             <View style={{ gap: 10 }}>
-              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Now streaming</Text>
+              <SectionLabel>Now streaming</SectionLabel>
               <Card>
                 <RouteRow
                   icon={icons.monitor}
@@ -401,6 +418,7 @@ export function MixerHome({
                   onPress={onChangeOutput}
                   testID="output-row"
                   dense={shortWide}
+                  live={status.live}
                 />
               </Card>
             </View>
@@ -429,16 +447,13 @@ export function MixerHome({
               <NativeIcon
                 name={icons.live}
                 size={shortWide ? 52 : compact ? 58 : 68}
-                color={status.live ? colors.accent : colors.tertiaryLabel}
+                color={status.live ? colors.accent : colors.liveDim}
               />
               <View style={{ flexShrink: 1, gap: 5 }}>
-                <Text style={{ color: colors.label, fontSize: 21, fontWeight: "700" }}>
+                <Text style={[type.title, { color: colors.label, fontSize: 20, lineHeight: 25 }]}>
                   {status.live ? "Audio is live" : "Ready to stream"}
                 </Text>
-                <Text
-                  numberOfLines={2}
-                  style={{ color: colors.secondaryLabel, fontSize: 16, lineHeight: 21 }}
-                >
+                <Text numberOfLines={2} style={[type.body, { color: colors.secondaryLabel }]}>
                   {`${source} → ${output}`}
                 </Text>
               </View>
@@ -452,9 +467,7 @@ export function MixerHome({
               gap: shortWide ? 12 : wide ? 18 : compact ? 18 : 22,
             }}
           >
-            {wide ? (
-              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Playback</Text>
-            ) : null}
+            {wide ? <SectionLabel>Playback</SectionLabel> : null}
             <Card
               style={{ paddingHorizontal: 18, paddingVertical: 16, gap: 8, overflow: "visible" }}
             >
@@ -463,12 +476,15 @@ export function MixerHome({
                 importantForAccessibility="no-hide-descendants"
                 style={{ paddingLeft: 40, flexDirection: "row", alignItems: "center" }}
               >
-                <Text style={{ flex: 1, color: colors.label, fontSize: 16, fontWeight: "600" }}>
-                  Volume
-                </Text>
-                <Text style={{ color: colors.label, fontSize: 16, fontWeight: "600" }}>
-                  {Math.round(volume)}
-                </Text>
+                <Text style={[type.label, { flex: 1, color: colors.secondaryLabel }]}>Volume</Text>
+                <LedReadout
+                  value={String(Math.round(volume))}
+                  digits={3}
+                  size={20}
+                  dim={volumeDisabled}
+                  accessibilityLabel={`Volume ${Math.round(volume)}`}
+                  testID="volume-readout"
+                />
               </View>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
                 <NativeIcon
@@ -478,7 +494,7 @@ export function MixerHome({
                 />
                 <Host
                   colorScheme="dark"
-                  seedColor={colors.accent}
+                  seedColor={colors.amber}
                   ignoreSafeArea="all"
                   style={{ flex: 1, height: 42 }}
                 >
@@ -510,17 +526,20 @@ export function MixerHome({
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 16,
-                borderRadius: radius.xl,
+                borderRadius: radius.lg,
                 borderCurve: "continuous",
                 borderWidth: 1,
                 borderColor: colors.border,
+                borderTopColor: colors.borderStrong,
                 backgroundColor: pressed ? colors.surfacePressed : colors.surface,
                 opacity: soundDisabled ? 0.5 : 1,
               })}
             >
               <NativeIcon name={icons.tune} size={28} />
-              <Text style={{ flex: 1, color: colors.label, fontSize: 18 }}>Sound settings</Text>
-              <NativeIcon name={icons.chevron} size={19} color={colors.secondaryLabel} />
+              <Text style={[type.body, { flex: 1, color: colors.label, fontSize: 17 }]}>
+                Sound settings
+              </Text>
+              <NativeIcon name={icons.chevron} size={19} color={colors.tertiaryLabel} />
             </Pressable>
 
             <Pressable
@@ -535,7 +554,7 @@ export function MixerHome({
                 opacity: pressed ? 0.65 : 1,
               })}
             >
-              <Text style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}>
+              <Text style={[type.label, { color: colors.onError, fontSize: 12 }]}>
                 Disconnect remote
               </Text>
             </Pressable>

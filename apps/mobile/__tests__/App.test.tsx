@@ -307,10 +307,17 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
 });
 
 /** Numbers rendered in host Text nodes (the volume readout among them). */
+/** Numbers visible on screen, including LED readouts (their ghost "8" segments are hidden). */
 function numbersShown(): number[] {
   return (tree as ReactTestRenderer.ReactTestRenderer).root
-    .findAll((node) => (node.type as unknown) === "Text" && typeof node.props.children === "number")
-    .map((node) => node.props.children as number);
+    .findAll(
+      (node) =>
+        (node.type as unknown) === "Text" &&
+        !node.props.accessibilityElementsHidden &&
+        (typeof node.props.children === "number" ||
+          (typeof node.props.children === "string" && /^\d+$/.test(node.props.children))),
+    )
+    .map((node) => Number(node.props.children));
 }
 
 test("a failed volume write rolls the readout back to what the desktop holds", async () => {
@@ -574,4 +581,60 @@ test("accessibility: nothing but the host string is selectable; decorative icons
     expect(parent.type).not.toBe("ExpoHost");
     parent = parent.parent;
   }
+});
+
+// Style props are arbitrarily nested arrays of objects; flatten like StyleSheet.flatten.
+const flat = (style: any): Record<string, unknown> =>
+  Array.isArray(style) ? Object.assign({}, ...style.map(flat)) : (style ?? {});
+const textsIn = (node: ReactTestInstance) =>
+  node.findAll((n) => (n.type as unknown) === "Text" && typeof n.props.children === "string");
+
+test("retro header: the sign stays unlit when ready and lights while live", async () => {
+  await renderApp();
+  await pairWith();
+  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
+  expect(host("mixer-sign").props.accessibilityLabel).toBe("on-air");
+  expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#5a1814");
+  expect(exists("live-dot")).toBe(false);
+
+  ReactTestRenderer.act(() => tree?.unmount());
+  api.getActiveOutput.mockResolvedValue({
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    transport: "sonos",
+    state: "live",
+  });
+  await renderApp(); // the saved pairing restores straight into the mixer
+  expect(host("status-pill").props.accessibilityLabel).toBe("Audio is live");
+  expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#ff3b2a");
+  expect(exists("live-dot")).toBe(true);
+});
+
+test("volume shows on an LED readout that dims when the desktop is paused", async () => {
+  // Volume is only adjustable while a speaker is live.
+  api.getActiveOutput.mockResolvedValue({
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    transport: "sonos",
+    state: "live",
+  });
+  await renderApp();
+  await pairWith();
+  const value = () =>
+    textsIn(host("volume-readout")).find((t) => !t.props.accessibilityElementsHidden);
+  expect(host("volume-readout").props.accessibilityLabel).toBe("Volume 50");
+  expect(value()?.props.children).toBe("50");
+  expect(flat(value()?.props.style).color).toBe("#e0a24b");
+
+  api.fetchStatus.mockResolvedValue({ status: "ok", version: "0.1.0", service_enabled: false });
+  for (const read of [api.listInputs, api.listOutputs, api.getEq, api.getVolume]) {
+    read.mockRejectedValue(
+      new client.HttpError("/api/x", 503, '{"error":"","code":"service_paused"}'),
+    );
+  }
+  await press("more-button");
+  await press("refresh-button");
+  await press("native-back");
+  expect(host("status-pill").props.accessibilityLabel).toBe("Desktop service is paused");
+  expect(flat(value()?.props.style).color).toBe("#9a8f78");
 });
