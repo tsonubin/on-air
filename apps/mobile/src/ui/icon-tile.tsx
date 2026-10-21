@@ -18,7 +18,7 @@ export function IconTile({ name, size = "md" }: { name: IconName; size?: keyof t
       style={{
         width: tile,
         height: tile,
-        borderRadius: radius.lg,
+        borderRadius: radius.md,
         borderCurve: "continuous",
         alignItems: "center",
         justifyContent: "center",
