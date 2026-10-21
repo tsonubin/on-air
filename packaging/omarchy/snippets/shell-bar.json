@@ -1,2 +1,2 @@
 { "id": "on-air", "type": "command", "exec": "on-air bar", "interval": 5,
-  "tooltip": "on-air", "onClick": "omarchy-launch-or-focus-tui on-air" }
+  "tooltip": "On Air", "onClick": "omarchy-launch-or-focus-tui on-air" }

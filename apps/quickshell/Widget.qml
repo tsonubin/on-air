@@ -23,7 +23,7 @@ Ui.Panel {
         bar: root.bar
         text: "󰝚"
         slotSize: Style.bar.statusSlot
-        tooltipText: client.error || "on-air"
+        tooltipText: client.error || "On Air"
         onPressed: function (mouseButton) {
             if (mouseButton === Qt.LeftButton || mouseButton === Qt.MiddleButton)
                 root.toggle();

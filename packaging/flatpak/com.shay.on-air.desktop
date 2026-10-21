@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=on-air desktop
+Name=On Air
 GenericName=Wireless Audio Streamer
 Comment=Stream desktop audio to AirPlay, Bluetooth, or Sonos
 Exec=on-air-desktop

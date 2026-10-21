@@ -2,7 +2,7 @@
 // Paste into ~/.config/omarchy/extensions/omarchy-menu.jsonc, inside the
 // top-level object. Dotted ids place rows: "on-air" is a root entry and
 // "on-air.open" sits inside it.
-"on-air": {"icon":"󰝚","label":"on-air"},
+"on-air": {"icon":"󰝚","label":"On Air"},
 "on-air.open": {"icon":"󰝚","label":"Open","action":"omarchy-launch-or-focus-tui on-air"},
 "on-air.monitor": {"icon":"󰐥","label":"Monitor on/off","action":"on-air monitor toggle"},
 "on-air.restart": {"icon":"󰜉","label":"Restart core","action":"on-air service restart"},

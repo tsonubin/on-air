@@ -1,7 +1,7 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=on-air
+Name=On Air
 GenericName=Speaker streaming
 Comment=LAN audio to AirPlay, Bluetooth or Sonos
 Exec=xdg-terminal-exec --app-id=org.omarchy.on-air -e on-air
