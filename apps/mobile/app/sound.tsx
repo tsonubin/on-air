@@ -1,36 +1,41 @@
-import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem } from "@expo/ui";
 import { router } from "expo-router";
 import { useRemoteSession } from "@/remote-session";
-import { SettingsForm } from "@/settings-form";
+import { SettingsForm, sectionModifiers } from "@/settings-form";
+import { FormText, SectionTitle } from "@/ui/form-text";
 
 export default function SoundScreen() {
   const { gains } = useRemoteSession();
   return (
     <SettingsForm testID="sound-screen">
-      <FieldGroup.Section title="Tone">
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        <SectionTitle title="Tone" />
         <ListItem
           onPress={() => router.push("/equalizer")}
           supportingText="Adjust bass, vocals, and treble"
           testID="equalizer-link"
         >
-          <Text>Equalizer</Text>
+          <FormText variant="body">Equalizer</FormText>
           <ListItem.Trailing>
-            <Text>{gains.every((g) => g === 0) ? "Flat ›" : "Custom ›"}</Text>
+            <FormText variant="value">
+              {gains.every((g) => g === 0) ? "Flat ›" : "Custom ›"}
+            </FormText>
           </ListItem.Trailing>
         </ListItem>
         <FieldGroup.SectionFooter>
-          <Text>Sound changes apply to the connected desktop.</Text>
+          <FormText variant="footnote">Sound changes apply to the connected desktop.</FormText>
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>
-      <FieldGroup.Section title="Advanced">
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        <SectionTitle title="Advanced" />
         <ListItem
           onPress={() => router.push("/audio-format")}
           supportingText="Input and output sample rates"
           testID="audio-format-link"
         >
-          <Text>Audio format</Text>
+          <FormText variant="body">Audio format</FormText>
           <ListItem.Trailing>
-            <Text>›</Text>
+            <FormText variant="value">›</FormText>
           </ListItem.Trailing>
         </ListItem>
       </FieldGroup.Section>

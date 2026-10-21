@@ -2,7 +2,7 @@ import { Column, Row, Slider, Spacer, Text } from "@expo/ui";
 import { accessibilityLabel as a11yLabel } from "@expo/ui/swift-ui/modifiers";
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
-import { theme } from "./theme";
+import { colors, fonts, theme } from "./theme";
 
 /**
  * A native slider that previews locally and commits after a short pause. While
@@ -86,9 +86,11 @@ export function NativeFader(props: {
     <Column spacing={theme.spacing.sm} testID={props.testId}>
       {!props.hideHeader && (
         <Row alignment="center" spacing={theme.spacing.sm}>
-          <Text textStyle={{ fontWeight: "600" }}>{props.label}</Text>
+          <Text textStyle={{ fontFamily: fonts.sansMedium, color: colors.label }}>
+            {props.label}
+          </Text>
           <Spacer />
-          <Text textStyle={{ fontWeight: "600" }}>
+          <Text textStyle={{ fontFamily: fonts.monoMedium, color: colors.amber }}>
             {`${props.signed && draft > 0 ? "+" : ""}${Number.isInteger(draft) ? String(draft) : draft.toFixed(1)}${props.unit ? ` ${props.unit}` : ""}`}
           </Text>
         </Row>

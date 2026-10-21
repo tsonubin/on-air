@@ -35,7 +35,7 @@ export function sheetProps(spec: SheetSpec): SheetProps {
         modifiers: [
           environment({ key: "colorScheme", value: "dark" }),
           presentationBackground(colors.surface),
-          tint(colors.accent),
+          tint(colors.amber),
         ],
         snapPoints: iosSnapPoints(spec),
       },

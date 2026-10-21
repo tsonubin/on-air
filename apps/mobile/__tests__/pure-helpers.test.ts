@@ -21,7 +21,7 @@ describe("sheetProps", () => {
     expect(source.modifiers).toEqual([
       { $type: "environment", key: "colorScheme", value: "dark" },
       { $type: "presentationBackground", color: "#1a1814" },
-      { $type: "tint", color: "#ff3b2a" },
+      { $type: "tint", color: "#e0a24b" },
     ]);
     expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 316 }]);
     expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 300 }]);

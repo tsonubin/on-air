@@ -1,26 +1,25 @@
-import { Button, FieldGroup, Text } from "@expo/ui";
-import { textSelection } from "@expo/ui/swift-ui/modifiers";
-import { Platform } from "react-native";
+import { Button, FieldGroup } from "@expo/ui";
 import { useRemoteSession } from "@/remote-session";
-import { SettingsForm } from "@/settings-form";
+import { SettingsForm, sectionModifiers } from "@/settings-form";
+import { FormText, SectionTitle } from "@/ui/form-text";
 
 export default function ConnectionScreen() {
   const { pairedHost, view, refreshing, refresh, disconnect } = useRemoteSession();
   return (
     <SettingsForm testID="connection-screen">
-      <FieldGroup.Section title="Paired desktop">
-        <Text
-          testID="paired-host"
-          modifiers={Platform.OS === "ios" ? [textSelection(true)] : undefined}
-        >
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        <SectionTitle title="Paired desktop" />
+        <FormText variant="value" copyable testID="paired-host">
           {pairedHost}
-        </Text>
-        <Text>{view.connectionText}</Text>
+        </FormText>
+        <FormText variant="body">{view.connectionText}</FormText>
         <FieldGroup.SectionFooter>
-          <Text>Your PIN pairing is saved on this phone. Keep both devices on the same Wi-Fi.</Text>
+          <FormText variant="footnote">
+            Your PIN pairing is saved on this phone. Keep both devices on the same Wi-Fi.
+          </FormText>
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>
-      <FieldGroup.Section>
+      <FieldGroup.Section modifiers={sectionModifiers}>
         <Button
           label={refreshing ? "Refreshing…" : "Refresh connection"}
           disabled={refreshing}
@@ -28,13 +27,13 @@ export default function ConnectionScreen() {
           testID="refresh-button"
         />
         <FieldGroup.SectionFooter>
-          <Text>
+          <FormText variant="footnote">
             Refresh reloads the mixer without removing your pairing. If the desktop address changed,
             forget it and pair again.
-          </Text>
+          </FormText>
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>
-      <FieldGroup.Section>
+      <FieldGroup.Section modifiers={sectionModifiers}>
         <Button
           label="Forget desktop"
           variant="text"

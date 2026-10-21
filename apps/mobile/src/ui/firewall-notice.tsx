@@ -22,7 +22,7 @@ export function FirewallNotice({ warning }: { warning?: FirewallWarning | null }
       <Text accessibilityRole="alert" style={{ color: colors.onError, fontSize: 15 }}>
         {warning.message}
       </Text>
-      <Host matchContents colorScheme="dark">
+      <Host matchContents colorScheme="dark" seedColor={colors.amber}>
         <Button
           label={expanded ? "Hide firewall help" : "Firewall help"}
           variant="text"

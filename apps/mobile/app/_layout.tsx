@@ -1,14 +1,15 @@
-import { DarkTheme, ThemeProvider } from "@react-navigation/native";
+import { ThemeProvider } from "@react-navigation/native";
 import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { FontGate } from "@/font-gate";
+import { navigationTheme, screenHeaderOptions } from "@/navigation-theme";
 import { RemoteProvider, useRemoteSession } from "@/remote-session";
 
 function Navigation() {
   const { paired } = useRemoteSession();
   return (
-    <Stack screenOptions={{ headerBackButtonDisplayMode: "default" }}>
+    <Stack screenOptions={{ headerBackButtonDisplayMode: "default", ...screenHeaderOptions }}>
       <Stack.Screen name="index" options={{ headerShown: false, title: "Mixer" }} />
       <Stack.Protected guard={paired}>
         <Stack.Screen name="sound" options={{ title: "Sound" }} />
@@ -25,7 +26,7 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <FontGate>
-        <ThemeProvider value={DarkTheme}>
+        <ThemeProvider value={navigationTheme}>
           <StatusBar style="light" />
           <RemoteProvider>
             <Navigation />

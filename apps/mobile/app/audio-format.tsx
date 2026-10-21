@@ -1,4 +1,4 @@
-import { Button, FieldGroup, Picker, Row, Spacer, Text } from "@expo/ui";
+import { Button, FieldGroup, Picker, Row, Spacer } from "@expo/ui";
 import {
   AUDIO_CHECK_DESCRIPTION,
   AUDIO_CHECK_OVER_BUDGET,
@@ -7,7 +7,8 @@ import {
   captureBufferLabel,
 } from "@on-air/control-client";
 import { useRemoteSession } from "@/remote-session";
-import { SettingsForm } from "@/settings-form";
+import { SettingsForm, sectionModifiers } from "@/settings-form";
+import { FormText, SectionTitle } from "@/ui/form-text";
 
 const rate = (hz: number) => `${hz / 1000} kHz`;
 export default function AudioFormatScreen() {
@@ -41,10 +42,11 @@ export default function AudioFormatScreen() {
   ] as const;
   return (
     <SettingsForm testID="audio-format-screen">
-      <FieldGroup.Section title="Sample rate">
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        <SectionTitle title="Sample rate" />
         {rows.map((row) => (
           <Row key={row.kind} alignment="center">
-            <Text>{row.label}</Text>
+            <FormText variant="body">{row.label}</FormText>
             <Spacer />
             <Picker
               selectedValue={row.value}
@@ -60,15 +62,16 @@ export default function AudioFormatScreen() {
           </Row>
         ))}
         <FieldGroup.SectionFooter>
-          <Text>
+          <FormText variant="footnote">
             Keep the current rates unless your audio equipment requires a different format. Input is
             captured from the desktop; output is sent to the speaker.
-          </Text>
+          </FormText>
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>
-      <FieldGroup.Section title="Audio performance">
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        <SectionTitle title="Audio performance" />
         <Row alignment="center">
-          <Text>Requested capture buffer</Text>
+          <FormText variant="body">Requested capture buffer</FormText>
           <Spacer />
           <Picker
             selectedValue={captureBufferMs ?? 0}
@@ -92,8 +95,10 @@ export default function AudioFormatScreen() {
         />
         {report && (
           <>
-            <Text>{audioBenchmarkSummary(report)}</Text>
-            {!report.within_buffer_budget && <Text>{AUDIO_CHECK_OVER_BUDGET}</Text>}
+            <FormText variant="body">{audioBenchmarkSummary(report)}</FormText>
+            {!report.within_buffer_budget && (
+              <FormText variant="body">{AUDIO_CHECK_OVER_BUDGET}</FormText>
+            )}
             <Button
               label={`Apply recommendation (${report.recommended_buffer_ms} ms)`}
               disabled={!view.controlsEnabled || audioPerformance.busy}
@@ -102,11 +107,11 @@ export default function AudioFormatScreen() {
             />
           </>
         )}
-        {audioPerformance.error && <Text>{audioPerformance.error}</Text>}
+        {audioPerformance.error && <FormText variant="body">{audioPerformance.error}</FormText>}
         <FieldGroup.SectionFooter>
-          <Text>{AUDIO_CHECK_DESCRIPTION}</Text>
+          <FormText variant="footnote">{AUDIO_CHECK_DESCRIPTION}</FormText>
           {captureBufferMs === undefined && (
-            <Text>Update the on-air core to use these settings.</Text>
+            <FormText variant="footnote">Update the on-air core to use these settings.</FormText>
           )}
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>

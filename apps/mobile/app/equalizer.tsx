@@ -1,8 +1,9 @@
-import { FieldGroup, Text } from "@expo/ui";
+import { FieldGroup } from "@expo/ui";
 import { Stack } from "expo-router/stack";
 import { NativeFader } from "@/native-fader";
 import { useRemoteSession } from "@/remote-session";
-import { SettingsForm } from "@/settings-form";
+import { SettingsForm, sectionModifiers } from "@/settings-form";
+import { FormText, SectionTitle } from "@/ui/form-text";
 
 const bands = [
   { label: "Bass · 60 Hz", spoken: "Bass, 60 hertz" },
@@ -18,7 +19,8 @@ export default function EqualizerScreen() {
   return (
     <>
       <SettingsForm testID="equalizer-screen">
-        <FieldGroup.Section title="Five-band equalizer">
+        <FieldGroup.Section modifiers={sectionModifiers}>
+          <SectionTitle title="Five-band equalizer" />
           {gains.map((gain, index) => (
             <NativeFader
               key={bands[index].label}
@@ -36,10 +38,10 @@ export default function EqualizerScreen() {
             />
           ))}
           <FieldGroup.SectionFooter>
-            <Text>
+            <FormText variant="footnote">
               Move left to reduce a band, or right to boost it. 0 dB leaves the sound unchanged.
               Changes are applied as you adjust.
-            </Text>
+            </FormText>
           </FieldGroup.SectionFooter>
         </FieldGroup.Section>
       </SettingsForm>
