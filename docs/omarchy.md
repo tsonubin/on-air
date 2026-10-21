@@ -215,6 +215,7 @@ Click `[r Refresh]` in the Destination pane or press `r` to reload devices and s
 | `i` | Status: version, addresses, monitor, login start |
 | `b` | Open Bluetooth settings |
 | `r` | Refresh devices |
+| `R` | Restart the local core service and reconnect (also available in Status) |
 | `f` | Firewall help when UFW is blocking LAN audio |
 | `t` | Audio check and capture buffer settings |
 | `?` | This help |
@@ -252,13 +253,14 @@ The check does not measure USB capture errors or network/speaker buffering.
 ### UFW blocking LAN audio
 
 On Linux hosts with readable kernel journal logs, the core looks for recent
-UFW TCP drops on its listening port. The TUI, GUI and remote app show the
+UFW TCP drops on its listening port and UDP drops on AirPlay's reserved
+timing/control ports (48000–48127). The TUI, GUI and remote app show the
 same warning. Healthy radio playback clears a stale audio warning.
 
 Click the warning or press `f` in the TUI, or open **Firewall help** in the
 GUI. **Allow LAN audio** (Enter in the TUI) asks for administrator
 authentication on the host and adds a rule for the observed local subnet
-and on-air's TCP port. It also handles UFW's inconsistent state where its
+and on-air's TCP port and AirPlay UDP range. It also handles UFW's inconsistent state where its
 config says disabled but old kernel rules are still blocking traffic.
 Other firewall rules stay in place.
 

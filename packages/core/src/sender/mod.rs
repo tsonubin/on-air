@@ -4,6 +4,7 @@ use tokio::sync::Mutex;
 pub mod airplay;
 pub mod airplay_mdns;
 pub mod bluetooth;
+mod helper;
 pub mod local;
 pub mod sonos;
 
@@ -71,11 +72,18 @@ pub struct OutputFormat {
 
 #[async_trait::async_trait]
 pub trait AudioSender: Send + Sync {
+    /// Return only when the receiver is ready to play. An error must leave
+    /// enough ownership for `stop` to clean up a partially started sender.
     async fn start(&mut self) -> Result<(), SenderError>;
     async fn stop(&mut self) -> Result<(), SenderError>;
     async fn set_volume(&mut self, volume: u8) -> Result<(), SenderError>;
     fn name(&self) -> &str;
     fn transport(&self) -> &'static str;
+    /// Detect failures after a successful start. The output session owns
+    /// supervision and publishes failures for every control surface.
+    fn check_health(&mut self) -> Result<(), SenderError> {
+        Ok(())
+    }
     /// Actual format of a live OS sink, discovered when playback starts.
     fn output_format(&self) -> Option<OutputFormat> {
         None

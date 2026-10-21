@@ -6,19 +6,41 @@ use discovery::SonosDevice;
 use soap::SonosControlClient;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SET_URI_SETTLE_DELAY: Duration = Duration::from_millis(250);
 const STREAM_RECOVERY_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const STREAM_RECOVERY_MAX_DELAY: Duration = Duration::from_secs(30);
 const STREAM_STALL_CHECKS_BEFORE_RECOVERY: u8 = 2;
+const START_TIMEOUT: Duration = Duration::from_secs(5);
+const STREAM_FAILURE_TIMEOUT: Duration = Duration::from_secs(15);
+
+struct RadioHealth {
+    clients: Arc<AtomicUsize>,
+    progress: Arc<AtomicU64>,
+    last_progress: u64,
+    last_audio_at: Instant,
+}
+
+impl RadioHealth {
+    fn check(&mut self, now: Instant) -> Result<(), SenderError> {
+        let progress = self.progress.load(Ordering::Acquire);
+        if self.clients.load(Ordering::Acquire) > 0 && progress != self.last_progress {
+            self.last_audio_at = now;
+            self.last_progress = progress;
+        }
+        if now.duration_since(self.last_audio_at) >= STREAM_FAILURE_TIMEOUT {
+            return Err(SenderError::transport("Sonos stopped fetching audio and recovery did not restore it. Check the LAN connection and firewall, then retry the output."));
+        }
+        Ok(())
+    }
+}
 
 pub struct SonosSender {
     device: SonosDevice,
     client: SonosControlClient,
     stream_url: String,
-    stream_clients: Option<Arc<AtomicUsize>>,
-    stream_progress: Option<Arc<AtomicU64>>,
+    health: Option<RadioHealth>,
     recovery_task: Option<tokio::task::JoinHandle<()>>,
 }
 
@@ -28,8 +50,7 @@ impl SonosSender {
             device,
             client: SonosControlClient::new(http),
             stream_url,
-            stream_clients: None,
-            stream_progress: None,
+            health: None,
             recovery_task: None,
         }
     }
@@ -41,8 +62,12 @@ impl SonosSender {
         stream_clients: Arc<AtomicUsize>,
         stream_progress: Arc<AtomicU64>,
     ) -> Self {
-        self.stream_clients = Some(stream_clients);
-        self.stream_progress = Some(stream_progress);
+        self.health = Some(RadioHealth {
+            clients: stream_clients,
+            last_progress: stream_progress.load(Ordering::Acquire),
+            progress: stream_progress,
+            last_audio_at: Instant::now(),
+        });
         self
     }
 
@@ -51,12 +76,11 @@ impl SonosSender {
     }
 
     fn spawn_recovery_task(&mut self) {
-        let Some(stream_clients) = self.stream_clients.clone() else {
+        let Some(health) = self.health.as_ref() else {
             return;
         };
-        let Some(stream_progress) = self.stream_progress.clone() else {
-            return;
-        };
+        let stream_clients = health.clients.clone();
+        let stream_progress = health.progress.clone();
         if let Some(task) = self.recovery_task.take() {
             task.abort();
         }
@@ -137,9 +161,33 @@ impl Drop for SonosSender {
 #[async_trait::async_trait]
 impl AudioSender for SonosSender {
     async fn start(&mut self) -> Result<(), SenderError> {
+        let initial_progress = self
+            .health
+            .as_ref()
+            .map(|h| h.progress.load(Ordering::Acquire));
         self.begin_playback().await?;
         self.spawn_recovery_task();
+        if let (Some(health), Some(initial)) = (&mut self.health, initial_progress) {
+            tokio::time::timeout(START_TIMEOUT, async {
+                while health.progress.load(Ordering::Acquire) == initial {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            }).await.map_err(|_| SenderError::transport("Sonos accepted playback but did not fetch the audio stream. Check the LAN connection and the on-air firewall warning."))?;
+            health.last_progress = health.progress.load(Ordering::Acquire);
+            health.last_audio_at = Instant::now();
+        }
         Ok(())
+    }
+
+    fn check_health(&mut self) -> Result<(), SenderError> {
+        let result = self
+            .health
+            .as_mut()
+            .map_or(Ok(()), |health| health.check(Instant::now()));
+        if result.is_err() {
+            self.abort_recovery_task();
+        }
+        result
     }
 
     async fn stop(&mut self) -> Result<(), SenderError> {
@@ -170,5 +218,27 @@ impl AudioSender for SonosSender {
 
     fn transport(&self) -> &'static str {
         "sonos"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lost_radio_is_given_recovery_time_then_reported_as_a_failure() {
+        let now = Instant::now();
+        let mut health = RadioHealth {
+            clients: Arc::new(AtomicUsize::new(1)),
+            progress: Arc::new(AtomicU64::new(10)),
+            last_progress: 10,
+            last_audio_at: now,
+        };
+        assert!(health.check(now + Duration::from_secs(10)).is_ok());
+        health.progress.store(20, Ordering::Release);
+        assert!(health.check(now + Duration::from_secs(14)).is_ok());
+        health.clients.store(0, Ordering::Release);
+        assert!(health.check(now + Duration::from_secs(20)).is_ok());
+        assert!(health.check(now + Duration::from_secs(30)).is_err());
     }
 }

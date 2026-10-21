@@ -27,6 +27,8 @@ pub struct AirPlayDevice {
     pub name: String,
     pub model: String,
     pub gid: String,
+    /// Permanent stereo identifier, independent of transient playback groups.
+    pub stereo_group: String,
     pub is_leader: bool,
     pub in_group: bool,
     pub password: bool,
@@ -34,7 +36,11 @@ pub struct AirPlayDevice {
 }
 
 pub fn group_key(gid: &str) -> String {
-    gid.split('+').next().unwrap_or(gid).to_string()
+    gid.split('+')
+        .next()
+        .unwrap_or(gid)
+        .trim()
+        .to_ascii_uppercase()
 }
 
 pub fn skip_airplay_model(model: &str, manufacturer: &str) -> bool {
@@ -55,23 +61,24 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
     let mut by_group: HashMap<String, Vec<AirPlayDevice>> = HashMap::new();
     let mut solos = Vec::new();
     for device in devices {
-        if device.in_group && !device.gid.is_empty() {
-            by_group
-                .entry(group_key(&device.gid))
-                .or_default()
-                .push(device);
+        if !device.stereo_group.is_empty() || (device.in_group && !device.gid.is_empty()) {
+            let key = if device.stereo_group.is_empty() {
+                format!("session:{}", group_key(&device.gid))
+            } else {
+                format!("stereo:{}", group_key(&device.stereo_group))
+            };
+            by_group.entry(key).or_default().push(device);
         } else {
             solos.push(device);
         }
     }
     let mut out = Vec::new();
-    for members in by_group.into_values() {
-        if members.len() >= 2 {
-            let leader = members
-                .iter()
-                .find(|m| m.is_leader)
-                .cloned()
-                .unwrap_or_else(|| members[0].clone());
+    for mut members in by_group.into_values() {
+        if members.len() >= 2 || members.iter().any(|d| !d.stereo_group.is_empty()) {
+            // HomePods can both advertise igl=1. mDNS arrival order must
+            // not change the selectable ID/address on every refresh.
+            members.sort_by(|a, b| b.is_leader.cmp(&a.is_leader).then_with(|| a.id.cmp(&b.id)));
+            let leader = members[0].clone();
             let name = if leader.name.is_empty() {
                 members
                     .iter()
@@ -87,7 +94,7 @@ pub fn collapse_pairs(devices: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
                 needs_pair: leader.password,
                 paired: !leader.password,
                 kind: "pair",
-                member_count: members.len().min(255) as u8,
+                member_count: members.len().clamp(2, 255) as u8,
                 address: leader.ip.to_string(),
             });
         } else {
@@ -177,6 +184,7 @@ pub fn device_from_txt(
         name,
         model: model.to_string(),
         gid: gid.to_string(),
+        stereo_group: String::new(),
         is_leader: igl == "1",
         in_group,
         password: airplay_password_required(pw),
@@ -219,7 +227,7 @@ fn device_from_mdns_info(info: &mdns_sd::ResolvedService) -> Option<AirPlayDevic
         .or_else(|| info.get_addresses().iter().next())?
         .to_ip_addr();
     let instance = info.get_fullname();
-    device_from_txt(
+    let mut device = device_from_txt(
         instance,
         txt(info, "deviceid"),
         txt(info, "model"),
@@ -230,11 +238,13 @@ fn device_from_mdns_info(info: &mdns_sd::ResolvedService) -> Option<AirPlayDevic
         txt(info, "gpn"),
         txt(info, "pw"),
         ip,
-    )
+    )?;
+    device.stereo_group = txt(info, "tsid").to_string();
+    Some(device)
 }
 
-pub async fn search_mdns(duration: Duration) -> Vec<CatalogDevice> {
-    let raw = crate::mdns::browse(
+async fn search_receivers(duration: Duration) -> Vec<AirPlayDevice> {
+    crate::mdns::browse(
         AIRPLAY_MDNS_TYPE,
         duration,
         MAX_DISCOVERED_DEVICES,
@@ -243,35 +253,39 @@ pub async fn search_mdns(duration: Duration) -> Vec<CatalogDevice> {
             Some((device.id.clone(), device))
         },
     )
-    .await;
-    collapse_pairs(raw)
+    .await
 }
 
-const EMPTY_SCANS_BEFORE_EVICTION: u8 = 3;
+pub async fn search_mdns(duration: Duration) -> Vec<CatalogDevice> {
+    collapse_pairs(search_receivers(duration).await)
+}
+
+const MISSED_SCANS_BEFORE_EVICTION: u8 = 3;
 const SCAN_INTERVAL: Duration = Duration::from_secs(15);
 
-/// Merge one AirPlay scan into the catalog. Returns `true` when the catalog
-/// changed so the caller can diff it for join/left events. A receiver
-/// survives a few empty scans because mDNS answers are lossy.
-fn apply_scan(
-    current: &mut Vec<CatalogDevice>,
-    found: Vec<CatalogDevice>,
-    consecutive_empty_scans: &mut u8,
-) -> bool {
-    if found.is_empty() {
-        *consecutive_empty_scans = consecutive_empty_scans.saturating_add(1);
-        if *consecutive_empty_scans >= EMPTY_SCANS_BEFORE_EVICTION && !current.is_empty() {
-            current.clear();
-            return true;
+/// Keep raw receivers until several scans miss each one, then derive the
+/// selectable catalog. A partial scan must not break a known pair apart.
+#[derive(Default)]
+struct ReceiverRegistry {
+    receivers: HashMap<String, (AirPlayDevice, u8)>,
+}
+
+impl ReceiverRegistry {
+    fn apply_scan(&mut self, found: Vec<AirPlayDevice>) -> Vec<CatalogDevice> {
+        for (_, misses) in self.receivers.values_mut() {
+            *misses += 1;
         }
-        return false;
+        for device in found {
+            if self.receivers.len() < MAX_DISCOVERED_DEVICES
+                || self.receivers.contains_key(&device.id)
+            {
+                self.receivers.insert(device.id.clone(), (device, 0));
+            }
+        }
+        self.receivers
+            .retain(|_, (_, misses)| *misses < MISSED_SCANS_BEFORE_EVICTION);
+        collapse_pairs(self.receivers.values().map(|(d, _)| d.clone()).collect())
     }
-    *consecutive_empty_scans = 0;
-    if *current != found {
-        *current = found;
-        return true;
-    }
-    false
 }
 
 fn catalog_ids(devices: &[CatalogDevice]) -> Vec<(String, String)> {
@@ -291,9 +305,10 @@ pub fn spawn(
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let owntone_http = crate::net::lan_http_client(Duration::from_millis(500));
-        let mut consecutive_empty_scans = 0;
+        let mut receivers = ReceiverRegistry::default();
         loop {
-            let mut found = search_mdns(Duration::from_secs(2)).await;
+            let raw = search_receivers(Duration::from_secs(2)).await;
+            let mut found = receivers.apply_scan(raw);
             let url = owntone_base.lock().clone();
             if let Ok(owntone) =
                 crate::sender::airplay::fetch_owntone_outputs_with_client(&owntone_http, &url).await
@@ -303,8 +318,12 @@ pub fn spawn(
             let diff = {
                 let mut current = catalog.lock();
                 let before = catalog_ids(&current);
-                apply_scan(&mut current, found, &mut consecutive_empty_scans)
-                    .then(|| (before, catalog_ids(&current)))
+                if *current != found {
+                    *current = found;
+                    Some((before, catalog_ids(&current)))
+                } else {
+                    None
+                }
             };
             if let Some((before, after)) = diff {
                 crate::events::emit_catalog_diff(&ws_tx, "airplay", &before, &after);
@@ -318,36 +337,37 @@ pub fn spawn(
 mod spawn_tests {
     use super::*;
 
-    fn receiver(id: &str) -> CatalogDevice {
-        CatalogDevice {
-            id: id.into(),
-            name: format!("Receiver {id}"),
-            needs_pair: false,
-            paired: true,
-            kind: "solo",
-            member_count: 1,
-            address: "192.168.1.2".into(),
-        }
+    fn receiver(id: &str, leader: bool) -> AirPlayDevice {
+        device_from_txt(
+            "Bedroom._airplay._tcp.local.",
+            id,
+            "AudioAccessory5,1",
+            "",
+            "pair",
+            if leader { "1" } else { "0" },
+            "1",
+            "Bedroom",
+            "",
+            "192.168.1.2".parse().unwrap(),
+        )
+        .unwrap()
     }
 
     #[test]
-    fn airplay_catalog_tolerates_transient_misses_then_evicts_stale_receivers() {
-        let mut current = vec![receiver("old")];
-        let mut misses = 0;
-
-        assert!(!apply_scan(&mut current, Vec::new(), &mut misses));
-        assert!(!apply_scan(&mut current, Vec::new(), &mut misses));
-        assert_eq!(current, vec![receiver("old")]);
-
-        assert!(apply_scan(&mut current, vec![receiver("new")], &mut misses));
-        assert_eq!(current, vec![receiver("new")]);
-        assert_eq!(misses, 0);
-
-        let mut changed = false;
-        for _ in 0..EMPTY_SCANS_BEFORE_EVICTION {
-            changed |= apply_scan(&mut current, Vec::new(), &mut misses);
+    fn partial_scans_do_not_break_a_pair_and_missing_devices_still_expire() {
+        let mut registry = ReceiverRegistry::default();
+        let leader = receiver("leader", true);
+        let satellite = receiver("satellite", false);
+        let pair = registry.apply_scan(vec![leader.clone(), satellite]);
+        assert_eq!(pair.len(), 1);
+        assert_eq!(pair[0].kind, "pair");
+        for _ in 0..2 {
+            assert_eq!(registry.apply_scan(vec![leader.clone()]), pair);
         }
-        assert!(current.is_empty());
-        assert!(changed);
+        let solo = registry.apply_scan(vec![leader]);
+        assert_eq!(solo[0].kind, "solo");
+        assert_eq!(registry.apply_scan(vec![]), solo);
+        assert_eq!(registry.apply_scan(vec![]), solo);
+        assert!(registry.apply_scan(vec![]).is_empty());
     }
 }

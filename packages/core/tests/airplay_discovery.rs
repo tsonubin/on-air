@@ -103,3 +103,71 @@ fn owntone_catalog_merges_case_and_spacing_variants_without_losing_the_address()
     assert!(mdns[0].needs_pair);
     assert!(!mdns[0].paired);
 }
+
+#[test]
+fn a_homepod_pair_with_two_advertised_leaders_selects_a_stable_destination() {
+    let make = |id: &str, address: &str| {
+        device_from_txt(
+            "Bedroom._airplay._tcp.local.",
+            id,
+            "AudioAccessory5,1",
+            "",
+            "PAIR+session",
+            "1",
+            "1",
+            "Bedroom",
+            "",
+            address.parse().unwrap(),
+        )
+        .unwrap()
+    };
+    let a = make("AA:00", "192.168.1.2");
+    let b = make("BB:00", "192.168.1.3");
+    assert_eq!(
+        collapse_pairs(vec![a.clone(), b.clone()]),
+        collapse_pairs(vec![b, a]),
+        "mDNS response ordering must not switch the target speaker"
+    );
+}
+
+#[test]
+fn permanent_stereo_identity_survives_different_playback_groups() {
+    let mut a = device_from_txt(
+        "Bedroom._airplay._tcp.local.",
+        "AA",
+        "AudioAccessory5,1",
+        "",
+        "session-a",
+        "1",
+        "1",
+        "Bedroom",
+        "",
+        "192.168.1.2".parse().unwrap(),
+    )
+    .unwrap();
+    let mut b = device_from_txt(
+        "Bedroom (2)._airplay._tcp.local.",
+        "BB",
+        "AudioAccessory5,1",
+        "",
+        "session-b",
+        "1",
+        "1",
+        "Bedroom",
+        "",
+        "192.168.1.3".parse().unwrap(),
+    )
+    .unwrap();
+    a.stereo_group = "stereo-id".into();
+    b.stereo_group = "STEREO-ID".into();
+    let listed = collapse_pairs(vec![b, a.clone()]);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].kind, "pair");
+    assert_eq!(listed[0].member_count, 2);
+    assert_eq!(listed[0].id, "AA");
+    assert_eq!(
+        collapse_pairs(vec![a]),
+        listed,
+        "an advertised permanent pair remains a pair with one missing answer"
+    );
+}

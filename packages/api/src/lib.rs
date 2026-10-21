@@ -279,6 +279,9 @@ pub struct ActiveOutputView {
     /// Absent on cores older than 0.2, which only reported live outputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<OutputPhase>,
+    /// Failure of the retained sender, shared by all control surfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl ActiveOutputView {
@@ -537,6 +540,7 @@ mod tests {
     #[test]
     fn active_output_view_flattens_the_identity() {
         let view = ActiveOutputView {
+            error: None,
             output: ActiveOutput {
                 transport: transport::SONOS.into(),
                 device_id: "uuid:1".into(),

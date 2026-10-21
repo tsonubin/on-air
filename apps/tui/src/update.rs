@@ -61,6 +61,7 @@ pub enum Msg {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Cmd {
     Refresh,
+    RestartService,
     RepairFirewall,
     RunAudioCheck,
     SetCaptureBuffer(u32),
@@ -125,6 +126,7 @@ pub const LABEL_PAIR: &str = "Pairing";
 pub const LABEL_CONNECT: &str = "Connecting";
 pub const LABEL_MONITOR: &str = "Changing monitor";
 pub const LABEL_REFRESH: &str = "Refreshing";
+pub const LABEL_RESTART: &str = "Restarting core service";
 pub const LABEL_FIREWALL: &str = "Authorizing firewall rule";
 pub const LABEL_BENCHMARK: &str = "Checking audio performance";
 pub const LABEL_BUFFER: &str = "Changing capture buffer";
@@ -147,6 +149,7 @@ pub fn needs_core(cmd: &Cmd) -> bool {
         cmd,
         Cmd::Quit
             | Cmd::Refresh
+            | Cmd::RestartService
             | Cmd::QueryAutostart
             | Cmd::SetAutostart(_)
             | Cmd::OpenBluetoothSettings
@@ -239,6 +242,14 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
             model.core_down = false;
             close_cd_modals_without_disc(model);
             model.notice = sleep_notice(&model.snapshot);
+            if let Some(error) = model
+                .snapshot
+                .active_output
+                .as_ref()
+                .and_then(|o| o.error.as_ref())
+            {
+                model.error = Some(error.clone());
+            }
             if matches!(
                 model.pending,
                 Some(Pending { ref label }) if label == LABEL_REFRESH
@@ -250,7 +261,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Vec<Cmd> {
         }
         Msg::Snapshot(Err(copy)) => {
             model.core_down = true;
-            model.error = Some(copy);
+            if !model
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.label == LABEL_RESTART)
+            {
+                model.error = Some(copy);
+            }
             if matches!(
                 model.pending,
                 Some(Pending { ref label }) if label == LABEL_REFRESH
@@ -337,6 +354,14 @@ fn sleep_notice(snapshot: &Snapshot) -> Option<String> {
 }
 
 fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cmd> {
+    if model
+        .pending
+        .as_ref()
+        .is_some_and(|p| p.label == LABEL_RESTART)
+        && label != LABEL_RESTART
+    {
+        return vec![];
+    }
     let chain_step = match label {
         LABEL_PAIR => Some(ActivationStep::Pairing),
         LABEL_CONNECT => Some(ActivationStep::Connecting),
@@ -357,6 +382,11 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
     match result {
         Ok(()) => {
             model.error = None;
+            if label == LABEL_RESTART {
+                model.connection = Connection::Reconnecting;
+                model.notice =
+                    Some("Core restarted; reconnecting and discovering speakers…".into());
+            }
             if label == LABEL_FIREWALL {
                 model.modal = Modal::None;
             }
@@ -406,7 +436,11 @@ fn on_done(model: &mut Model, label: &str, result: Result<(), String>) -> Vec<Cm
                 }
             }
             model.error = Some(copy);
-            vec![]
+            if label == LABEL_OUTPUT {
+                vec![Cmd::Refresh]
+            } else {
+                vec![]
+            }
         }
     }
 }
@@ -623,6 +657,28 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         model.quit = true;
         return vec![Cmd::Quit];
+    }
+    if action_for(&key) == Some(Action::RestartService)
+        && matches!(model.modal, Modal::None | Modal::Status)
+    {
+        if !crate::handoff::is_loopback_base(&model.base) {
+            model.error = Some("Restart the core service on the remote host.".into());
+            return vec![];
+        }
+        if model
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.label == LABEL_RESTART)
+        {
+            return vec![];
+        }
+        model.modal = Modal::None;
+        model.activation = None;
+        model.failed_output = None;
+        model.error = None;
+        model.snapshot.active_output = None;
+        model.connection = Connection::Reconnecting;
+        return pending(model, LABEL_RESTART, vec![Cmd::RestartService]);
     }
     match &mut model.modal {
         Modal::AudioCheck => {
@@ -895,6 +951,7 @@ fn on_key(model: &mut Model, key: KeyEvent) -> Vec<Cmd> {
         Action::PrevTrack => cd_action(model, CdAction::Prev),
         Action::Bluetooth => pending(model, LABEL_SETTINGS, vec![Cmd::OpenBluetoothSettings]),
         Action::Refresh => pending(model, LABEL_REFRESH, vec![Cmd::Refresh]),
+        Action::RestartService => unreachable!("handled above"),
         Action::Quit
         | Action::Help
         | Action::Back

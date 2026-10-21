@@ -82,6 +82,99 @@ fn stereo_pair_matches_mdns_uuid_without_instance_suffix() {
 }
 
 #[test]
+fn stereo_pair_survives_a_discovery_refresh_without_topology() {
+    let mut registry = DeviceRegistry::new();
+    let now = Instant::now();
+    let coordinator = SonosDevice::discovered(
+        "uuid:RINCON_38420B56ED0E",
+        "http://192.168.5.3:1400/xml/device_description.xml",
+        "192.168.5.3".parse().unwrap(),
+        "Bedroom",
+    );
+    let satellite = SonosDevice::discovered(
+        "uuid:RINCON_38420B56ECEC",
+        "http://192.168.5.2:1400/xml/device_description.xml",
+        "192.168.5.2".parse().unwrap(),
+        "Bedroom",
+    );
+    let groups = parse_zone_groups(
+        r#"<ZoneGroup Coordinator="RINCON_38420B56ED0E01400">
+        <ZoneGroupMember UUID="RINCON_38420B56ED0E01400" ZoneName="Bedroom"/>
+        <ZoneGroupMember UUID="RINCON_38420B56ECEC01400" ZoneName="Bedroom" Invisible="1"/>
+        </ZoneGroup>"#,
+    );
+    registry.upsert(coordinator.clone(), now);
+    registry.upsert(satellite.clone(), now);
+    registry.apply_zone_groups(&groups);
+    assert_eq!(registry.list().len(), 1);
+
+    // The next SSDP/mDNS scan succeeds, but GetZoneGroupState times out.
+    let next = now + Duration::from_secs(30);
+    registry.upsert(coordinator.clone(), next);
+    registry.upsert(satellite.clone(), next);
+    registry.apply_zone_groups(&[]);
+    let listed = registry.list();
+    assert_eq!(
+        listed.len(),
+        1,
+        "refresh must not expose a bonded satellite"
+    );
+    assert_eq!(listed[0].member_count, 2);
+
+    // An authoritative topology update must still expose newly unbonded rooms.
+    registry.apply_zone_groups(&parse_zone_groups(
+        r#"<ZoneGroup Coordinator="RINCON_38420B56ED0E01400">
+        <ZoneGroupMember UUID="RINCON_38420B56ED0E01400" ZoneName="Bedroom"/>
+        </ZoneGroup>
+        <ZoneGroup Coordinator="RINCON_38420B56ECEC01400">
+        <ZoneGroupMember UUID="RINCON_38420B56ECEC01400" ZoneName="Office"/>
+        </ZoneGroup>"#,
+    ));
+    let listed = registry.list();
+    assert_eq!(listed.len(), 2);
+    assert!(listed.iter().all(|d| d.member_count == 1));
+}
+
+#[test]
+fn cached_topology_hides_a_satellite_discovered_in_a_later_scan() {
+    let mut registry = DeviceRegistry::new();
+    registry.apply_zone_groups(&parse_zone_groups(
+        r#"<ZoneGroup Coordinator="RINCON_38420B56ED0E01400">
+        <ZoneGroupMember UUID="RINCON_38420B56ED0E01400" ZoneName="Bedroom"/>
+        <ZoneGroupMember UUID="RINCON_38420B56ECEC01400" ZoneName="Bedroom" Invisible="1"/>
+        </ZoneGroup>"#,
+    ));
+    let now = Instant::now();
+    registry.upsert(
+        SonosDevice::discovered(
+            "uuid:RINCON_38420B56ECEC",
+            "http://192.168.5.2:1400/xml/device_description.xml",
+            "192.168.5.2".parse().unwrap(),
+            "Bedroom",
+        ),
+        now,
+    );
+    assert!(registry.list().is_empty());
+
+    // A newer authoritative topology no longer contains this speaker.
+    registry.apply_zone_groups(&parse_zone_groups(
+        r#"<ZoneGroup Coordinator="RINCON_38420B56ED0E01400">
+        <ZoneGroupMember UUID="RINCON_38420B56ED0E01400" ZoneName="Bedroom"/>
+        </ZoneGroup>"#,
+    ));
+    let listed = registry.list();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].member_count, 1);
+
+    let ttl = Duration::from_secs(120);
+    registry.expire_stale(now + ttl, ttl);
+    assert!(
+        registry.list().is_empty(),
+        "topology must not keep devices alive"
+    );
+}
+
+#[test]
 fn ssdp_and_mdns_usn_collapse_to_one_registry_key() {
     let mut registry = DeviceRegistry::new();
     let t0 = Instant::now();

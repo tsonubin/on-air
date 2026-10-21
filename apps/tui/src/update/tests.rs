@@ -100,6 +100,7 @@ fn code(code: KeyCode) -> Msg {
 
 fn live_sonos() -> ActiveOutputView {
     ActiveOutputView {
+        error: None,
         output: ActiveOutput {
             transport: "sonos".into(),
             device_id: "uuid:mock-sonos".into(),
@@ -474,7 +475,7 @@ fn activation_failure_marks_the_row_and_enter_retries() {
     update(&mut m, code(KeyCode::Enter));
     assert_eq!(
         update(&mut m, done(LABEL_OUTPUT, Err("boom".into()))),
-        vec![]
+        vec![Cmd::Refresh]
     );
     assert_eq!(
         m.failed_output,
@@ -1340,6 +1341,7 @@ fn resize_and_accent_are_recorded() {
 fn live_model() -> Model {
     let mut m = model_with_mock_snapshot();
     m.snapshot.active_output = Some(ActiveOutputView {
+        error: None,
         output: ActiveOutput {
             transport: "sonos".into(),
             device_id: "uuid:mock-sonos".into(),
@@ -2088,4 +2090,58 @@ fn a_placeholder_row_cannot_be_activated() {
     assert_eq!(update(&mut m, code(KeyCode::Enter)), vec![]);
     assert_eq!(m.activation, None);
     assert_eq!(m.modal, Modal::None);
+}
+
+#[test]
+fn restart_works_while_the_core_is_down_and_ignores_an_old_switch_reply() {
+    let mut model = live_model();
+    model.base = crate::client::DEFAULT_BASE.into();
+    model.core_down = true;
+    model.modal = Modal::Status;
+    assert_eq!(update(&mut model, key('R')), vec![Cmd::RestartService]);
+    assert!(model.snapshot.active_output.is_none());
+    assert_eq!(model.pending.as_ref().unwrap().label, LABEL_RESTART);
+    assert!(update(&mut model, key('R')).is_empty());
+    assert!(update(
+        &mut model,
+        Msg::Done {
+            label: LABEL_OUTPUT.into(),
+            result: Ok(())
+        }
+    )
+    .is_empty());
+    assert_eq!(model.pending.as_ref().unwrap().label, LABEL_RESTART);
+    assert_eq!(
+        update(
+            &mut model,
+            Msg::Done {
+                label: LABEL_RESTART.into(),
+                result: Ok(())
+            }
+        ),
+        vec![Cmd::Refresh]
+    );
+    assert!(model.pending.is_none());
+}
+
+#[test]
+fn restart_never_restarts_a_local_service_when_controlling_a_remote_core() {
+    let mut model = live_model();
+    model.base = "http://192.168.1.40:47990".into();
+    assert!(update(&mut model, key('R')).is_empty());
+    assert!(model.error.as_ref().unwrap().contains("remote host"));
+}
+
+#[test]
+fn a_failed_output_snapshot_explains_the_receiver_failure() {
+    let mut model = live_model();
+    let mut snapshot = model.snapshot.clone();
+    let active = snapshot.active_output.as_mut().unwrap();
+    active.state = Some(OutputPhase::Failed);
+    active.error = Some("AirPlay playback failed: receiver disconnected".into());
+    update(&mut model, Msg::Snapshot(Ok(Box::new(snapshot))));
+    assert_eq!(
+        model.error.as_deref(),
+        Some("AirPlay playback failed: receiver disconnected")
+    );
 }

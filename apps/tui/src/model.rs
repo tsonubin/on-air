@@ -501,6 +501,7 @@ mod tests {
 
     fn active(transport: &str, id: &str, state: Option<OutputPhase>) -> ActiveOutputView {
         ActiveOutputView {
+            error: None,
             output: ActiveOutput {
                 transport: transport.into(),
                 device_id: id.into(),

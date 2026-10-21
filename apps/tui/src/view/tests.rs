@@ -59,6 +59,7 @@ fn model() -> Model {
             ),
         ],
         active_output: Some(ActiveOutputView {
+            error: None,
             output: ActiveOutput {
                 transport: "sonos".into(),
                 device_id: "uuid:mock-sonos".into(),

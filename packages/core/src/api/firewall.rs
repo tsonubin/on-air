@@ -31,7 +31,7 @@ pub async fn repair(
         let output = tokio::time::timeout(
             Duration::from_secs(120),
             tokio::process::Command::new("pkexec")
-                .args(["/bin/sh", "-c", REPAIR_SCRIPT, "on-air-firewall", &warning.subnet, &warning.port.to_string()])
+                .args(["--disable-internal-agent", "/bin/sh", "-c", REPAIR_SCRIPT, "on-air-firewall", &warning.subnet, &warning.port.to_string()])
                 .kill_on_drop(true)
                 .output(),
         ).await

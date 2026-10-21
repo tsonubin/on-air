@@ -300,6 +300,7 @@ pub(super) fn status_overlay(model: &Model, frame: &mut Frame, area: Rect) -> Re
         )),
         Line::from(format!("login start: {}", on_off(model.autostart))),
         Line::from(format!("Core: {}", model.base)),
+        Line::from(" R restarts the core service and reconnects "),
         Line::from(Span::styled(" Esc or i closes ", Style::new().dim())),
     ]);
     let rect = centered(

@@ -276,6 +276,18 @@ impl BluetoothSender {
 
 #[async_trait::async_trait]
 impl AudioSender for BluetoothSender {
+    fn check_health(&mut self) -> Result<(), SenderError> {
+        if self.live.as_ref().is_some_and(|live| {
+            live.writer
+                .as_ref()
+                .is_some_and(|writer| writer.is_finished())
+                || live.pump.as_ref().is_some_and(|pump| pump.is_finished())
+        }) {
+            return Err(SenderError::transport("The audio output stopped accepting samples. Reconnect the output or choose another speaker."));
+        }
+        Ok(())
+    }
+
     async fn start(&mut self) -> Result<(), SenderError> {
         if self.live.is_some() || self.connection_attempted {
             return Err(SenderError::not_ready(

@@ -180,6 +180,8 @@ export type OutputPhase = "starting" | "live" | "failed";
 export interface ActiveOutputView extends ActiveOutput {
   /** Optional because cores older than the output-session refactor omit it. */
   state?: OutputPhase;
+  /** Diagnostic for a failed output. */
+  error?: string;
 }
 
 /** Phase of the active output; cores that predate the field only report live outputs. */

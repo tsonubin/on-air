@@ -52,6 +52,8 @@ pub fn copy(error: &ClientError) -> String {
             "{UNREACHABLE_PREFIX}{base}; is on-air-core running? (systemctl --user status on-air-core)"
         ),
         ClientError::Timeout => TIMEOUT_COPY.to_string(),
+        ClientError::Http { code: Some(code), message, .. }
+            if matches!(code.as_str(), "transport_unreachable" | "not_ready" | "conflict") && !message.trim().is_empty() => message.trim().to_string(),
         ClientError::Http { status, code, .. } => code
             .as_deref()
             .and_then(copy_by_code)
@@ -71,6 +73,19 @@ mod tests {
             code: code.map(str::to_string),
             message: String::new(),
         }
+    }
+
+    #[test]
+    fn transport_failures_keep_the_core_diagnostic() {
+        let error = ClientError::Http {
+            status: 502,
+            code: Some("transport_unreachable".into()),
+            message: "AirPlay playback failed: receiver did not finish setup".into(),
+        };
+        assert_eq!(
+            copy(&error),
+            "AirPlay playback failed: receiver did not finish setup"
+        );
     }
 
     #[test]

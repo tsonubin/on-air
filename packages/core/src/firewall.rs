@@ -7,12 +7,16 @@ use std::net::Ipv4Addr;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+/// Direct AirPlay sessions allocate one timing/control pair in this range.
+pub const AIRPLAY_UDP_PORT_MIN: u16 = 48000;
+pub const AIRPLAY_UDP_PORT_MAX: u16 = 48127;
+
 fn field<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     line.split_whitespace()
         .find_map(|word| word.strip_prefix(key))
 }
 
-/// Only accept TCP drops on our actual listening port and a local interface.
+/// Only accept drops on our audio ports and a local interface.
 /// Other services' drops and public Internet probes are not audio warnings.
 pub fn warning_from_log(
     log: &str,
@@ -20,10 +24,13 @@ pub fn warning_from_log(
     interfaces: &[(Ipv4Addr, Ipv4Addr)],
 ) -> Option<FirewallWarning> {
     for line in log.lines().rev() {
-        if !line.contains("[UFW BLOCK]")
-            || field(line, "PROTO=") != Some("TCP")
-            || field(line, "DPT=").and_then(|s| s.parse::<u16>().ok()) != Some(port)
-        {
+        let destination_port = field(line, "DPT=").and_then(|s| s.parse::<u16>().ok());
+        let audio_drop = match (field(line, "PROTO="), destination_port) {
+            (Some("TCP"), Some(p)) => p == port,
+            (Some("UDP"), Some(p)) => (AIRPLAY_UDP_PORT_MIN..=AIRPLAY_UDP_PORT_MAX).contains(&p),
+            _ => false,
+        };
+        if !line.contains("[UFW BLOCK]") || !audio_drop {
             continue;
         }
         let Some(source) = field(line, "SRC=").and_then(|s| s.parse::<Ipv4Addr>().ok()) else {
@@ -52,8 +59,11 @@ pub fn warning_from_log(
         return Some(FirewallWarning {
             repair_command: format!(
                 "sudo ufw allow from {subnet} to any port {port} proto tcp\n\
+                 sudo ufw allow from {subnet} to any port {AIRPLAY_UDP_PORT_MIN}:{AIRPLAY_UDP_PORT_MAX} proto udp\n\
                  sudo iptables -C ufw-user-input -s {subnet} -p tcp --dport {port} -j ACCEPT || \
-                 sudo iptables -I ufw-user-input 1 -s {subnet} -p tcp --dport {port} -j ACCEPT"
+                 sudo iptables -I ufw-user-input 1 -s {subnet} -p tcp --dport {port} -j ACCEPT\n\
+                 sudo iptables -C ufw-user-input -s {subnet} -p udp --dport {AIRPLAY_UDP_PORT_MIN}:{AIRPLAY_UDP_PORT_MAX} -j ACCEPT || \
+                 sudo iptables -I ufw-user-input 1 -s {subnet} -p udp --dport {AIRPLAY_UDP_PORT_MIN}:{AIRPLAY_UDP_PORT_MAX} -j ACCEPT"
             ),
             subnet,
             port,

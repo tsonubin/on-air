@@ -33,6 +33,7 @@ pub enum Action {
     Status,
     Bluetooth,
     Refresh,
+    RestartService,
     Firewall,
     AudioCheck,
     Help,
@@ -139,6 +140,11 @@ pub const KEYS: &[Binding] = &[
         help: "Refresh devices",
     },
     Binding {
+        keys: "R",
+        action: Action::RestartService,
+        help: "Restart the core service and reconnect",
+    },
+    Binding {
         keys: "?",
         action: Action::Help,
         help: "This help",
@@ -171,9 +177,10 @@ pub const HINTS: &[(&str, &str)] = &[
     ("t", "audio"),
     ("Enter", "select"),
     ("h/l", "adjust"),
-    ("↑/↓", "volume"),
+    ("↑/↓", "vol"),
     ("m", "monitor"),
     ("i", "info"),
+    ("R", "restart"),
     ("?", "help"),
     ("q", "quit"),
 ];
@@ -214,6 +221,7 @@ pub fn action_for(key: &KeyEvent) -> Option<Action> {
             'i' => Action::Status,
             'b' => Action::Bluetooth,
             'r' => Action::Refresh,
+            'R' => Action::RestartService,
             'f' => Action::Firewall,
             't' => Action::AudioCheck,
             '?' => Action::Help,
@@ -244,7 +252,7 @@ mod tests {
         );
         assert_eq!(action_for(&press(KeyCode::Char('s'))), None);
         assert_eq!(action_for(&press(KeyCode::Char('z'))), None);
-        assert_eq!(KEYS.len(), 23);
+        assert_eq!(KEYS.len(), 24);
         assert_eq!(action_for(&press(KeyCode::Char('L'))), Some(Action::FineUp));
         assert_eq!(
             action_for(&press(KeyCode::Char('H'))),

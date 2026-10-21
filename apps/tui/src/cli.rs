@@ -263,6 +263,7 @@ mod tests {
 
     fn active(name: &str, phase: OutputPhase) -> ActiveOutputView {
         ActiveOutputView {
+            error: None,
             output: ActiveOutput {
                 transport: "sonos".into(),
                 device_id: "uuid:mock-sonos".into(),

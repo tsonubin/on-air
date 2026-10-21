@@ -52,8 +52,9 @@ building from source, is in [INSTALL.md](INSTALL.md).
 ## Use
 
 On Omarchy 4 the native panel provides routing and device defaults. The terminal
-UI also provides EQ, CD transport and sample-rate controls. `?` shows its keys; the
-full key and mouse tables, the launcher entry, hotkey, menu rows and bar
+UI also provides EQ, CD transport and sample-rate controls. `?` shows its keys;
+`R` restarts the local core service and reconnects the TUI. The full key and
+mouse tables, the launcher entry, hotkey, menu rows and bar
 module are in [docs/omarchy.md](docs/omarchy.md). From a shell:
 
 ```bash
@@ -83,6 +84,13 @@ writes to the OS audio sink. A small HTTP and WebSocket control plane on
 port 47990 is the only way in: the terminal UI, the tray window and the
 phone are all clients of it and own no playback. Remote clients pair with
 a PIN and then a bearer token; the local desktop is trusted by origin.
+
+The output session owns readiness, failure reporting and cleanup. Sonos must
+begin fetching its stream, and a direct AirPlay helper must advance its
+playhead, before the session reports live playback. A helper or PCM worker
+that exits later changes the output to failed with a diagnostic shared by
+the clients. Direct AirPlay timing/control uses UDP ports 48000–48127, with
+a distinct port pair for each concurrent session.
 
 The Linux patchbay adds a separate graph: PipeWire/PulseAudio buses perform
 local mixing and fan-out, and each active network sink gets its own capture

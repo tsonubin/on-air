@@ -38,6 +38,30 @@ fn the_reported_sonos_drop_produces_a_port_and_subnet_scoped_repair() {
 }
 
 #[test]
+fn homepod_timing_drops_produce_a_scoped_airplay_udp_repair() {
+    let log =
+        "[UFW BLOCK] IN=wlp3s0 SRC=192.168.5.26 DST=192.168.5.101 PROTO=UDP SPT=54031 DPT=48001";
+    let warning = warning_from_log(
+        log,
+        47990,
+        &[(
+            Ipv4Addr::new(192, 168, 5, 101),
+            Ipv4Addr::new(255, 255, 255, 0),
+        )],
+    )
+    .expect("AirPlay timing drops must be detected as audio failures");
+    assert_eq!(warning.port, 47990);
+    assert_eq!(warning.subnet, "192.168.5.0/24");
+    assert!(warning
+        .repair_command
+        .contains("port 48000:48127 proto udp"));
+    assert!(warning
+        .repair_command
+        .contains("-p udp --dport 48000:48127"));
+    assert!(warning.repair_command.contains("port 47990 proto tcp"));
+}
+
+#[test]
 fn unrelated_drops_and_unreadable_logs_do_not_blame_ufw() {
     let interfaces = [(
         Ipv4Addr::new(192, 168, 5, 101),

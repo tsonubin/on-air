@@ -73,7 +73,11 @@ async fn start_calls_set_uri_then_play_stop_calls_stop_set_volume_calls_set_volu
 }
 
 #[derive(Clone, Default)]
-struct FailingStopProbe(Arc<Mutex<Vec<String>>>);
+struct FailingStopProbe {
+    calls: Arc<Mutex<Vec<String>>>,
+    clients: Arc<std::sync::atomic::AtomicUsize>,
+    progress: Arc<std::sync::atomic::AtomicU64>,
+}
 
 async fn fail_stop_handler(State(probe): State<FailingStopProbe>, headers: HeaderMap) -> Response {
     let action = headers
@@ -81,7 +85,13 @@ async fn fail_stop_handler(State(probe): State<FailingStopProbe>, headers: Heade
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_string();
-    probe.0.lock().unwrap().push(action.clone());
+    probe.calls.lock().unwrap().push(action.clone());
+    if action.contains("#Play") {
+        probe.clients.store(1, std::sync::atomic::Ordering::Release);
+        probe
+            .progress
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+    }
     if action.contains("#Stop") {
         (StatusCode::INTERNAL_SERVER_ERROR, "stop failed").into_response()
     } else {
@@ -93,7 +103,13 @@ async fn fail_stop_handler(State(probe): State<FailingStopProbe>, headers: Heade
 async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
     use on_air_core::state::{ActiveOutput, CoreState};
 
-    let probe = FailingStopProbe::default();
+    let mut state = CoreState::new();
+    state.set_mock(true);
+    let probe = FailingStopProbe {
+        clients: state.stream_clients.clone(),
+        progress: state.stream_progress.clone(),
+        ..FailingStopProbe::default()
+    };
     let app = Router::new()
         .route(
             "/MediaRenderer/AVTransport/Control",
@@ -116,8 +132,6 @@ async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
         IpAddr::V4(Ipv4Addr::LOCALHOST),
         "Failed Stop",
     );
-    let mut state = CoreState::new();
-    state.set_mock(true);
     let sender = SonosSender::new(
         device,
         reqwest::Client::builder().no_proxy().build().unwrap(),
@@ -136,12 +150,13 @@ async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
         .await
         .unwrap();
 
+    probe.clients.store(0, std::sync::atomic::Ordering::Release);
     assert!(state.deactivate_sender().await.is_err());
     assert!(state.output().sender_name().await.is_some());
     let recovered = tokio::time::timeout(std::time::Duration::from_secs(3), async {
         loop {
             let play_count = probe
-                .0
+                .calls
                 .lock()
                 .unwrap()
                 .iter()

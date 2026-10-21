@@ -14,7 +14,7 @@
 use crate::events::WsEvent;
 use crate::sender::{AudioSender, OutputFormat, SenderError};
 use parking_lot::Mutex as SyncMutex;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch, Mutex, MutexGuard};
 
@@ -128,6 +128,7 @@ struct Inner {
     output_rate_hz: Arc<SyncMutex<u32>>,
     /// Mute laptop speakers while a remote output is live. Off in mock mode.
     manage_local_sink: AtomicBool,
+    supervision_generation: AtomicU64,
     #[cfg(test)]
     after_starting: SyncMutex<Option<Box<dyn Fn() + Send + Sync>>>,
 }
@@ -148,6 +149,7 @@ impl OutputSession {
                 ws_tx,
                 output_rate_hz,
                 manage_local_sink: AtomicBool::new(true),
+                supervision_generation: AtomicU64::new(0),
                 #[cfg(test)]
                 after_starting: SyncMutex::new(None),
             }),
@@ -420,6 +422,55 @@ impl OutputSession {
         );
         self.apply_local_sink(&identity).await;
         self.emit(&identity, true);
+        self.supervise();
+    }
+
+    /// Watch the sender owned by this activation. A weak reference avoids
+    /// keeping closed patchbay sessions alive; the generation prevents an
+    /// old watcher from observing a replacement sender on the same device.
+    fn supervise(&self) {
+        let generation = self
+            .inner
+            .supervision_generation
+            .fetch_add(1, Ordering::AcqRel)
+            + 1;
+        let inner = Arc::downgrade(&self.inner);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let Some(inner) = inner.upgrade() else { return };
+                let session = OutputSession { inner };
+                let mut state = session.inner.state.lock().await;
+                if session.inner.supervision_generation.load(Ordering::Acquire) != generation {
+                    return;
+                }
+                let error = match &mut *state {
+                    OutputState::Live { sender, .. } => sender.check_health().err(),
+                    _ => return,
+                };
+                if let Some(error) = error {
+                    let OutputState::Live {
+                        sender, identity, ..
+                    } = std::mem::replace(&mut *state, OutputState::Idle)
+                    else {
+                        unreachable!()
+                    };
+                    let failed_identity = identity.clone();
+                    session.set(
+                        &mut state,
+                        OutputState::Failed {
+                            sender,
+                            identity,
+                            nonce: None,
+                            error: error.to_string(),
+                        },
+                    );
+                    session.restore_local_sink().await;
+                    session.emit(&failed_identity, false);
+                    return;
+                }
+            }
+        });
     }
 
     async fn apply_local_sink(&self, identity: &ActiveOutput) {
@@ -499,6 +550,7 @@ mod tests {
         fail_stop: bool,
         start_delay: Duration,
         format: Option<OutputFormat>,
+        failed: Arc<AtomicBool>,
     }
 
     impl Scripted {
@@ -510,6 +562,7 @@ mod tests {
                 fail_stop: false,
                 start_delay: Duration::ZERO,
                 format: None,
+                failed: Arc::new(AtomicBool::new(false)),
             }
         }
     }
@@ -542,9 +595,79 @@ mod tests {
         fn transport(&self) -> &'static str {
             "sonos"
         }
+        fn check_health(&mut self) -> Result<(), SenderError> {
+            if self.failed.load(Ordering::Acquire) {
+                Err(SenderError::transport("receiver disconnected"))
+            } else {
+                Ok(())
+            }
+        }
         fn output_format(&self) -> Option<OutputFormat> {
             self.format.clone()
         }
+    }
+
+    #[tokio::test]
+    async fn a_sender_failure_retires_its_radio_and_publishes_failed_state() {
+        let (session, mut events) = session();
+        let log = Log::default();
+        let sender = Scripted::new("AirPlay", &log);
+        let failed = sender.failed.clone();
+        session
+            .activate(
+                Box::new(sender),
+                Some(identity("airplay")),
+                Some("radio".into()),
+            )
+            .await
+            .unwrap();
+        failed.store(true, Ordering::Release);
+        let mut snapshots = session.subscribe();
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            snapshots.wait_for(|s| s.phase == OutputPhase::Failed),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.error.as_deref(), Some("receiver disconnected"));
+        assert!(!snapshot.serves_radio("radio"));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            WsEvent::OutputStateChanged { active: true, .. }
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            WsEvent::OutputStateChanged { active: false, .. }
+        ));
+        session.deactivate().await.unwrap();
+        assert_eq!(session.snapshot(), OutputSnapshot::default());
+        assert_eq!(*log.lock().await, ["AirPlay:start", "AirPlay:stop"]);
+    }
+
+    #[tokio::test]
+    async fn a_replaced_sender_cannot_fail_the_new_activation() {
+        let (session, _) = session();
+        let log = Log::default();
+        let old = Scripted::new("old", &log);
+        let failed = old.failed.clone();
+        session
+            .activate(Box::new(old), Some(identity("same")), None)
+            .await
+            .unwrap();
+        session
+            .activate(
+                Box::new(Scripted::new("new", &log)),
+                Some(identity("same")),
+                None,
+            )
+            .await
+            .unwrap();
+        failed.store(true, Ordering::Release);
+        tokio::time::sleep(Duration::from_millis(350)).await;
+        assert_eq!(session.snapshot().phase, OutputPhase::Live);
+        session.deactivate().await.unwrap();
     }
 
     #[tokio::test]

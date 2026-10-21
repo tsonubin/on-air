@@ -77,6 +77,9 @@ impl SonosDevice {
 #[derive(Default)]
 pub struct DeviceRegistry {
     devices: HashMap<String, (SonosDevice, Instant)>,
+    /// Last successful topology. SSDP/mDNS refreshes contain no bonding
+    /// information and must not turn satellites back into solo outputs.
+    zone_groups: Vec<ZoneGroup>,
 }
 
 impl DeviceRegistry {
@@ -84,7 +87,8 @@ impl DeviceRegistry {
         Self::default()
     }
 
-    pub fn upsert(&mut self, device: SonosDevice, seen_at: Instant) {
+    pub fn upsert(&mut self, mut device: SonosDevice, seen_at: Instant) {
+        apply_device_topology(&mut device, &self.zone_groups);
         if !self.devices.contains_key(&device.usn) && self.devices.len() >= MAX_REGISTRY_DEVICES {
             if let Some(oldest) = self
                 .devices
@@ -122,36 +126,37 @@ impl DeviceRegistry {
         if groups.is_empty() {
             return;
         }
+        self.zone_groups = groups.to_vec();
         for (device, _) in self.devices.values_mut() {
-            let key = rincon_key(&device.usn);
-            let mut matched = false;
-            for group in groups {
-                if rincon_key(&group.coordinator) == key {
-                    device.playable = true;
-                    device.member_count = group.members.len().clamp(1, u8::MAX as usize) as u8;
-                    if let Some(name) = group
-                        .members
-                        .iter()
-                        .find(|m| rincon_key(&m.uuid) == key)
-                        .map(|m| m.name.clone())
-                    {
-                        if !name.is_empty() {
-                            device.friendly_name = name;
-                        }
-                    }
-                    matched = true;
-                    break;
-                }
-                if group.members.iter().any(|m| rincon_key(&m.uuid) == key) {
-                    device.playable = false;
-                    device.member_count = 1;
-                    matched = true;
-                    break;
+            apply_device_topology(device, groups);
+        }
+    }
+}
+
+fn apply_device_topology(device: &mut SonosDevice, groups: &[ZoneGroup]) {
+    device.playable = true;
+    device.member_count = 1;
+    let key = rincon_key(&device.usn);
+    for group in groups {
+        if rincon_key(&group.coordinator) == key {
+            device.playable = true;
+            device.member_count = group.members.len().clamp(1, u8::MAX as usize) as u8;
+            if let Some(name) = group
+                .members
+                .iter()
+                .find(|m| rincon_key(&m.uuid) == key)
+                .map(|m| m.name.clone())
+            {
+                if !name.is_empty() {
+                    device.friendly_name = name;
                 }
             }
-            if !matched {
-                device.playable = true;
-            }
+            break;
+        }
+        if group.members.iter().any(|m| rincon_key(&m.uuid) == key) {
+            device.playable = false;
+            device.member_count = 1;
+            break;
         }
     }
 }
@@ -473,17 +478,11 @@ pub fn spawn(
     registry: std::sync::Arc<tokio::sync::Mutex<DeviceRegistry>>,
     ws_tx: tokio::sync::broadcast::Sender<crate::events::WsEvent>,
 ) -> tokio::task::JoinHandle<()> {
-    use crate::events::WsEvent;
     use std::collections::HashSet;
 
     tokio::spawn(async move {
         let http = crate::net::lan_http_client(Duration::from_secs(2));
         loop {
-            let before: HashSet<String> = {
-                let registry = registry.lock().await;
-                registry.list().into_iter().map(|d| d.usn).collect()
-            };
-
             let (ssdp, mdns) = tokio::join!(
                 search_once(Duration::from_secs(2)),
                 search_mdns(Duration::from_secs(2)),
@@ -523,30 +522,87 @@ pub fn spawn(
             let now = Instant::now();
             {
                 let mut registry = registry.lock().await;
-                for device in named {
-                    if !before.contains(&device.usn) {
-                        let _ = ws_tx.send(WsEvent::DeviceJoined {
-                            transport: "sonos".to_string(),
-                            id: device.usn.clone(),
-                            name: device.friendly_name.clone(),
-                        });
-                    }
-                    registry.upsert(device, now);
-                }
-                if let Some(groups) = topology {
-                    registry.apply_zone_groups(&groups);
-                }
-                registry.expire_stale(now, DEVICE_TTL);
-
-                let after: HashSet<String> = registry.list().into_iter().map(|d| d.usn).collect();
-                for left in before.difference(&after) {
-                    let _ = ws_tx.send(WsEvent::DeviceLeft {
-                        transport: "sonos".to_string(),
-                        id: left.clone(),
-                    });
-                }
+                apply_scan(&mut registry, named, topology.as_deref(), now, &ws_tx);
             }
             tokio::time::sleep(DISCOVERY_INTERVAL).await;
         }
     })
+}
+
+fn apply_scan(
+    registry: &mut DeviceRegistry,
+    found: Vec<SonosDevice>,
+    topology: Option<&[ZoneGroup]>,
+    now: Instant,
+    ws_tx: &tokio::sync::broadcast::Sender<crate::events::WsEvent>,
+) {
+    let before = catalog_entries(registry);
+    for device in found {
+        registry.upsert(device, now);
+    }
+    if let Some(groups) = topology {
+        registry.apply_zone_groups(groups);
+    }
+    registry.expire_stale(now, DEVICE_TTL);
+    let after = catalog_entries(registry);
+    crate::events::emit_catalog_diff(ws_tx, "sonos", &before, &after);
+}
+
+fn catalog_entries(registry: &DeviceRegistry) -> Vec<(String, String)> {
+    registry
+        .list()
+        .into_iter()
+        .map(|d| (d.usn, d.friendly_name))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_events_never_advertise_a_bonded_satellite() {
+        let coordinator = SonosDevice::discovered(
+            "uuid:coordinator",
+            "http://192.168.1.2:1400/device.xml",
+            "192.168.1.2".parse().unwrap(),
+            "Bedroom",
+        );
+        let satellite = SonosDevice::discovered(
+            "uuid:satellite",
+            "http://192.168.1.3:1400/device.xml",
+            "192.168.1.3".parse().unwrap(),
+            "Bedroom",
+        );
+        let topology = parse_zone_groups(
+            r#"<ZoneGroup Coordinator="uuid:coordinator">
+            <ZoneGroupMember UUID="uuid:coordinator" ZoneName="Bedroom"/>
+            <ZoneGroupMember UUID="uuid:satellite" ZoneName="Bedroom" Invisible="1"/>
+            </ZoneGroup>"#,
+        );
+        let mut registry = DeviceRegistry::new();
+        let (ws_tx, mut events) = tokio::sync::broadcast::channel(16);
+        let now = Instant::now();
+        let found = vec![coordinator.clone(), satellite.clone()];
+        apply_scan(&mut registry, found.clone(), Some(&topology), now, &ws_tx);
+        assert!(
+            matches!(events.try_recv().unwrap(), crate::events::WsEvent::DeviceJoined { id, .. } if id == coordinator.usn)
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "satellites must not join the selectable catalog"
+        );
+
+        apply_scan(
+            &mut registry,
+            found,
+            None,
+            now + Duration::from_secs(30),
+            &ws_tx,
+        );
+        assert!(
+            events.try_recv().is_err(),
+            "refresh must not reannounce hidden satellites"
+        );
+    }
 }

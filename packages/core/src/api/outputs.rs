@@ -26,6 +26,7 @@ pub async fn get_active_output(
         active: snapshot.identity.map(|output| ActiveOutputView {
             output,
             state: Some(snapshot.phase),
+            error: snapshot.error,
         }),
     })
 }

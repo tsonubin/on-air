@@ -411,6 +411,11 @@ async fn sonos_radio_is_live_before_play_pulls_the_uri() {
                         .unwrap();
                     if let Ok(resp) = client.get(uri).send().await {
                         *status_slot.lock().unwrap() = Some(resp.status().as_u16());
+                        // Read the body like a speaker, so readiness observes
+                        // actual audio delivery rather than just HTTP headers.
+                        let mut body = resp.bytes_stream();
+                        let _ = body.next().await;
+                        let _ = body.next().await;
                     }
                 }
             });
@@ -709,6 +714,17 @@ async fn start_sonos_recovery_harness(
         format!("http://{core_addr}/stream/{nonce}/audio.wav"),
     )
     .with_stream_health(state.stream_clients.clone(), state.stream_progress.clone());
+    // A live source produces samples while the receiver starts, rather
+    // than waiting for activation to return before publishing its first PCM.
+    let warmup = tokio::spawn({
+        let tx = audio_tx.clone();
+        async move {
+            loop {
+                let _ = tx.send(bytes::Bytes::from_static(FIRST_AUDIO));
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }
+    });
     state
         .activate_sender_streaming(
             Box::new(sender) as Box<dyn AudioSender>,
@@ -721,6 +737,7 @@ async fn start_sonos_recovery_harness(
         )
         .await
         .unwrap();
+    warmup.abort();
     assert!(
         wait_until(std::time::Duration::from_secs(1), || {
             probe
@@ -817,7 +834,11 @@ async fn sonos_stream_recovers_when_connected_reader_stalls() {
     let (state, audio_tx, probe, stalled_reader) =
         start_sonos_recovery_harness(FakeSonosFailure::StallFirstPull).await;
     let _stalled_reader = stalled_reader.expect("harness must retain the stalled stream body");
-    assert_eq!(state.stream_clients.load(Ordering::Acquire), 1);
+    assert_eq!(
+        state.stream_clients.load(Ordering::Acquire),
+        2,
+        "startup must replace the retained stalled reader before reporting live playback"
+    );
     assert!(state.active_output().is_some());
 
     assert!(

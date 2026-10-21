@@ -51,10 +51,11 @@ fn not_installed(stderr: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 pub async fn control(verb: ServiceVerb) -> Result<String, String> {
-    let output = tokio::process::Command::new("systemctl")
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), tokio::process::Command::new("systemctl")
         .args(systemctl_args(verb))
+        .kill_on_drop(true)
         .output()
-        .await
+    ).await.map_err(|_| "The core service did not finish restarting within 30 seconds; check `systemctl --user status on-air-core`.".to_string())?
         .map_err(|error| format!("could not run systemctl: {error}"))?;
     if output.status.success() {
         return Ok(format!("{UNIT} {}", verb.done()));

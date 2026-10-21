@@ -200,6 +200,13 @@ impl Client {
         };
         match cmd {
             Cmd::Quit => vec![],
+            Cmd::RestartService => {
+                let result = self.restart_service().await;
+                vec![Msg::Done {
+                    label: update::LABEL_RESTART.into(),
+                    result,
+                }]
+            }
             Cmd::RunAudioCheck => vec![Msg::Benchmark(
                 self.audio_check()
                     .await
@@ -304,6 +311,21 @@ impl Client {
                 vec![Msg::Autostart(crate::autostart::set_enabled(enabled).await)]
             }
         }
+    }
+
+    async fn restart_service(&self) -> Result<(), String> {
+        if !crate::handoff::is_loopback_base(&self.base) {
+            return Err("Restart the core service on the remote host.".into());
+        }
+        crate::service::control(crate::service::ServiceVerb::Restart).await?;
+        // Type=simple only proves that systemd spawned the core. Keep the
+        // restart pending until HTTP is ready, so the first refresh cannot
+        // leave a successful restart showing a stale unreachable error.
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while self.status().await.is_err() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }).await.map_err(|_| "The service restarted, but the core is still unreachable. Check `systemctl --user status on-air-core`.".to_string())
     }
 }
 
