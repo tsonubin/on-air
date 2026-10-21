@@ -1,14 +1,14 @@
 import { Button, FieldGroup } from "@expo/ui";
 import { useRemoteSession } from "@/remote-session";
 import { SettingsForm, sectionModifiers } from "@/settings-form";
-import { FormText, SectionTitle } from "@/ui/form-text";
+import { FormText, sectionTitle } from "@/ui/form-text";
 
 export default function ConnectionScreen() {
   const { pairedHost, view, refreshing, refresh, disconnect } = useRemoteSession();
   return (
     <SettingsForm testID="connection-screen">
       <FieldGroup.Section modifiers={sectionModifiers}>
-        <SectionTitle title="Paired desktop" />
+        {sectionTitle("Paired desktop")}
         <FormText variant="value" copyable testID="paired-host">
           {pairedHost}
         </FormText>

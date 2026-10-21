@@ -3,7 +3,7 @@ import { Stack } from "expo-router/stack";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { FontGate } from "@/font-gate";
-import { navigationTheme, screenHeaderOptions } from "@/navigation-theme";
+import { navigationTheme, screenHeaderOptions, titledScreen } from "@/navigation-theme";
 import { RemoteProvider, useRemoteSession } from "@/remote-session";
 
 function Navigation() {
@@ -12,10 +12,10 @@ function Navigation() {
     <Stack screenOptions={{ headerBackButtonDisplayMode: "default", ...screenHeaderOptions }}>
       <Stack.Screen name="index" options={{ headerShown: false, title: "Mixer" }} />
       <Stack.Protected guard={paired}>
-        <Stack.Screen name="sound" options={{ title: "Sound" }} />
-        <Stack.Screen name="equalizer" options={{ title: "Equalizer" }} />
-        <Stack.Screen name="audio-format" options={{ title: "Audio format" }} />
-        <Stack.Screen name="connection" options={{ title: "Connection" }} />
+        <Stack.Screen name="sound" options={titledScreen("Sound")} />
+        <Stack.Screen name="equalizer" options={titledScreen("Equalizer")} />
+        <Stack.Screen name="audio-format" options={titledScreen("Audio format")} />
+        <Stack.Screen name="connection" options={titledScreen("Connection")} />
       </Stack.Protected>
     </Stack>
   );

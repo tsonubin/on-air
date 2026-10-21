@@ -34,14 +34,18 @@ describe("sheetProps", () => {
     ]);
   });
 
-  test("Android keeps the Material defaults", () => {
+  test("Android sheets sit on the faceplate with cream content", () => {
     (Platform as { OS: string }).OS = "android";
     for (const spec of [
       { kind: "source" } as const,
       { kind: "output", count: 9 } as const,
       { kind: "device-pair", transport: "airplay" } as const,
     ]) {
-      expect(sheetProps(spec)).toEqual({ showDragIndicator: true });
+      expect(sheetProps(spec)).toEqual({
+        showDragIndicator: true,
+        containerColor: "#1a1814",
+        contentColor: "#f3ead4",
+      });
     }
   });
 });

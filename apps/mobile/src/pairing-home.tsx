@@ -187,7 +187,10 @@ export function PairingHome({
   const pinInputRef = useRef<TextInput>(null);
   const selected = found.find((hit) => hit.host === host.trim()) ?? null;
   const targetReady = manual ? host.trim().length > 0 : selected !== null;
-  const canPair = targetReady && pin.length === 6 && !pairing;
+  // The key stays lit while the code is checked so its spinner stays visible;
+  // it is only pressable when lit and idle.
+  const lit = targetReady && pin.length === 6;
+  const canPair = lit && !pairing;
 
   return (
     // iOS insets the ScrollView and scrolls the focused field above the keyboard. Edge-to-edge
@@ -395,8 +398,8 @@ export function PairingHome({
                       alignItems: "center",
                       justifyContent: "center",
                       borderWidth: 1,
-                      borderColor: canPair ? colors.amberBright : colors.border,
-                      backgroundColor: canPair ? colors.amber : colors.surface,
+                      borderColor: lit ? colors.amberBright : colors.border,
+                      backgroundColor: lit ? colors.amber : colors.surface,
                       opacity: pressed ? 0.7 : 1,
                     })}
                   >
@@ -408,7 +411,7 @@ export function PairingHome({
                           type.label,
                           {
                             fontSize: 13,
-                            color: canPair ? colors.onAmber : colors.tertiaryLabel,
+                            color: lit ? colors.onAmber : colors.tertiaryLabel,
                           },
                         ]}
                       >

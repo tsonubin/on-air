@@ -65,7 +65,7 @@ export function DevicePairSheet({
             style={{
               padding: 12,
               borderWidth: 1,
-              borderColor: colors.accent,
+              borderColor: colors.key,
               borderRadius: radius.sm,
             }}
           />

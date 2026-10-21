@@ -505,6 +505,8 @@ test("unpaired AirPlay asks for the speaker code, then pairs and connects", asyn
   expect(exists("output-sheet")).toBe(false);
   expect(exists("pair-sheet")).toBe(true);
   expect(api.activateOutput).not.toHaveBeenCalled();
+  // Red is only for live state; the speaker-code field sits in the faceplate palette.
+  expect(flat(host("device-pin-input").props.style).borderColor).toBe("#5c4a32");
   ReactTestRenderer.act(() => host("device-pin-input").props.onChangeText("11x11"));
   await press("device-pair-submit");
   expect(api.pairAirplay).toHaveBeenCalledWith(BASE, "ap-locked", "1111", TOKEN);
@@ -533,6 +535,12 @@ test("compact disc transport applies the returned state", async () => {
   await renderApp();
   await pairWith();
   expect(text()).toContain("So What");
+  // Transport buttons are faceplate keys, like the desktop's.
+  expect(flat(host("cd-play").props.style)).toMatchObject({
+    backgroundColor: "#221f1a",
+    borderColor: "#3a342a",
+    borderWidth: 1,
+  });
   await press("cd-next");
   expect(api.controlCd).toHaveBeenCalledWith(BASE, "next", TOKEN);
   expect(text()).toContain("Freddie Freeloader");
@@ -610,6 +618,51 @@ test("retro header: the sign stays unlit when ready and lights while live", asyn
   expect(exists("live-dot")).toBe(true);
 });
 
+test("live state warms the active route row and makes the lamp glow; ready does neither", async () => {
+  await renderApp();
+  await pairWith();
+  expect(flat(host("output-row").props.style).backgroundColor).toBe("transparent");
+  expect(flat(host("live-lamp").props.style).shadowOpacity).toBe(0);
+
+  ReactTestRenderer.act(() => tree?.unmount());
+  api.getActiveOutput.mockResolvedValue({
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    transport: "sonos",
+    state: "live",
+  });
+  await renderApp();
+  expect(flat(host("output-row").props.style).backgroundColor).toBe("#3a221c");
+  expect(flat(host("live-lamp").props.style)).toMatchObject({
+    shadowColor: "#ff3b2a",
+    shadowOpacity: 0.6,
+  });
+});
+
+test("a firewall block keeps the live dot off, matching the header", async () => {
+  api.getActiveOutput.mockResolvedValue({
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    transport: "sonos",
+    state: "live",
+  });
+  api.fetchStatus.mockResolvedValue({
+    status: "ok",
+    version: "0.1.0",
+    service_enabled: true,
+    firewall_warning: {
+      message: "UFW is blocking LAN audio.",
+      subnet: "192.168.5.0/24",
+      port: 47990,
+      repair_command: "sudo ufw allow from 192.168.5.0/24 to any port 47990 proto tcp",
+    },
+  });
+  await renderApp();
+  await pairWith();
+  expect(host("status-pill").props.accessibilityLabel).toBe("Firewall blocking audio");
+  expect(exists("live-dot")).toBe(false);
+});
+
 test("volume shows on an LED readout that dims when the desktop is paused", async () => {
   // Volume is only adjustable while a speaker is live.
   api.getActiveOutput.mockResolvedValue({
@@ -663,4 +716,19 @@ test("pairing: unlit sign, LED code field and an amber Connect key", async () =>
   ReactTestRenderer.act(() => host("pin-input").props.onChangeText("123456"));
   expect(flat(host("pair-button").props.style)).toMatchObject({ backgroundColor: "#e0a24b" });
   expect(flat(textsIn(host("pair-button"))[0].props.style).color).toBe("#141210");
+});
+
+test("pairing: the Connect key stays lit with a visible spinner while the code is checked", async () => {
+  api.verifyPin.mockReturnValue(new Promise<string>(() => {})); // never answers
+  await renderApp();
+  ReactTestRenderer.act(() => host("pin-input").props.onChangeText("123456"));
+  ReactTestRenderer.act(() => {
+    void host("pair-button").props.onPress();
+  });
+  await flush();
+  const key = host("pair-button");
+  expect(key.props.onPress).toBeUndefined(); // busy: not pressable again
+  expect(flat(key.props.style)).toMatchObject({ backgroundColor: "#e0a24b" });
+  const spinner = key.find((n) => (n.type as unknown) === "ActivityIndicator");
+  expect(spinner.props.color).toBe("#141210");
 });

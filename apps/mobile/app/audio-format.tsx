@@ -8,7 +8,7 @@ import {
 } from "@on-air/control-client";
 import { useRemoteSession } from "@/remote-session";
 import { SettingsForm, sectionModifiers } from "@/settings-form";
-import { FormText, SectionTitle } from "@/ui/form-text";
+import { FormText, sectionTitle } from "@/ui/form-text";
 
 const rate = (hz: number) => `${hz / 1000} kHz`;
 export default function AudioFormatScreen() {
@@ -43,7 +43,7 @@ export default function AudioFormatScreen() {
   return (
     <SettingsForm testID="audio-format-screen">
       <FieldGroup.Section modifiers={sectionModifiers}>
-        <SectionTitle title="Sample rate" />
+        {sectionTitle("Sample rate")}
         {rows.map((row) => (
           <Row key={row.kind} alignment="center">
             <FormText variant="body">{row.label}</FormText>
@@ -69,7 +69,7 @@ export default function AudioFormatScreen() {
         </FieldGroup.SectionFooter>
       </FieldGroup.Section>
       <FieldGroup.Section modifiers={sectionModifiers}>
-        <SectionTitle title="Audio performance" />
+        {sectionTitle("Audio performance")}
         <Row alignment="center">
           <FormText variant="body">Requested capture buffer</FormText>
           <Spacer />

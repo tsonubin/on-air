@@ -59,7 +59,11 @@ function RouteRow({
         flexDirection: "row",
         alignItems: "center",
         gap: ROW_GAP,
-        backgroundColor: pressed ? colors.surfacePressed : "transparent",
+        backgroundColor: pressed
+          ? colors.surfacePressed
+          : live
+            ? colors.selectedSurface
+            : "transparent",
       })}
     >
       <IconTile name={icon} size="lg" />
@@ -225,12 +229,17 @@ function TransportButton({
       onPress={onPress}
       testID={testID}
       hitSlop={8}
-      style={{
+      style={({ pressed }) => ({
         width: 46,
         height: 46,
         alignItems: "center",
         justifyContent: "center",
-      }}
+        borderRadius: radius.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderTopColor: colors.borderStrong,
+        backgroundColor: pressed ? colors.surfacePressed : colors.surfaceRaised,
+      })}
     >
       <NativeIcon name={icon} size={size} />
     </Pressable>
@@ -350,17 +359,15 @@ export function MixerHome({
       : outputPhase === "failed"
         ? "Speaker failed. Choose it again."
         : "Selected speaker";
+  // What the header shows; a firewall block overrides live, and the route's
+  // live dot follows the header so the two never disagree.
+  const headerStatus: HeaderStatus = firewallWarning
+    ? { text: "Audio blocked", announcement: "Firewall blocking audio", live: false }
+    : status;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }} testID="mixer-screen">
-      <Header
-        status={
-          firewallWarning
-            ? { text: "Audio blocked", announcement: "Firewall blocking audio", live: false }
-            : status
-        }
-        onMore={onOpenMore}
-      />
+      <Header status={headerStatus} onMore={onOpenMore} />
       <ScrollView
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
@@ -418,7 +425,7 @@ export function MixerHome({
                   onPress={onChangeOutput}
                   testID="output-row"
                   dense={shortWide}
-                  live={status.live}
+                  live={headerStatus.live}
                 />
               </Card>
             </View>
@@ -444,11 +451,22 @@ export function MixerHome({
                 gap: shortWide ? 12 : 18,
               }}
             >
-              <NativeIcon
-                name={icons.live}
-                size={shortWide ? 52 : compact ? 58 : 68}
-                color={status.live ? colors.accent : colors.liveDim}
-              />
+              <View
+                testID="live-lamp"
+                style={{
+                  borderRadius: 40,
+                  shadowColor: colors.accent,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowRadius: 12,
+                  shadowOpacity: status.live ? 0.6 : 0,
+                }}
+              >
+                <NativeIcon
+                  name={icons.live}
+                  size={shortWide ? 52 : compact ? 58 : 68}
+                  color={status.live ? colors.accent : colors.liveDim}
+                />
+              </View>
               <View style={{ flexShrink: 1, gap: 5 }}>
                 <Text style={[type.title, { color: colors.label, fontSize: 20, lineHeight: 25 }]}>
                   {status.live ? "Audio is live" : "Ready to stream"}

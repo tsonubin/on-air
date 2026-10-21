@@ -12,14 +12,14 @@ import { DevicePairSheet } from "@/sheets/device-pair-sheet";
 import { OutputSheet } from "@/sheets/output-sheet";
 import { SourceSheet } from "@/sheets/source-sheet";
 import { colors } from "@/theme";
-import { FormText, SectionTitle } from "@/ui/form-text";
+import { FormText, sectionTitle } from "@/ui/form-text";
 
 function RestoringScreen() {
   return (
     <Host style={{ flex: 1 }} colorScheme="dark" seedColor={colors.amber}>
       <FieldGroup testID="pairing-restore">
         <FieldGroup.Section modifiers={sectionModifiers}>
-          <SectionTitle title="on-air remote" />
+          {sectionTitle("on-air remote")}
           <FormText variant="body">Restoring your desktop connection…</FormText>
         </FieldGroup.Section>
       </FieldGroup>

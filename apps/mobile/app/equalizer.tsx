@@ -3,7 +3,7 @@ import { Stack } from "expo-router/stack";
 import { NativeFader } from "@/native-fader";
 import { useRemoteSession } from "@/remote-session";
 import { SettingsForm, sectionModifiers } from "@/settings-form";
-import { FormText, SectionTitle } from "@/ui/form-text";
+import { FormText, sectionTitle } from "@/ui/form-text";
 
 const bands = [
   { label: "Bass · 60 Hz", spoken: "Bass, 60 hertz" },
@@ -20,7 +20,7 @@ export default function EqualizerScreen() {
     <>
       <SettingsForm testID="equalizer-screen">
         <FieldGroup.Section modifiers={sectionModifiers}>
-          <SectionTitle title="Five-band equalizer" />
+          {sectionTitle("Five-band equalizer")}
           {gains.map((gain, index) => (
             <NativeFader
               key={bands[index].label}

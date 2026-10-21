@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { Platform } from "react-native";
 import { useRemoteSession } from "@/remote-session";
 import { colors } from "@/theme";
-import { FormText, SectionTitle } from "@/ui/form-text";
+import { FormText, sectionTitle } from "@/ui/form-text";
 
 const ios = Platform.OS === "ios";
 
@@ -31,7 +31,7 @@ export function SettingsForm({ children, testID }: { children: ReactNode; testID
       >
         {message && (
           <FieldGroup.Section modifiers={sectionModifiers}>
-            <SectionTitle title="Connection" />
+            {sectionTitle("Connection")}
             <FormText variant="body">{message}</FormText>
           </FieldGroup.Section>
         )}

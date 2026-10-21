@@ -16,6 +16,14 @@ export const navigationTheme = {
   },
 };
 
+/**
+ * A screen's header shows its title as an uppercase caption; `title` stays in
+ * plain case because it also labels the next screen's back button.
+ */
+export function titledScreen(title: string) {
+  return { title, headerTitle: title.toUpperCase() };
+}
+
 export const screenHeaderOptions = {
   headerTintColor: colors.amber,
   headerTitleStyle: { fontFamily: fonts.monoMedium, color: colors.label },

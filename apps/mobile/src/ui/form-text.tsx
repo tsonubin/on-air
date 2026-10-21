@@ -5,12 +5,13 @@ import { colors, fonts } from "@/theme";
 
 type Variant = "body" | "footnote" | "label" | "value";
 
-// SwiftUI text styles keep Dynamic Type scaling with the custom family.
+// SwiftUI scales a custom family from `size` along the `textStyle` Dynamic Type
+// curve; Expo UI defaults the size to 17, so each variant names its base size.
 const variants = {
-  body: { family: fonts.sans, textStyle: "body", color: colors.label },
-  footnote: { family: fonts.sans, textStyle: "footnote", color: colors.tertiaryLabel },
-  label: { family: fonts.monoMedium, textStyle: "footnote", color: colors.tertiaryLabel },
-  value: { family: fonts.monoMedium, textStyle: "body", color: colors.amber },
+  body: { family: fonts.sans, textStyle: "body", size: 17, color: colors.label },
+  footnote: { family: fonts.sans, textStyle: "footnote", size: 13, color: colors.tertiaryLabel },
+  label: { family: fonts.monoMedium, textStyle: "footnote", size: 13, color: colors.tertiaryLabel },
+  value: { family: fonts.monoMedium, textStyle: "body", size: 17, color: colors.amber },
 } as const;
 
 /**
@@ -38,7 +39,7 @@ export function FormText({
       modifiers={
         Platform.OS === "ios"
           ? [
-              font({ family: v.family, textStyle: v.textStyle }),
+              font({ family: v.family, textStyle: v.textStyle, size: v.size }),
               ...(copyable ? [textSelection(true)] : []),
             ]
           : undefined
@@ -49,8 +50,12 @@ export function FormText({
   );
 }
 
-/** A form section's title as an uppercase mono caption. */
-export function SectionTitle({ title }: { title: string }) {
+/**
+ * A form section's title as an uppercase mono caption. A function, not a
+ * component: FieldGroup.Section finds its header slot by element type, so the
+ * element it receives must be the SectionHeader itself, not a wrapper.
+ */
+export function sectionTitle(title: string) {
   return (
     <FieldGroup.SectionHeader>
       <FormText variant="label">{title}</FormText>
