@@ -36,6 +36,9 @@ Notable changes to on-air. The format follows
 
 - The phone's pairing screen scrolls up when the keyboard opens, so the
   address and code fields are no longer hidden behind it on iOS or Android.
+- On iOS 26 and later the whole pairing-code panel, Connect included, now
+  scrolls above the number pad. Connect used to sit behind the keyboard's
+  see-through "Done" bar, which took the tap, so only its top edge worked.
 
 ## [0.2.0] - unreleased
 

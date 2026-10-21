@@ -3,8 +3,11 @@ import * as client from "@on-air/control-client";
 import { FakeSocket } from "@on-air/control-client/testing";
 import * as expoRouter from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { Platform, useWindowDimensions } from "react-native";
-import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
+import { Keyboard, Platform, useWindowDimensions } from "react-native";
+import ReactTestRenderer, {
+  type ReactTestInstance,
+  type TestRendererOptions,
+} from "react-test-renderer";
 import RootLayout from "../app/_layout";
 
 jest.mock("@on-air/control-client", () => ({
@@ -36,6 +39,8 @@ const api = jest.mocked(client);
 const store = SecureStore as jest.Mocked<typeof SecureStore> & { __reset(): void };
 // `expo-router` is mapped to __mocks__/expo-router.js, which adds `__reset`.
 const routerMock = expoRouter as typeof expoRouter & { __reset(): void };
+// `react-native` is mapped to __mocks__/react-native.js, whose Keyboard adds `__emit`.
+const keyboard = Keyboard as typeof Keyboard & { __emit(type: string, event: unknown): void };
 const PAIRING_KEY = "on-air.desktop-pairing.v1";
 
 const STUDIO = { host: "192.168.5.14", port: 47990, name: "studio", version: "0.1.0" };
@@ -131,9 +136,9 @@ async function flush() {
   });
 }
 
-async function renderApp() {
+async function renderApp(options?: TestRendererOptions) {
   await ReactTestRenderer.act(async () => {
-    tree = ReactTestRenderer.create(<RootLayout />);
+    tree = ReactTestRenderer.create(<RootLayout />, options);
   });
   await flush();
   return tree as ReactTestRenderer.ReactTestRenderer;
@@ -192,6 +197,7 @@ beforeEach(() => {
 afterEach(() => {
   ReactTestRenderer.act(() => tree?.unmount());
   tree = undefined;
+  keyboard.__emit("keyboardDidHide", {});
   (globalThis as { WebSocket: unknown }).WebSocket = originalWebSocket;
   jest.useRealTimers();
 });
@@ -451,6 +457,104 @@ test("the pairing form moves up out of the keyboard's way", async () => {
     (Platform as { OS: string }).OS = "android";
     await renderApp();
     expect(host("pairing-screen").props.behavior).toBe("padding");
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
+});
+
+// An iPhone 17 Pro on iOS 27: the number pad's frame starts at y=524, and its top strip is a
+// see-through bar with "Done" that takes every tap in it, so the code panel must end above it.
+const NUMBER_PAD = { endCoordinates: { screenX: 0, screenY: 524, width: 402, height: 350 } };
+
+/** Stand-ins for the native pairing views: where the code panel sits and what got scrolled. */
+function pairingViews() {
+  const views = { scrollTo: jest.fn(), pinFocused: false, panelBottom: 580 };
+  const options: TestRendererOptions = {
+    createNodeMock: (element) => {
+      switch ((element.props as { testID?: string }).testID) {
+        case "pairing-scroll":
+          return { scrollTo: views.scrollTo };
+        case "pin-input":
+          return { isFocused: () => views.pinFocused };
+        case "pairing-code":
+          return {
+            measureInWindow: (callback: (x: number, y: number, w: number, h: number) => void) =>
+              callback(20, views.panelBottom - 240, 362, 240),
+          };
+        default:
+          return null;
+      }
+    },
+  };
+  return { views, options };
+}
+
+function scrolledTo(y: number) {
+  ReactTestRenderer.act(() =>
+    host("pairing-scroll").props.onScroll({ nativeEvent: { contentOffset: { x: 0, y } } }),
+  );
+}
+
+function showKeyboard(event: unknown = NUMBER_PAD) {
+  ReactTestRenderer.act(() => keyboard.__emit("keyboardDidShow", event));
+}
+
+test("the code panel scrolls clear of the number pad and its Done bar", async () => {
+  const { views, options } = pairingViews();
+  await renderApp(options);
+  scrolledTo(30);
+
+  // A keyboard for another field leaves the screen where it is.
+  showKeyboard();
+  expect(views.scrollTo).not.toHaveBeenCalled();
+
+  // 30pt already scrolled, plus the panel's 56pt overlap, plus 12pt of room above the bar.
+  views.pinFocused = true;
+  showKeyboard();
+  expect(views.scrollTo).toHaveBeenCalledWith({ y: 98, animated: true });
+  views.scrollTo.mockClear();
+
+  // A frame with no height covers nothing.
+  showKeyboard({ endCoordinates: { screenX: 0, screenY: 0, width: 0, height: 0 } });
+  expect(views.scrollTo).not.toHaveBeenCalled();
+
+  // A panel that already clears the keyboard stays put.
+  views.panelBottom = 500;
+  showKeyboard();
+  expect(views.scrollTo).not.toHaveBeenCalled();
+});
+
+test("the code panel stays clear of the number pad when manual setup opens above it", async () => {
+  const { views, options } = pairingViews();
+  await renderApp(options);
+  views.pinFocused = true;
+  views.panelBottom = 500;
+  showKeyboard();
+  scrolledTo(98);
+
+  // The address card pushes the panel 88pt down, back under the keyboard, with no keyboard event.
+  await press("manual-setup-button");
+  views.panelBottom = 588;
+  ReactTestRenderer.act(() => host("pairing-code").props.onLayout());
+  expect(views.scrollTo).toHaveBeenCalledWith({ y: 174, animated: true });
+
+  // With the keyboard gone there is nothing to clear.
+  views.scrollTo.mockClear();
+  ReactTestRenderer.act(() => keyboard.__emit("keyboardDidHide", {}));
+  ReactTestRenderer.act(() => host("pairing-code").props.onLayout());
+  expect(views.scrollTo).not.toHaveBeenCalled();
+});
+
+test("Android leaves the code panel to the padded screen", async () => {
+  const original = Platform.OS;
+  try {
+    (Platform as { OS: string }).OS = "android";
+    const { views, options } = pairingViews();
+    views.pinFocused = true;
+    await renderApp(options);
+    showKeyboard();
+    ReactTestRenderer.act(() => host("pairing-code").props.onLayout());
+    expect(views.scrollTo).not.toHaveBeenCalled();
   } finally {
     (Platform as { OS: string }).OS = original;
   }

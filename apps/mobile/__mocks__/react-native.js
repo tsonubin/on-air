@@ -31,6 +31,30 @@ const AppState = {
   },
 };
 
+const keyboardListeners = new Map();
+// Like the real one, `metrics()` reports the keyboard from the last `keyboardDidShow` until it hides.
+let keyboardShowing = null;
+const Keyboard = {
+  metrics() {
+    return keyboardShowing?.endCoordinates;
+  },
+  addListener(type, listener) {
+    const listeners = keyboardListeners.get(type) ?? new Set();
+    keyboardListeners.set(type, listeners);
+    listeners.add(listener);
+    return {
+      remove() {
+        listeners.delete(listener);
+      },
+    };
+  },
+  __emit(type, event) {
+    if (type === "keyboardDidShow") keyboardShowing = event;
+    if (type === "keyboardDidHide") keyboardShowing = null;
+    for (const listener of keyboardListeners.get(type) ?? []) listener(event);
+  },
+};
+
 // Pressable honours `disabled` and resolves function styles like the real one,
 // so a test that presses a disabled control fails instead of passing silently.
 function Pressable(props) {
@@ -45,6 +69,7 @@ function Pressable(props) {
 module.exports = {
   ActivityIndicator: mock("ActivityIndicator"),
   AppState,
+  Keyboard,
   KeyboardAvoidingView: mock("KeyboardAvoidingView"),
   Pressable,
   SafeAreaView: mock("SafeAreaView"),

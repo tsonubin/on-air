@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useKeyboardClearance } from "./hooks/useKeyboardClearance";
 import { colors, layout, radius } from "./theme";
 import { Card } from "./ui/card";
 import { IconTile } from "./ui/icon-tile";
@@ -190,6 +191,8 @@ export function PairingHome({
   const wide = width >= layout.wideBreakpoint;
   const [manual, setManual] = useState(false);
   const pinInputRef = useRef<TextInput>(null);
+  // Lifts the whole code panel, Connect included, above the number pad and its "Done" bar.
+  const keyboardClearance = useKeyboardClearance(pinInputRef);
   const selected = found.find((hit) => hit.host === host.trim()) ?? null;
   const targetReady = manual ? host.trim().length > 0 : selected !== null;
   const canPair = targetReady && pin.length === 6 && !pairing;
@@ -203,6 +206,8 @@ export function PairingHome({
       testID="pairing-screen"
     >
       <ScrollView
+        ref={keyboardClearance.scrollRef}
+        onScroll={keyboardClearance.onScroll}
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
         automaticallyAdjustKeyboardInsets
@@ -337,6 +342,9 @@ export function PairingHome({
 
             {targetReady ? (
               <View
+                ref={keyboardClearance.targetRef}
+                onLayout={keyboardClearance.onTargetLayout}
+                testID="pairing-code"
                 style={{ width: wide ? undefined : "100%", flex: wide ? 1 : undefined, gap: 10 }}
               >
                 <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Pairing code</Text>
