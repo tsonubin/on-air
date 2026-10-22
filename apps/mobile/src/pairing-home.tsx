@@ -300,6 +300,8 @@ export function PairingHome({
                     onChangeText={onChangeHost}
                     placeholder="192.168.1.20"
                     placeholderTextColor={colors.tertiaryLabel}
+                    cursorColor={colors.amber}
+                    selectionHandleColor={colors.amber}
                     autoCapitalize="none"
                     autoCorrect={false}
                     keyboardType="url"
@@ -349,6 +351,8 @@ export function PairingHome({
                     onChangeText={onChangePin}
                     placeholder="888888"
                     placeholderTextColor={colors.ledGhost}
+                    cursorColor={colors.amber}
+                    selectionHandleColor={colors.amber}
                     maxFontSizeMultiplier={1.3}
                     keyboardType="number-pad"
                     inputMode="numeric"

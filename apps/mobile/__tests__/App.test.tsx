@@ -718,6 +718,17 @@ test("pairing: unlit sign, LED code field and an amber Connect key", async () =>
   expect(flat(textsIn(host("pair-button"))[0].props.style).color).toBe("#141210");
 });
 
+test("pairing: text fields take an amber caret, not Android's default accent", async () => {
+  await renderApp();
+  await press("manual-setup-button");
+  for (const id of ["host-input", "pin-input"]) {
+    expect(host(id).props).toMatchObject({
+      cursorColor: "#e0a24b",
+      selectionHandleColor: "#e0a24b",
+    });
+  }
+});
+
 test("pairing: the Connect key stays lit with a visible spinner while the code is checked", async () => {
   api.verifyPin.mockReturnValue(new Promise<string>(() => {})); // never answers
   await renderApp();
