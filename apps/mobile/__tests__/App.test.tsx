@@ -174,6 +174,24 @@ async function pairWith(pin = "123456") {
   await press("pair-button");
 }
 
+/** A native-stack toolbar button, found by its spoken label (toolbar items take no testID). */
+function toolbarButton(label: string): ReactTestInstance {
+  return (tree as ReactTestRenderer.ReactTestRenderer).root.find(
+    (node) =>
+      (node.type as unknown) === "NativeToolbarButton" && node.props.accessibilityLabel === label,
+  );
+}
+
+/** Taps the Connection screen's top-right refresh button. */
+async function pressRefresh() {
+  const button = toolbarButton("Refresh connection");
+  if (button.props.disabled) throw new Error("refresh is disabled");
+  await ReactTestRenderer.act(async () => {
+    await button.props.onPress();
+  });
+  await flush();
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   routerMock.__reset();
@@ -367,7 +385,7 @@ test("a speaker that is still starting is not shown as live; a failed one can be
     state: "failed",
   });
   await press("more-button");
-  await press("refresh-button");
+  await pressRefresh();
   await press("native-back");
   expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
   expect(text()).toContain("Speaker failed. Choose it again.");
@@ -471,7 +489,7 @@ test("an expired pairing returns to pairing with the desktop still selected", as
     new client.HttpError("/api/inputs", 401, '{"error":"","code":"not_paired"}'),
   );
   await press("more-button");
-  await press("refresh-button");
+  await pressRefresh();
   expect(text()).toContain("Pair your Mac");
   expect(text()).toContain("Pairing expired");
   expect(exists("pin-input")).toBe(true);
@@ -488,7 +506,7 @@ test("a paused desktop keeps its pairing and disables sound settings", async () 
     );
   }
   await press("more-button");
-  await press("refresh-button");
+  await pressRefresh();
   expect(text()).toContain("Connected to desktop");
   expect(text()).toContain("desktop service is paused");
   await press("native-back");
@@ -639,6 +657,31 @@ test("live state warms the active route row and makes the lamp glow; ready does 
   });
 });
 
+test("connection: refresh is a top-right toolbar button, disabled while it runs", async () => {
+  await renderApp();
+  await pairWith();
+  await press("more-button");
+  const refresh = toolbarButton("Refresh connection");
+  expect(refresh.props.icon).toBe("arrow.clockwise");
+  let toolbar = refresh.parent;
+  while (toolbar && (toolbar.type as unknown) !== "NativeToolbar") toolbar = toolbar.parent;
+  expect(toolbar?.props.placement).toBe("right");
+  expect(refresh.props.disabled).toBe(false);
+  // The old in-form button is gone; the footer still explains what refresh does.
+  const formButtons = (tree as ReactTestRenderer.ReactTestRenderer).root.findAll(
+    (node) => (node.type as unknown) === "ExpoButton" && node.props.label === "Refresh connection",
+  );
+  expect(formButtons).toHaveLength(0);
+  expect(text()).toContain("Tap ↻ to reload without removing your pairing.");
+
+  api.fetchStatus.mockReturnValue(new Promise(() => {})); // the refresh never answers
+  ReactTestRenderer.act(() => {
+    void toolbarButton("Refresh connection").props.onPress();
+  });
+  await flush();
+  expect(toolbarButton("Refresh connection").props.disabled).toBe(true);
+});
+
 test("a firewall block keeps the live dot off, matching the header", async () => {
   api.getActiveOutput.mockResolvedValue({
     device_id: "uuid:mock-sonos",
@@ -686,7 +729,7 @@ test("volume shows on an LED readout that dims when the desktop is paused", asyn
     );
   }
   await press("more-button");
-  await press("refresh-button");
+  await pressRefresh();
   await press("native-back");
   expect(host("status-pill").props.accessibilityLabel).toBe("Desktop service is paused");
   expect(flat(value()?.props.style).color).toBe("#9a8f78");
