@@ -102,3 +102,41 @@ export function describeUiState(state: UiState): UiView {
     paused: state === "paused",
   };
 }
+
+/** What the mixer's LED window shows: a short status word, what it announces, and the lamp. */
+export type HomeStatus = { word: string; announcement: string; live: boolean };
+
+/**
+ * The LED window's status. A firewall block overrides live (no audio reaches
+ * the speaker), and a speaker that failed to start reads FAILED rather than
+ * STANDBY. Words fit the 14-segment strip (at most 10 characters).
+ */
+export function homeStatus({
+  uiState,
+  outputPhase,
+  firewallBlocked,
+}: {
+  uiState: UiState;
+  outputPhase?: OutputPhase;
+  firewallBlocked: boolean;
+}): HomeStatus {
+  const off = (word: string, announcement = describeUiState(uiState).statusAnnouncement) => ({
+    word,
+    announcement,
+    live: false,
+  });
+  if (firewallBlocked) return off("BLOCKED", "Firewall blocking audio");
+  switch (uiState) {
+    case "live":
+      return { word: "ON AIR", announcement: "Audio is live", live: true };
+    case "starting":
+    case "connecting":
+      return off("CONNECTING");
+    case "reconnecting":
+      return off("RECONNECT");
+    case "paused":
+      return off("PAUSED");
+    default:
+      return outputPhase === "failed" ? off("FAILED", "Status: Speaker failed") : off("STANDBY");
+  }
+}

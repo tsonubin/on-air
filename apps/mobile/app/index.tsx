@@ -1,4 +1,4 @@
-import { FieldGroup, Host, Text } from "@expo/ui";
+import { FieldGroup } from "@expo/ui";
 import type { OutputInfo } from "@on-air/api-types";
 import { outputPhase } from "@on-air/api-types";
 import { router } from "expo-router";
@@ -7,20 +7,22 @@ import { View } from "react-native";
 import { MixerHome } from "@/mixer-home";
 import { PairingHome } from "@/pairing-home";
 import { type DevicePairTarget, useRemoteSession } from "@/remote-session";
+import { SettingsForm, sectionModifiers } from "@/settings-form";
 import { DevicePairSheet } from "@/sheets/device-pair-sheet";
 import { OutputSheet } from "@/sheets/output-sheet";
 import { SourceSheet } from "@/sheets/source-sheet";
 import { colors } from "@/theme";
+import { FormText, sectionTitle } from "@/ui/form-text";
+import { homeStatus } from "@/ui-state";
 
 function RestoringScreen() {
   return (
-    <Host style={{ flex: 1 }} colorScheme="dark">
-      <FieldGroup testID="pairing-restore">
-        <FieldGroup.Section title="on-air remote">
-          <Text>Restoring your desktop connection…</Text>
-        </FieldGroup.Section>
-      </FieldGroup>
-    </Host>
+    <SettingsForm testID="pairing-restore">
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        {sectionTitle("on-air remote")}
+        <FormText variant="body">Restoring your desktop connection…</FormText>
+      </FieldGroup.Section>
+    </SettingsForm>
   );
 }
 
@@ -62,7 +64,12 @@ function MixerScreen() {
         activeOutput={remote.activeOutput?.device_name ?? ""}
         outputPhase={remote.activeOutput ? outputPhase(remote.activeOutput) : undefined}
         volume={remote.volume}
-        status={{ text: view.statusText, announcement: view.statusAnnouncement, live: view.live }}
+        status={homeStatus({
+          uiState: remote.uiState,
+          outputPhase: remote.activeOutput ? outputPhase(remote.activeOutput) : undefined,
+          firewallBlocked: remote.firewallWarning != null,
+        })}
+        outputSampleRate={remote.outputSampleRate}
         error={remote.error ?? remote.warning}
         firewallWarning={remote.firewallWarning}
         volumeDisabled={!view.volumeEnabled}
@@ -70,9 +77,10 @@ function MixerScreen() {
         cd={cd}
         onChangeInput={() => setSheet("source")}
         onChangeOutput={() => setSheet("output")}
-        onOpenSound={() => router.push("/sound")}
+        eqFlat={remote.gains.every((g) => g === 0)}
+        onOpenEqualizer={() => router.push("/equalizer")}
+        onOpenFormat={() => router.push("/audio-format")}
         onOpenMore={() => router.push("/connection")}
-        onDisconnect={remote.disconnect}
         onVolumeChange={remote.applyVolume}
         onCdPlayPause={() => void remote.controlCd(cd.playing ? "pause" : "play")}
         onCdPrev={() => void remote.controlCd("prev")}

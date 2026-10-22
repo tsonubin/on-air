@@ -13,6 +13,7 @@ const androidApp = read("apps/mobile/android/app/build.gradle");
 const androidSettings = read("apps/mobile/android/settings.gradle");
 const androidRoot = read("apps/mobile/android/build.gradle");
 const androidManifest = read("apps/mobile/android/app/src/main/AndroidManifest.xml");
+const androidStyles = read("apps/mobile/android/app/src/main/res/values/styles.xml");
 const androidApplication = read(
   "apps/mobile/android/app/src/main/java/app/onair/remote/MainApplication.kt",
 );
@@ -21,6 +22,7 @@ const androidActivity = read(
 );
 const iosPodfile = read("apps/mobile/ios/Podfile");
 const iosAppDelegate = read("apps/mobile/ios/OnAirMobile/AppDelegate.swift");
+const iosSceneDelegate = read("apps/mobile/ios/OnAirMobile/SceneDelegate.swift");
 const iosInfo = read("apps/mobile/ios/OnAirMobile/Info.plist");
 const iosProject = read("apps/mobile/ios/OnAirMobile.xcodeproj/project.pbxproj");
 
@@ -96,6 +98,47 @@ test("iOS native project autolinks Expo and declares LAN discovery access", () =
     marketingCatalog.images.some(
       (image) => image.idiom === "universal" && image.filename === "AppIcon.png",
     ),
+  );
+});
+
+test("iOS adopts the scene life cycle the iOS 27 SDK requires", () => {
+  // The iOS 27 SDK asserts at launch unless the app adopts UIScene. Expo's scene
+  // delegate creates the window and starts React Native from the app delegate's factory.
+  assert.match(
+    iosAppDelegate,
+    /class AppDelegate: ExpoAppDelegate, ExpoReactNativeFactoryProvider/,
+  );
+  assert.doesNotMatch(iosAppDelegate, /startReactNative/);
+  assert.match(iosSceneDelegate, /class SceneDelegate: ExpoAppSceneDelegate/);
+  assert.match(iosProject, /SceneDelegate\.swift in Sources/);
+  assert.match(iosInfo, /<key>UIApplicationSceneManifest<\/key>/);
+  assert.match(
+    iosInfo,
+    /<key>UISceneDelegateClassName<\/key>\s*<string>\$\(PRODUCT_MODULE_NAME\)\.SceneDelegate<\/string>/,
+  );
+});
+
+test("iOS native project keeps the dark-only Expo appearance", () => {
+  assert.equal(appConfig.userInterfaceStyle, "dark");
+  assert.match(iosInfo, /<key>UIUserInterfaceStyle<\/key>\s*<string>Dark<\/string>/);
+});
+
+test("Android native project keeps the dark-only Expo appearance", () => {
+  // userInterfaceStyle needs expo-system-ui on Android. Forcing AppCompat's night mode puts
+  // UI_MODE_NIGHT_YES in the configuration, which the DayNight theme, React Native's
+  // navigation bar style and Expo UI's unseeded Compose hosts all read.
+  assert.equal(appConfig.userInterfaceStyle, "dark");
+  assert.match(androidStyles, /name="AppTheme" parent="Theme\.AppCompat\.DayNight\./);
+  // The system draws the launch splash from the theme before any app code runs, under the
+  // system's own night mode, so the window background must be dark in both configurations.
+  assert.equal(appConfig.backgroundColor, "#000000");
+  assert.match(
+    androidStyles,
+    /<item name="android:windowBackground">@android:color\/black<\/item>/,
+  );
+  assert.match(
+    androidApplication,
+    /AppCompatDelegate\.setDefaultNightMode\(AppCompatDelegate\.MODE_NIGHT_YES\)/,
   );
 });
 

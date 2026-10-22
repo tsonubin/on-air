@@ -13,6 +13,10 @@ Notable changes to on-air. The format follows
 
 ### Changed
 
+- Phone remote: the mixer is one LED faceplate, with a display window for
+  the source, speaker and status, a fader for volume, keys for source,
+  speaker, EQ and format, and five vertical EQ faders. The Sound menu is
+  gone; the EQ and format screens open straight from their keys.
 - Repository reorganised for contributors: design records live in
   `docs/design`, the domain glossary in `docs/glossary.md`; added
   `CONTRIBUTING.md`, `SECURITY.md` and this changelog.
@@ -42,6 +46,11 @@ Notable changes to on-air. The format follows
 
 - The phone's pairing screen scrolls up when the keyboard opens, so the
   address and code fields are no longer hidden behind it on iOS or Android.
+- On iOS 26 and later the whole pairing-code panel, Connect included, now
+  scrolls above the number pad. Connect used to sit behind the keyboard's
+  see-through "Done" bar, which took the tap, so only its top edge worked.
+- Android does the same: Connect used to stay clipped below the number pad,
+  since the screen only scrolled until the code field touched the keyboard.
 
 ## [0.2.0] - unreleased
 

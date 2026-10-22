@@ -11,7 +11,6 @@ module.exports = {
   moduleNameMapper: {
     "^@/(.*)$": "<rootDir>/src/$1",
     "^expo-router(/stack)?$": "<rootDir>/__mocks__/expo-router.js",
-    "^@react-navigation/native$": "<rootDir>/__mocks__/navigation-theme.js",
     "^@on-air/control-client$": "<rootDir>/../../packages/control-client/src/index.ts",
     "^@on-air/control-client/testing$": "<rootDir>/../../packages/control-client/src/testing.ts",
     "^@on-air/api-types$": "<rootDir>/../../packages/api-types/src/index.ts",
@@ -22,6 +21,8 @@ module.exports = {
     "^@expo/ui$": "<rootDir>/__mocks__/expo-ui.js",
     "^@expo/material-symbols/.*\\.xml$": "<rootDir>/__mocks__/material-symbol.js",
     "^expo-status-bar$": "<rootDir>/__mocks__/expo-status-bar.js",
+    "^expo-font$": "<rootDir>/__mocks__/expo-font.js",
+    "\\.(ttf|otf|png)$": "<rootDir>/__mocks__/file.js",
     "^react-native-safe-area-context$": "<rootDir>/__mocks__/safe-area-context.js",
   },
 };

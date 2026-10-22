@@ -2,6 +2,7 @@ package app.onair.remote
 
 import android.app.Application
 import android.content.res.Configuration
+import androidx.appcompat.app.AppCompatDelegate
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -22,6 +23,11 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // The app is dark-only (`userInterfaceStyle: "dark"` in app.json, which Android
+    // ignores without expo-system-ui). Force night mode before the first activity so
+    // the DayNight theme, React Native's navigation bar style and Expo UI's unseeded
+    // Compose hosts (the bottom sheets) all see a dark configuration.
+    AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_YES)
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (_: IllegalArgumentException) {

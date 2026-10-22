@@ -2,27 +2,17 @@ import { Button, Host } from "@expo/ui";
 import type { FirewallWarning } from "@on-air/api-types";
 import { useState } from "react";
 import { Text, View } from "react-native";
-import { colors, radius } from "@/theme";
+import { colors } from "@/theme";
 
 export function FirewallNotice({ warning }: { warning?: FirewallWarning | null }) {
   const [expanded, setExpanded] = useState(false);
   if (!warning) return null;
   return (
-    <View
-      testID="firewall-warning"
-      style={{
-        padding: 14,
-        gap: 10,
-        borderRadius: radius.md,
-        backgroundColor: colors.errorSurface,
-        borderColor: colors.errorBorder,
-        borderWidth: 1,
-      }}
-    >
+    <View testID="firewall-warning" style={{ paddingHorizontal: 2, gap: 10 }}>
       <Text accessibilityRole="alert" style={{ color: colors.onError, fontSize: 15 }}>
         {warning.message}
       </Text>
-      <Host matchContents colorScheme="dark">
+      <Host matchContents colorScheme="dark" seedColor={colors.amber}>
         <Button
           label={expanded ? "Hide firewall help" : "Firewall help"}
           variant="text"

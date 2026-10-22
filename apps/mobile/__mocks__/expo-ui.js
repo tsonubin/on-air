@@ -6,6 +6,39 @@ function mock(name) {
   };
 }
 
+// FieldGroup.Section slots, extracted like Expo UI's FieldSectionSlots: only a
+// direct SectionHeader / SectionFooter element (or one inside a Fragment) fills a
+// slot; anything else, including a component that renders one, becomes a row.
+function SectionHeader(props) {
+  return React.createElement(React.Fragment, {}, props.children);
+}
+function SectionFooter(props) {
+  return React.createElement(React.Fragment, {}, props.children);
+}
+function FieldSection(props) {
+  let header;
+  let footer;
+  const rows = [];
+  const walk = (node) => {
+    React.Children.forEach(node, (child) => {
+      if (child == null || typeof child === "boolean") return;
+      if (!React.isValidElement(child)) return rows.push(child);
+      if (child.type === SectionHeader) header = child.props.children;
+      else if (child.type === SectionFooter) footer = child.props.children;
+      else if (child.type === React.Fragment) walk(child.props.children);
+      else rows.push(child);
+    });
+  };
+  walk(props.children);
+  return React.createElement(
+    "ExpoFieldSection",
+    { ...props, children: undefined },
+    header === undefined ? null : React.createElement("ExpoFieldSectionHeader", {}, header),
+    React.createElement("ExpoFieldSectionRows", {}, ...rows),
+    footer === undefined ? null : React.createElement("ExpoFieldSectionFooter", {}, footer),
+  );
+}
+
 const Icon = mock("ExpoIcon");
 Icon.select = ({ ios }) => ios;
 
@@ -24,9 +57,9 @@ module.exports = {
   },
   Column: mock("ExpoColumn"),
   FieldGroup: Object.assign(mock("ExpoFieldGroup"), {
-    Section: mock("ExpoFieldSection"),
-    SectionHeader: mock("ExpoFieldSectionHeader"),
-    SectionFooter: mock("ExpoFieldSectionFooter"),
+    Section: FieldSection,
+    SectionHeader: SectionHeader,
+    SectionFooter: SectionFooter,
   }),
   Host: mock("ExpoHost"),
   Icon,
