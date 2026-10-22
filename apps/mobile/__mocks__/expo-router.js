@@ -50,7 +50,11 @@ function Stack({ children }) {
     React.createElement(screens[selected]()),
   );
 }
-Stack.Screen = () => null;
+// A screen's own <Stack.Screen options> renders its header buttons so tests can press them.
+Stack.Screen = ({ options }) =>
+  typeof options?.headerRight === "function"
+    ? React.createElement("NativeHeaderRight", {}, options.headerRight({ canGoBack: true }))
+    : null;
 Stack.Protected = () => null;
 Stack.Toolbar = (props) => React.createElement("NativeToolbar", props, props.children);
 Stack.Toolbar.Button = (props) => React.createElement("NativeToolbarButton", props, props.children);

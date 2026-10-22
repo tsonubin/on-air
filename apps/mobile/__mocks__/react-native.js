@@ -49,7 +49,7 @@ module.exports = {
   Pressable,
   SafeAreaView: mock("SafeAreaView"),
   ScrollView: mock("ScrollView"),
-  StyleSheet: { create: (s) => s },
+  StyleSheet: { create: (s) => s, flatten: (s) => Object.assign({}, ...[s].flat(Infinity)) },
   Text: mock("Text"),
   TextInput: mock("TextInput"),
   View: mock("View"),
