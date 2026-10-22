@@ -1,7 +1,7 @@
 import { FieldGroup, ListItem } from "@expo/ui";
 import { router } from "expo-router";
 import { useRemoteSession } from "@/remote-session";
-import { SettingsForm, sectionModifiers } from "@/settings-form";
+import { rowColors, SettingsForm, sectionModifiers } from "@/settings-form";
 import { FormText, sectionTitle } from "@/ui/form-text";
 
 export default function SoundScreen() {
@@ -11,6 +11,7 @@ export default function SoundScreen() {
       <FieldGroup.Section modifiers={sectionModifiers}>
         {sectionTitle("Tone")}
         <ListItem
+          colors={rowColors}
           onPress={() => router.push("/equalizer")}
           supportingText="Adjust bass, vocals, and treble"
           testID="equalizer-link"
@@ -29,6 +30,7 @@ export default function SoundScreen() {
       <FieldGroup.Section modifiers={sectionModifiers}>
         {sectionTitle("Advanced")}
         <ListItem
+          colors={rowColors}
           onPress={() => router.push("/audio-format")}
           supportingText="Input and output sample rates"
           testID="audio-format-link"
