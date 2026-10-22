@@ -34,6 +34,31 @@ test("ignores prop updates while interacting and applies the latest after releas
   expect(result.current.draft).toBe(20);
 });
 
+test("a held gesture keeps the draft however long the finger rests, until it lets go", async () => {
+  const onChange = jest.fn();
+  const props = (value: number): Props => ({ value, min: 0, max: 100, step: 1, onChange });
+  const { result, rerender } = renderHook((p: Props) => useFaderDraft(p), {
+    initialProps: props(50),
+  });
+  act(() => result.current.hold());
+  act(() => result.current.preview(80));
+  await act(async () => {
+    jest.advanceTimersByTime(180); // committed; its async tail would schedule the settle
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(800); // the finger is still down
+  });
+  expect(onChange).toHaveBeenCalledWith(80);
+  rerender(props(20)); // another client moves the volume
+  expect(result.current.draft).toBe(80);
+
+  act(() => result.current.letGo());
+  await act(async () => {
+    jest.advanceTimersByTime(300);
+  });
+  expect(result.current.draft).toBe(20);
+});
+
 test("a new drag during the settle window keeps holding the value", async () => {
   const onChange = jest.fn();
   const props = (value: number): Props => ({ value, min: -12, max: 12, step: 0.5, onChange });

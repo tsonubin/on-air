@@ -12,6 +12,9 @@ function create(element: ReactElement) {
   return renderer;
 }
 
+// Style props are arbitrarily nested arrays of objects; flatten like StyleSheet.flatten.
+const flat = (style: any): Record<string, unknown> =>
+  Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean).map(flat)) : (style ?? {});
 const hostById = (r: ReactTestRenderer.ReactTestRenderer, id: string) =>
   r.root.find((n) => typeof n.type === "string" && n.props.testID === id);
 const textsIn = (node: ReactTestInstance) =>
@@ -89,6 +92,17 @@ test("printed captions and scale marks cap text scaling", () => {
   const curve = r.root.find((n) => (n.type as unknown) === "Text" && n.props.children === "Curve");
   const printed = [...marks, curve];
   for (const text of printed) expect(text.props.maxFontSizeMultiplier).toBe(1.3);
+});
+
+test("dB readouts fit a 60 pt column: small digits, tight padding, no text scaling", () => {
+  // Found in review: a 4-digit well at 14 pt with 8 pt padding was ~62 pt, wider than a 360 dp column.
+  const r = create(<EqPanel gains={[3.5, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  const readout = hostById(r, "eq-band-0-readout");
+  expect(flat(readout.props.style).paddingHorizontal).toBe(4);
+  for (const digits of textsIn(readout)) {
+    expect(digits.props.maxFontSizeMultiplier).toBe(1);
+    expect(flat(digits.props.style).fontSize).toBe(12);
+  }
 });
 
 test("the footnote explains the faders", () => {

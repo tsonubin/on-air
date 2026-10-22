@@ -1,5 +1,6 @@
 import type { CdStatus, FirewallWarning } from "@on-air/api-types";
 import type React from "react";
+import { useState } from "react";
 import { ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LedDisplay } from "./led-display";
@@ -43,6 +44,21 @@ function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
       </View>
     </View>
   );
+}
+
+const KEY_GAP = 8;
+
+/**
+ * Whether the four key captions fit side by side in a row this wide. The
+ * captions are Plex Mono (0.6 em advance) at 11 pt with 1.76 pt tracking,
+ * capped at 1.3× text size, in keys with 8 pt padding each side; the longest
+ * is seven letters (SPEAKER, FORMAT and SOURCE are six or seven).
+ */
+export function keysFitInRow(rowWidth: number, fontScale: number): boolean {
+  const scale = Math.min(fontScale, 1.3);
+  const caption = 7 * (11 * scale * 0.6 + 1.76);
+  const key = (rowWidth - 3 * KEY_GAP) / 4;
+  return key >= caption + 2 * 8 + 2;
 }
 
 function padTrack(n: number): string {
@@ -188,9 +204,14 @@ export function MixerHome({
   const wide = width >= layout.wideBreakpoint;
   const shortWide = wide && height < 600;
   const gap = shortWide ? 12 : compact ? 18 : 22;
-  // The four keys share a row until large text or a narrow screen would crowd them.
-  const keyGrid = fontScale > 1.3 || width < 340;
+  // The four keys share a row while their captions fit; the row is measured, and
+  // estimated from the window until then.
+  const [keysWidth, setKeysWidth] = useState(0);
+  const keysRow = keysWidth || Math.min(width, layout.maxWidth) - 2 * (compact ? 16 : 20);
+  const keyGrid = !keysFitInRow(keysRow, fontScale);
   const keyStyle = { flexGrow: 1, flexBasis: keyGrid ? "48%" : 0 } as const;
+  // The big LED follows the fader's draft, so it moves with the finger.
+  const [shownVolume, setShownVolume] = useState(volume);
   const speakerFailed = activeOutput !== "" && outputPhase === "failed";
 
   return (
@@ -264,11 +285,11 @@ export function MixerHome({
                   Volume
                 </Text>
                 <LedReadout
-                  value={String(Math.round(volume))}
+                  value={String(Math.round(shownVolume))}
                   digits={3}
                   size={shortWide ? 36 : 44}
                   dim={volumeDisabled}
-                  accessibilityLabel={`Volume ${Math.round(volume)}`}
+                  accessibilityLabel={`Volume ${Math.round(shownVolume)}`}
                   testID="volume-readout"
                 />
               </View>
@@ -284,6 +305,7 @@ export function MixerHome({
                 formatValue={(value) => String(Math.round(value))}
                 disabled={volumeDisabled}
                 testID="volume-slider"
+                onDraft={setShownVolume}
                 onChange={onVolumeChange}
               />
               <Scale marks={["0", "50", "100"]} />
@@ -291,7 +313,11 @@ export function MixerHome({
 
             <Groove />
 
-            <View testID="mixer-keys" style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <View
+              testID="mixer-keys"
+              onLayout={(event) => setKeysWidth(event.nativeEvent.layout.width)}
+              style={{ flexDirection: "row", flexWrap: "wrap", gap: KEY_GAP }}
+            >
               <PanelKey
                 label="Source"
                 accessibilityHint="Choose what the desktop captures"

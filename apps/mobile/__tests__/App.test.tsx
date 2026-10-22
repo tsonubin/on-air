@@ -296,10 +296,11 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(text()).toContain("Audio is live");
   expect(api.listInputs.mock.calls.length).toBe(listsBefore);
 
-  // Volume commits after the drag pauses.
+  // Volume commits after the drag pauses; the LED follows the fader before that.
   jest.useFakeTimers();
   stepFader("volume-slider", "increment");
   expect(api.setVolume).not.toHaveBeenCalled();
+  expect(numbersShown()).toContain(55);
   await ReactTestRenderer.act(async () => {
     jest.advanceTimersByTime(180);
   });
@@ -369,6 +370,10 @@ test("a failed volume write rolls the readout back to what the desktop holds", a
   stepFader("volume-slider", "increment");
   await ReactTestRenderer.act(async () => {
     jest.advanceTimersByTime(180);
+  });
+  // The LED follows the fader, so it settles back to the desktop's value once the write fails.
+  await ReactTestRenderer.act(async () => {
+    jest.advanceTimersByTime(300);
   });
   jest.useRealTimers();
   await flush();
@@ -734,6 +739,27 @@ test("keys wrap into a 2 × 2 grid at the largest text size", async () => {
     .mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 1.6 });
   await renderApp();
   await pairWith();
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+});
+
+test("keys wrap once their captions would not fit, as at iOS XXL text on a 393 pt phone", async () => {
+  // Found in review: SPEAKER truncated at 1.235× because the grid waited for 1.3×.
+  jest
+    .mocked(useWindowDimensions)
+    .mockReturnValue({ width: 393, height: 852, scale: 3, fontScale: 1.235 });
+  await renderApp();
+  await pairWith();
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+});
+
+test("keys measure their row: a narrow column wraps even at the default text size", async () => {
+  await renderApp();
+  await pairWith();
+  ReactTestRenderer.act(() =>
+    host("mixer-keys").props.onLayout({
+      nativeEvent: { layout: { x: 0, y: 0, width: 312, height: 56 } },
+    }),
+  );
   expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
 });
 

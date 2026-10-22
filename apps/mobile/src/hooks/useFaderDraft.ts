@@ -6,7 +6,8 @@ import { theme } from "@/theme";
  * pause. While the person is adjusting, and for a moment after the last
  * commit settles, incoming `value` props (from polling or events) are ignored
  * so the control never snaps back mid-gesture; the latest prop is applied
- * once they let go.
+ * once they let go. A touch gesture brackets itself with `hold()` and
+ * `letGo()`, so a finger resting on the control keeps it however long it rests.
  */
 export function useFaderDraft({
   value,
@@ -20,13 +21,15 @@ export function useFaderDraft({
   max: number;
   step: number;
   onChange: (value: number) => void | Promise<void>;
-}): { draft: number; preview(next: number): void } {
+}): { draft: number; preview(next: number): void; hold(): void; letGo(): void } {
   const clamp = (next: number) => {
     const bounded = Math.min(max, Math.max(min, next));
     return Math.round(bounded / step) * step;
   };
   const [draft, setDraft] = useState(value);
   const interacting = useRef(false);
+  /** A finger is down on the control; nothing settles until it lifts. */
+  const holding = useRef(false);
   const latestProp = useRef(value);
   latestProp.current = value;
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -62,7 +65,21 @@ export function useFaderDraft({
     } catch {
       // The owner reports write failures; the fader only needs to let go.
     }
-    // A newer preview restarted the cycle; let that one release.
+    // A newer preview restarted the cycle, or the finger is still down; let those release.
+    if (commitTimer.current === null && !holding.current) release();
+  };
+
+  const hold = () => {
+    holding.current = true;
+    interacting.current = true;
+    if (settleTimer.current) clearTimeout(settleTimer.current);
+    settleTimer.current = null;
+  };
+
+  const letGo = () => {
+    if (!holding.current) return;
+    holding.current = false;
+    // A pending commit releases when it lands; otherwise settle from here.
     if (commitTimer.current === null) release();
   };
 
@@ -76,5 +93,5 @@ export function useFaderDraft({
     commitTimer.current = setTimeout(() => void commit(next), theme.motion.controlCommitMs);
   };
 
-  return { draft, preview };
+  return { draft, preview, hold, letGo };
 }

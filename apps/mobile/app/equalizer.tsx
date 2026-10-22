@@ -42,10 +42,13 @@ export default function EqualizerScreen() {
   return (
     <>
       <Faceplate testID="equalizer-screen">
+        {/* The native header covers the top; in landscape the sides clear the sensor housing. */}
         <View
+          testID="equalizer-body"
           style={{
             flex: 1,
-            paddingHorizontal: 16,
+            paddingLeft: Math.max(insets.left, 16),
+            paddingRight: Math.max(insets.right, 16),
             paddingTop: 16,
             paddingBottom: Math.max(insets.bottom, 16),
           }}

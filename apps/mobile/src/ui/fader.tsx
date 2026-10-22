@@ -1,4 +1,4 @@
-import { type ReactNode, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { type LayoutChangeEvent, PanResponder, View, type ViewStyle } from "react-native";
 import { useFaderDraft } from "@/hooks/useFaderDraft";
 import { colors, layout, radius } from "@/theme";
@@ -43,6 +43,8 @@ export type FaderProps = {
   length?: number;
   /** Drawn above a vertical track, following the drag. */
   renderReadout?: (draft: number) => ReactNode;
+  /** Told the shown (clamped) value whenever it moves, so a readout elsewhere can follow the drag. */
+  onDraft?: (shown: number) => void;
   testID: string;
   onChange: (value: number) => void | Promise<void>;
 };
@@ -63,7 +65,7 @@ const pct = (fraction: number) => `${+(fraction * 100).toFixed(3)}%` as const;
 export function Fader(props: FaderProps) {
   const { orientation, min, max, step, origin, disabled = false, testID } = props;
   const horizontal = orientation === "horizontal";
-  const { draft, preview } = useFaderDraft({
+  const { draft, preview, hold, letGo } = useFaderDraft({
     value: props.value,
     min,
     max,
@@ -75,8 +77,19 @@ export function Fader(props: FaderProps) {
 
   // The responder lives for the component's lifetime; it reads the latest
   // values through this ref so a re-render mid-drag never loses the gesture.
-  const live = useRef({ draft, disabled, trackLength, preview, min, max, step, horizontal });
-  live.current = { draft, disabled, trackLength, preview, min, max, step, horizontal };
+  const live = useRef({
+    draft,
+    disabled,
+    trackLength,
+    preview,
+    hold,
+    letGo,
+    min,
+    max,
+    step,
+    horizontal,
+  });
+  live.current = { draft, disabled, trackLength, preview, hold, letGo, min, max, step, horizontal };
   const start = useRef(draft);
   const responder = useRef(
     PanResponder.create({
@@ -85,7 +98,10 @@ export function Fader(props: FaderProps) {
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
         start.current = live.current.draft;
+        live.current.hold();
       },
+      onPanResponderRelease: () => live.current.letGo(),
+      onPanResponderTerminate: () => live.current.letGo(),
       onPanResponderMove: (_event, gesture) => {
         const now = live.current;
         if (now.disabled) return;
@@ -103,7 +119,17 @@ export function Fader(props: FaderProps) {
     }),
   ).current;
 
+  // A disabled fader gets no release event, so it lets go of any gesture in progress.
+  useEffect(() => {
+    if (disabled) live.current.letGo();
+  }, [disabled]);
+
   const shown = Math.min(max, Math.max(min, draft));
+  const onDraft = useRef(props.onDraft);
+  onDraft.current = props.onDraft;
+  useEffect(() => {
+    onDraft.current?.(shown);
+  }, [shown]);
   const fraction = (shown - min) / (max - min);
   const originFraction = (Math.min(max, Math.max(min, origin)) - min) / (max - min);
   const lo = Math.min(fraction, originFraction);

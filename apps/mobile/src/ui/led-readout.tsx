@@ -60,6 +60,8 @@ export function LedReadout({
   digits,
   size,
   dim = false,
+  compact = false,
+  maxScale = MAX_SCALE,
   accessibilityLabel,
   testID,
 }: {
@@ -67,9 +69,14 @@ export function LedReadout({
   digits: number;
   size: number;
   dim?: boolean;
+  /** Tighter side padding, for readouts that share a narrow column. */
+  compact?: boolean;
+  /** How far the digits may grow with Dynamic Type; 1 keeps a fixed-width well. */
+  maxScale?: number;
   accessibilityLabel: string;
   testID?: string;
 }) {
+  const padding = compact ? 4 : 8;
   const digitStyle = [
     type.led,
     { fontSize: size, lineHeight: size * 1.25, textAlign: "right" as const },
@@ -79,24 +86,24 @@ export function LedReadout({
       accessible
       accessibilityLabel={accessibilityLabel}
       testID={testID}
-      style={[wellStyle, { paddingHorizontal: 8, paddingVertical: 4 }]}
+      style={[wellStyle, { paddingHorizontal: padding, paddingVertical: 4 }]}
     >
       <Text
         accessibilityElementsHidden
         importantForAccessibility="no"
-        maxFontSizeMultiplier={MAX_SCALE}
+        maxFontSizeMultiplier={maxScale}
         style={[...digitStyle, { color: colors.ledGhost }]}
       >
         {"8".repeat(digits)}
       </Text>
       <Text
-        maxFontSizeMultiplier={MAX_SCALE}
+        maxFontSizeMultiplier={maxScale}
         style={[
           ...digitStyle,
           {
             position: "absolute",
             top: 4,
-            right: 8,
+            right: padding,
             color: dim ? colors.tertiaryLabel : colors.amber,
             textShadowColor: colors.amber,
             textShadowOffset: { width: 0, height: 0 },

@@ -183,6 +183,56 @@ test("a desktop value mid-drag never moves the cap", () => {
   expect(now(r, "vol")).toBe(80);
 });
 
+test("a finger resting on the cap keeps it there while the desktop changes the value", async () => {
+  // Found in review: the hold used to lapse 480 ms after the last move, finger still down.
+  const r = create(volume());
+  act(() => node(r, "vol-track").props.onLayout(layout(300, 44)));
+  act(() => node(r, "vol").props.onResponderGrant(touch(0)));
+  act(() => node(r, "vol").props.onResponderMove(touch(90)));
+  // Commit first (its async tail schedules the settle), then rest well past the settle.
+  await act(async () => {
+    jest.advanceTimersByTime(180);
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(500);
+  });
+  act(() => r.update(volume({ value: 20 })));
+  expect(now(r, "vol")).toBe(80);
+  act(() => node(r, "vol").props.onResponderRelease(touch(90)));
+  await act(async () => {
+    jest.advanceTimersByTime(300);
+  });
+  expect(now(r, "vol")).toBe(20);
+});
+
+test("disabling mid-hold lets go, so desktop values apply again", async () => {
+  const r = create(volume());
+  act(() => node(r, "vol-track").props.onLayout(layout(300, 44)));
+  act(() => node(r, "vol").props.onResponderGrant(touch(0)));
+  act(() => node(r, "vol").props.onResponderMove(touch(30)));
+  act(() => r.update(volume({ disabled: true }))); // no release reaches a disabled fader
+  await act(async () => {
+    jest.advanceTimersByTime(180);
+  });
+  await act(async () => {
+    jest.advanceTimersByTime(300);
+  });
+  act(() => r.update(volume({ disabled: true, value: 20 })));
+  expect(now(r, "vol")).toBe(20);
+});
+
+test("the shown value is reported as it moves, clamped like the cap", () => {
+  const onDraft = jest.fn();
+  const r = create(volume({ onDraft }));
+  expect(onDraft).toHaveBeenLastCalledWith(50);
+  act(() =>
+    node(r, "vol").props.onAccessibilityAction({ nativeEvent: { actionName: "increment" } }),
+  );
+  expect(onDraft).toHaveBeenLastCalledWith(55);
+  create(volume({ value: 120, onDraft }));
+  expect(onDraft).toHaveBeenLastCalledWith(100);
+});
+
 test("disabling mid-drag ignores further moves", async () => {
   const r = create(volume());
   act(() => node(r, "vol-track").props.onLayout(layout(300, 44)));

@@ -1,5 +1,6 @@
 import { act, render } from "@testing-library/react-native";
 import { Platform, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import EqualizerScreen from "../app/equalizer";
 
 const mockSession = {
@@ -61,6 +62,18 @@ describe("on Android", () => {
     const reset = view.getByTestId("eq-reset");
     expect(reset.props.accessibilityState).toEqual({ disabled: true });
     expect(reset.props.onPress).toBeUndefined();
+  });
+});
+
+test("in landscape the faders keep clear of the sensor housing and home indicator", () => {
+  // Found in review: only the bottom inset was used, so the scale sat under the notch.
+  jest.mocked(useSafeAreaInsets).mockReturnValueOnce({ top: 0, right: 59, bottom: 21, left: 59 });
+  const view = render(<EqualizerScreen />);
+  const body = view.getByTestId("equalizer-body");
+  expect(StyleSheet.flatten(body.props.style)).toMatchObject({
+    paddingLeft: 59,
+    paddingRight: 59,
+    paddingBottom: 21,
   });
 });
 

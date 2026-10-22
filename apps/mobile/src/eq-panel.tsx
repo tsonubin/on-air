@@ -117,7 +117,9 @@ export function EqPanel({
                     <LedReadout
                       value={formatDb(draft).text}
                       digits={4}
-                      size={14}
+                      size={12}
+                      compact
+                      maxScale={1}
                       dim={disabled}
                       accessibilityLabel=""
                       testID={`eq-band-${index}-readout`}
