@@ -13,6 +13,7 @@ import { OutputSheet } from "@/sheets/output-sheet";
 import { SourceSheet } from "@/sheets/source-sheet";
 import { colors } from "@/theme";
 import { FormText, sectionTitle } from "@/ui/form-text";
+import { homeStatus } from "@/ui-state";
 
 function RestoringScreen() {
   return (
@@ -65,7 +66,12 @@ function MixerScreen() {
         activeOutput={remote.activeOutput?.device_name ?? ""}
         outputPhase={remote.activeOutput ? outputPhase(remote.activeOutput) : undefined}
         volume={remote.volume}
-        status={{ text: view.statusText, announcement: view.statusAnnouncement, live: view.live }}
+        status={homeStatus({
+          uiState: remote.uiState,
+          outputPhase: remote.activeOutput ? outputPhase(remote.activeOutput) : undefined,
+          firewallBlocked: remote.firewallWarning != null,
+        })}
+        outputSampleRate={remote.outputSampleRate}
         error={remote.error ?? remote.warning}
         firewallWarning={remote.firewallWarning}
         volumeDisabled={!view.volumeEnabled}

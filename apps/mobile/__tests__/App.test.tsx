@@ -161,6 +161,9 @@ function exists(id: string): boolean {
   );
 }
 
+/** The first sentence of the LED window's summary: what the status pill used to announce. */
+const announced = () => (host("led-window").props.accessibilityLabel as string).split(". ")[0];
+
 function text(): string {
   return JSON.stringify(tree?.toJSON());
 }
@@ -245,7 +248,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(exists("mixer-screen")).toBe(true);
   expect(text()).toContain("Mock Monitor");
   expect(text()).toContain("Choose a speaker");
-  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
+  expect(announced()).toBe("Status: Ready");
   expect(FakeSocket.last?.url).toBe(`ws://192.168.5.14:47990/api/ws?token=${TOKEN}`);
   expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
 
@@ -280,7 +283,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
       active: true,
     }),
   );
-  expect(host("status-pill").props.accessibilityLabel).toBe("Audio is live");
+  expect(announced()).toBe("Audio is live");
   expect(text()).toContain("Audio is live");
   expect(api.listInputs.mock.calls.length).toBe(listsBefore);
 
@@ -350,7 +353,7 @@ test("a failed volume write rolls the readout back to what the desktop holds", a
   });
   await renderApp();
   await pairWith();
-  expect(host("status-pill").props.accessibilityLabel).toBe("Audio is live");
+  expect(announced()).toBe("Audio is live");
   expect(numbersShown()).toContain(50);
   api.setVolume.mockRejectedValue(
     new client.HttpError("/api/outputs/volume", 502, '{"error":"","code":"transport_unreachable"}'),
@@ -366,6 +369,10 @@ test("a failed volume write rolls the readout back to what the desktop holds", a
   expect(numbersShown()).toContain(50);
   expect(numbersShown()).not.toContain(73);
   expect(text()).toContain("speaker did not answer");
+  // Errors read as plain faceplate text under the window, with no box.
+  const notice = flat(host("mixer-error").props.style);
+  expect(notice.backgroundColor).toBeUndefined();
+  expect(notice.borderWidth).toBeUndefined();
 });
 
 test("a speaker that is still starting is not shown as live; a failed one can be chosen again", async () => {
@@ -377,9 +384,9 @@ test("a speaker that is still starting is not shown as live; a failed one can be
   });
   await renderApp();
   await pairWith();
-  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Connecting speaker");
+  expect(announced()).toBe("Status: Connecting speaker");
   expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
-  expect(text()).toContain("Connecting…");
+  expect(host("led-status").props.children).toBe("CONNECTING");
 
   api.getActiveOutput.mockResolvedValue({
     transport: "sonos",
@@ -390,8 +397,9 @@ test("a speaker that is still starting is not shown as live; a failed one can be
   await press("more-button");
   await pressRefresh();
   await press("native-back");
-  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
-  expect(text()).toContain("Speaker failed. Choose it again.");
+  expect(announced()).toBe("Status: Speaker failed");
+  expect(host("led-status").props.children).toBe("FAILED");
+  expect(host("speaker-failed").props.children).toBe("Speaker failed. Choose it again.");
   await press("speaker-key");
   expect(text()).toContain("Failed · Retry");
   await press("output-sonos-uuid:mock-sonos");
@@ -646,10 +654,17 @@ test("a paused desktop keeps its pairing and disables sound settings", async () 
   expect(text()).toContain("Connected to desktop");
   expect(text()).toContain("desktop service is paused");
   await press("native-back");
-  expect(host("status-pill").props.accessibilityLabel).toBe("Desktop service is paused");
+  expect(announced()).toBe("Desktop service is paused");
   expect(host("eq-key").props.onPress).toBeUndefined();
   expect(host("format-key").props.onPress).toBeUndefined();
   expect(store.deleteItemAsync).not.toHaveBeenCalled();
+});
+
+test("the LED window's format corner shows the output sample rate", async () => {
+  await renderApp();
+  await pairWith();
+  expect(host("led-format").props.children).toBe("44.1K · ST");
+  expect(host("led-source").props.children).toBe("Mock Monitor");
 });
 
 test("the four mixer keys open the sheets and the sound screens", async () => {
@@ -775,7 +790,7 @@ test("accessibility: nothing but the host string is selectable; decorative icons
     (node) => (node.type as unknown) === "ExpoIcon" && node.props.accessibilityLabel !== undefined,
   );
   expect(labelledIcons).toHaveLength(0);
-  const pill = host("status-pill");
+  const pill = host("led-window");
   expect(pill.props.accessible).toBe(true);
   expect(pill.props.accessibilityRole).toBe("text");
   // RN content must not be nested directly in a SwiftUI Host.
@@ -795,7 +810,7 @@ const textsIn = (node: ReactTestInstance) =>
 test("retro header: the sign stays unlit when ready and lights while live", async () => {
   await renderApp();
   await pairWith();
-  expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
+  expect(announced()).toBe("Status: Ready");
   expect(host("mixer-sign").props.accessibilityLabel).toBe("on-air");
   expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#4a4136");
 
@@ -807,7 +822,7 @@ test("retro header: the sign stays unlit when ready and lights while live", asyn
     state: "live",
   });
   await renderApp(); // the saved pairing restores straight into the mixer
-  expect(host("status-pill").props.accessibilityLabel).toBe("Audio is live");
+  expect(announced()).toBe("Audio is live");
   expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#ff3b2a");
 });
 
@@ -875,8 +890,13 @@ test("a firewall block keeps the live dot off, matching the header", async () =>
   });
   await renderApp();
   await pairWith();
-  expect(host("status-pill").props.accessibilityLabel).toBe("Firewall blocking audio");
+  expect(announced()).toBe("Firewall blocking audio");
+  expect(host("led-status").props.children).toBe("BLOCKED");
   expect(flat(host("live-lamp").props.style).shadowOpacity).toBe(0);
+  // The warning sits on the faceplate as plain text, not in a red box.
+  const warning = flat(host("firewall-warning").props.style);
+  expect(warning.backgroundColor).toBeUndefined();
+  expect(warning.borderWidth).toBeUndefined();
 });
 
 test("volume shows on an LED readout that dims when the desktop is paused", async () => {
@@ -904,7 +924,7 @@ test("volume shows on an LED readout that dims when the desktop is paused", asyn
   await press("more-button");
   await pressRefresh();
   await press("native-back");
-  expect(host("status-pill").props.accessibilityLabel).toBe("Desktop service is paused");
+  expect(announced()).toBe("Desktop service is paused");
   expect(flat(value()?.props.style).color).toBe("#9a8f78");
 });
 

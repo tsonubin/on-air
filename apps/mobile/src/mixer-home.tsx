@@ -3,7 +3,9 @@ import type { CdStatus, FirewallWarning } from "@on-air/api-types";
 import type React from "react";
 import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { LedDisplay } from "./led-display";
 import { NativeFader } from "./native-fader";
+import { formatRate } from "./readouts";
 import { colors, layout, radius, type } from "./theme";
 import { Card } from "./ui/card";
 import { FirewallNotice } from "./ui/firewall-notice";
@@ -13,25 +15,18 @@ import { NativeIcon } from "./ui/native-icon";
 import { Notice } from "./ui/notice";
 import { PanelKey } from "./ui/panel-key";
 import { Sign } from "./ui/sign";
+import type { HomeStatus } from "./ui-state";
 
 /** Section caption ("Now streaming", "Playback"), like the desktop's SOURCE / DESTINATION. */
 function SectionLabel({ children }: { children: string }) {
   return <Text style={[type.label, { color: colors.tertiaryLabel }]}>{children}</Text>;
 }
 
-type HeaderStatus = { text: string; announcement: string; live: boolean };
-
-function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }) {
+/** The ONAIR sign is the only status badge up top; the LED window carries the words. */
+function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
   const insets = useSafeAreaInsets();
   return (
-    <View
-      style={{
-        paddingTop: insets.top + 10,
-        paddingBottom: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.separator,
-      }}
-    >
+    <View style={{ paddingTop: insets.top + 10, paddingBottom: 14 }}>
       <View
         style={{
           width: "100%",
@@ -43,46 +38,15 @@ function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }
         }}
       >
         <View style={{ flex: 1 }}>
-          <Sign lit={status.live} testID="mixer-sign" />
+          <Sign lit={live} testID="mixer-sign" />
         </View>
-        <View
-          accessible
-          accessibilityRole="text"
-          accessibilityLabel={status.announcement}
-          testID="status-pill"
-          style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14 }}
-        >
-          <View
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: 4,
-              backgroundColor: status.live ? colors.accent : colors.liveDim,
-            }}
-          />
-          <Text style={[type.label, { color: status.live ? colors.accent : colors.tertiaryLabel }]}>
-            {status.text}
-          </Text>
-        </View>
-        <Pressable
-          accessibilityRole="button"
+        <PanelKey
+          shape="round"
+          icon={icons.more}
           accessibilityLabel="More options"
           onPress={onMore}
           testID="more-button"
-          hitSlop={5}
-          style={({ pressed }) => ({
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: pressed ? colors.surfacePressed : colors.surface,
-            borderWidth: 1,
-            borderColor: colors.border,
-          })}
-        >
-          <NativeIcon name={icons.more} size={19} />
-        </Pressable>
+        />
       </View>
     </View>
   );
@@ -192,6 +156,7 @@ export function MixerHome({
   outputPhase,
   volume,
   status,
+  outputSampleRate,
   error,
   firewallWarning,
   volumeDisabled,
@@ -213,7 +178,10 @@ export function MixerHome({
   /** Phase of the active output; absent means live (older desktops). */
   outputPhase?: "starting" | "live" | "failed";
   volume: number;
-  status: HeaderStatus;
+  /** The LED status (`homeStatus`): a firewall block already overrides live. */
+  status: HomeStatus;
+  /** The output sample rate in Hz for the window's format corner; 0 when unknown. */
+  outputSampleRate: number;
   error?: string | null;
   firewallWarning?: FirewallWarning | null;
   volumeDisabled: boolean;
@@ -239,23 +207,11 @@ export function MixerHome({
   // The four keys share a row until large text or a narrow screen would crowd them.
   const keyGrid = fontScale > 1.3 || width < 340;
   const keyStyle = { flexGrow: 1, flexBasis: keyGrid ? "48%" : 0 } as const;
-  const source = activeInput || "Choose a source";
-  const output = activeOutput || "Choose a speaker";
-  const speakerNote =
-    activeOutput && outputPhase === "starting"
-      ? "Connecting…"
-      : activeOutput && outputPhase === "failed"
-        ? "Speaker failed. Choose it again."
-        : null;
-  // What the header shows; a firewall block overrides live, and the lamp
-  // follows the header so the two never disagree.
-  const headerStatus: HeaderStatus = firewallWarning
-    ? { text: "Audio blocked", announcement: "Firewall blocking audio", live: false }
-    : status;
+  const speakerFailed = activeOutput !== "" && outputPhase === "failed";
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }} testID="mixer-screen">
-      <Header status={headerStatus} onMore={onOpenMore} />
+      <Header live={status.live} onMore={onOpenMore} />
       <ScrollView
         style={{ flex: 1 }}
         contentInsetAdjustmentBehavior="automatic"
@@ -270,8 +226,6 @@ export function MixerHome({
           alignSelf: "center",
         }}
       >
-        {error ? <Notice message={error} testID="mixer-error" /> : null}
-        <FirewallNotice warning={firewallWarning} />
         <View
           testID={
             shortWide ? "mixer-landscape-layout" : wide ? "mixer-wide-layout" : "mixer-phone-layout"
@@ -290,6 +244,21 @@ export function MixerHome({
               gap: shortWide ? 12 : wide ? 24 : compact ? 18 : 22,
             }}
           >
+            <LedDisplay
+              source={activeInput}
+              speaker={activeOutput}
+              status={status}
+              rate={formatRate(outputSampleRate)}
+            />
+
+            {error ? <Notice message={error} testID="mixer-error" /> : null}
+            {speakerFailed ? (
+              <Text testID="speaker-failed" style={[type.body, { color: colors.secondaryLabel }]}>
+                Speaker failed. Choose it again.
+              </Text>
+            ) : null}
+            <FirewallNotice warning={firewallWarning} />
+
             {cd?.present ? (
               <CdDeck
                 status={cd}
@@ -298,47 +267,6 @@ export function MixerHome({
                 onNext={() => onCdNext?.()}
               />
             ) : null}
-
-            <View
-              accessible
-              accessibilityLabel={`${status.live ? "Audio is live" : "Ready to stream"}. ${source} to ${output}`}
-              style={{
-                minHeight: shortWide ? 72 : wide ? 112 : 86,
-                paddingHorizontal: compact ? 8 : 18,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: shortWide ? 12 : 18,
-              }}
-            >
-              <View
-                testID="live-lamp"
-                style={{
-                  borderRadius: 40,
-                  shadowColor: colors.accent,
-                  shadowOffset: { width: 0, height: 0 },
-                  shadowRadius: 12,
-                  shadowOpacity: headerStatus.live ? 0.6 : 0,
-                }}
-              >
-                <NativeIcon
-                  name={icons.live}
-                  size={shortWide ? 52 : compact ? 58 : 68}
-                  color={headerStatus.live ? colors.accent : colors.liveDim}
-                />
-              </View>
-              <View style={{ flexShrink: 1, gap: 5 }}>
-                <Text style={[type.title, { color: colors.label, fontSize: 20, lineHeight: 25 }]}>
-                  {status.live ? "Audio is live" : "Ready to stream"}
-                </Text>
-                <Text numberOfLines={2} style={[type.body, { color: colors.secondaryLabel }]}>
-                  {`${source} → ${output}`}
-                </Text>
-                {speakerNote ? (
-                  <Text style={[type.body, { color: colors.secondaryLabel }]}>{speakerNote}</Text>
-                ) : null}
-              </View>
-            </View>
           </View>
 
           <View
