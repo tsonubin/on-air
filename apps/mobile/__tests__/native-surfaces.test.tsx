@@ -13,7 +13,6 @@ import { NativeIcon } from "@/ui/native-icon";
 import AudioFormatScreen from "../app/audio-format";
 import ConnectionScreen from "../app/connection";
 import EqualizerScreen from "../app/equalizer";
-import SoundScreen from "../app/sound";
 
 jest.mock("@/remote-session", () => ({
   useRemoteSession: () => ({
@@ -72,17 +71,13 @@ test("native header titles are uppercase captions; back buttons keep the plain t
     title: "Audio format",
     headerTitle: "AUDIO FORMAT",
   });
-  // iOS builds the back label from the previous screen's headerTitle, so a
-  // screen pushed from Sound names its back button explicitly.
-  expect(titledScreen("Equalizer", "Sound")).toEqual({
-    title: "Equalizer",
-    headerTitle: "EQUALIZER",
-    headerBackTitle: "Sound",
-  });
+  // Every screen is pushed straight from the Mixer, whose plain title becomes
+  // the back label; the Sound menu and its "Sound" back labels are gone.
   const byName = Object.fromEntries(stackScreens.map((s) => [s.name, s.options]));
-  expect(byName.equalizer.headerBackTitle).toBe("Sound");
-  expect(byName["audio-format"].headerBackTitle).toBe("Sound");
-  expect(Object.keys(byName)).toEqual(["sound", "equalizer", "audio-format", "connection"]);
+  expect(Object.keys(byName)).toEqual(["equalizer", "audio-format", "connection"]);
+  for (const options of Object.values(byName)) {
+    expect(options).not.toHaveProperty("headerBackTitle");
+  }
 });
 
 test("sheets are faceplate-backed and amber-tinted on iOS", () => {
@@ -128,7 +123,7 @@ test("form text uses the vendored families and uppercases labels", () => {
 });
 
 test("settings sections sit on faceplate rows under mono section titles", () => {
-  const r = create(<SoundScreen />);
+  const r = create(<AudioFormatScreen />);
   const sections = hosts(r, "ExpoFieldSection");
   expect(sections.length).toBeGreaterThan(0);
   for (const section of sections) {
@@ -137,23 +132,13 @@ test("settings sections sit on faceplate rows under mono section titles", () => 
   const headers = hosts(r, "ExpoFieldSectionHeader").map(
     (h) => h.findAll((n) => isHost(n, "ExpoText"))[0].props.children,
   );
-  expect(headers).toEqual(["TONE", "ADVANCED"]);
+  expect(headers).toEqual(["SAMPLE RATE", "AUDIO PERFORMANCE"]);
   // The caption must fill the header slot, not become a stray first row.
   const rowTexts = hosts(r, "ExpoFieldSectionRows").flatMap((rows) =>
     rows.findAll((n) => isHost(n, "ExpoText")).map((t) => t.props.children),
   );
-  expect(rowTexts).not.toContain("TONE");
-  expect(rowTexts).not.toContain("ADVANCED");
-});
-
-test("settings link rows let the section's row show through on Android", () => {
-  // Android's FieldGroup.Section wraps each row in its own Material ListItem, so
-  // an opaque nested ListItem paints a second, inset box inside the row.
-  const items = hosts(create(<SoundScreen />), "ExpoListItem");
-  expect(items.map((item) => item.props.testID)).toEqual(["equalizer-link", "audio-format-link"]);
-  for (const item of items) {
-    expect(item.props.colors).toEqual({ containerColor: "transparent" });
-  }
+  expect(rowTexts).not.toContain("SAMPLE RATE");
+  expect(rowTexts).not.toContain("AUDIO PERFORMANCE");
 });
 
 test("every settings screen puts its section captions in the header slot", () => {

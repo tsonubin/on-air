@@ -34,7 +34,6 @@ function Stack({ children }) {
   const selected = allowed ? route : "/";
   const screens = {
     "/": () => require("../app/index").default,
-    "/sound": () => require("../app/sound").default,
     "/equalizer": () => require("../app/equalizer").default,
     "/audio-format": () => require("../app/audio-format").default,
     "/connection": () => require("../app/connection").default,

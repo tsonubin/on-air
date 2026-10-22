@@ -73,9 +73,10 @@ function MixerScreen() {
         cd={cd}
         onChangeInput={() => setSheet("source")}
         onChangeOutput={() => setSheet("output")}
-        onOpenSound={() => router.push("/sound")}
+        eqFlat={remote.gains.every((g) => g === 0)}
+        onOpenEqualizer={() => router.push("/equalizer")}
+        onOpenFormat={() => router.push("/audio-format")}
         onOpenMore={() => router.push("/connection")}
-        onDisconnect={remote.disconnect}
         onVolumeChange={remote.applyVolume}
         onCdPlayPause={() => void remote.controlCd(cd.playing ? "pause" : "play")}
         onCdPrev={() => void remote.controlCd("prev")}

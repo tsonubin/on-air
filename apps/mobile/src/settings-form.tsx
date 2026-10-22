@@ -15,13 +15,6 @@ const ios = Platform.OS === "ios";
 /** Row background for every section of a settings form (iOS; Android follows the seeded host). */
 export const sectionModifiers = ios ? [listRowBackground(colors.surface)] : undefined;
 
-/**
- * Colors for a ListItem placed in a section. Android's section already wraps
- * each row in a Material ListItem, so a clear container keeps a nested one from
- * painting an inset box (iOS ignores ListItem colors).
- */
-export const rowColors = { containerColor: "transparent" } as const;
-
 // FieldGroup is a native, scrollable SwiftUI Form on iOS. Native stack headers
 // supply the safe area; the form owns scrolling and Dynamic Type layout. The
 // system's grouped gray is hidden so the form sits on the faceplate well.

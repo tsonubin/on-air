@@ -250,7 +250,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
 
   // Choose a source.
-  await press("source-row");
+  await press("source-key");
   await ReactTestRenderer.act(async () => {
     await host("source-picker").props.onValueChange("PipeWire Sound Server");
   });
@@ -259,7 +259,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(exists("source-sheet")).toBe(false);
 
   // Choose a speaker; the desktop's event marks it live without a full refetch.
-  await press("output-row");
+  await press("speaker-key");
   expect(text()).toContain("Living Room AirPlay");
   expect(text()).toContain("Stereo pair · AirPlay");
   const listsBefore = api.listInputs.mock.calls.length;
@@ -293,10 +293,8 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   });
   expect(api.setVolume).toHaveBeenCalledWith(BASE, 73, TOKEN);
 
-  // Equalizer: two quick band edits keep both values and serialise.
-  await press("sound-settings-button");
-  expect(text()).toContain("Audio format");
-  await press("equalizer-link");
+  // Equalizer, straight from its key: two quick band edits keep both values and serialise.
+  await press("eq-key");
   expect(text()).toContain("Bass · 60 Hz");
   ReactTestRenderer.act(() => {
     host("eq-band-0-native").props.onValueChange(0.5);
@@ -309,16 +307,15 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   await flush();
   expect(api.setEq).toHaveBeenLastCalledWith(BASE, [0.5, 1, 0, 0, 0], TOKEN);
 
-  // Audio format.
+  // Audio format, from its own key on the mixer.
   ReactTestRenderer.act(() => expoRouter.router.back());
-  await press("audio-format-link");
+  await press("format-key");
   await ReactTestRenderer.act(async () => {
     await host("output-sample-rate-picker").props.onValueChange(48000);
   });
   expect(api.setSampleRate).toHaveBeenCalledWith(BASE, { output_hz: 48000 }, TOKEN);
 
-  // Back to the mixer, then Connection shows the paired host, and Forget returns to pairing.
-  await press("native-back");
+  // One back reaches the mixer; Connection shows the paired host, and Forget returns to pairing.
   await press("native-back");
   expect(exists("mixer-screen")).toBe(true);
   await press("more-button");
@@ -395,7 +392,7 @@ test("a speaker that is still starting is not shown as live; a failed one can be
   await press("native-back");
   expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
   expect(text()).toContain("Speaker failed. Choose it again.");
-  await press("output-row");
+  await press("speaker-key");
   expect(text()).toContain("Failed · Retry");
   await press("output-sonos-uuid:mock-sonos");
   expect(api.activateOutput).toHaveBeenCalledWith(BASE, "sonos", "uuid:mock-sonos", TOKEN);
@@ -650,14 +647,55 @@ test("a paused desktop keeps its pairing and disables sound settings", async () 
   expect(text()).toContain("desktop service is paused");
   await press("native-back");
   expect(host("status-pill").props.accessibilityLabel).toBe("Desktop service is paused");
-  expect(host("sound-settings-button").props.onPress).toBeUndefined();
+  expect(host("eq-key").props.onPress).toBeUndefined();
+  expect(host("format-key").props.onPress).toBeUndefined();
   expect(store.deleteItemAsync).not.toHaveBeenCalled();
+});
+
+test("the four mixer keys open the sheets and the sound screens", async () => {
+  await renderApp();
+  await pairWith();
+  // The Sound menu and the home Disconnect are gone: keys go straight to each screen.
+  expect(exists("sound-settings-button")).toBe(false);
+  expect(exists("disconnect-button")).toBe(false);
+  await press("source-key");
+  expect(exists("source-sheet")).toBe(true);
+});
+
+test("the EQ key says Custom with an amber dot when any band is moved", async () => {
+  api.getEq.mockResolvedValue([0, 2, 0, 0, 0]);
+  await renderApp();
+  await pairWith();
+  expect(host("eq-key").props.accessibilityValue).toEqual({ text: "Custom" });
+  expect(exists("eq-key-indicator")).toBe(true);
+});
+
+test("the EQ key says Flat with no dot when every band is at 0 dB", async () => {
+  await renderApp();
+  await pairWith();
+  expect(host("eq-key").props.accessibilityValue).toEqual({ text: "Flat" });
+  expect(exists("eq-key-indicator")).toBe(false);
+});
+
+test("keys wrap into a 2 × 2 grid at the largest text size", async () => {
+  jest
+    .mocked(useWindowDimensions)
+    .mockReturnValue({ width: 390, height: 844, scale: 3, fontScale: 1.6 });
+  await renderApp();
+  await pairWith();
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+});
+
+test("keys share one row at the default text size", async () => {
+  await renderApp();
+  await pairWith();
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexGrow: 1, flexBasis: 0 });
 });
 
 test("unpaired AirPlay asks for the speaker code, then pairs and connects", async () => {
   await renderApp();
   await pairWith();
-  await press("output-row");
+  await press("speaker-key");
   await press("output-airplay-ap-locked");
   expect(exists("output-sheet")).toBe(false);
   expect(exists("pair-sheet")).toBe(true);
@@ -723,7 +761,7 @@ test("layouts: two panes when unfolded, compact rows in phone landscape", async 
   });
   ReactTestRenderer.act(() => tree?.update(<RootLayout />));
   expect(exists("mixer-landscape-layout")).toBe(true);
-  for (const id of ["source-row", "output-row", "volume-slider-native", "disconnect-button"]) {
+  for (const id of ["source-key", "speaker-key", "volume-slider-native", "eq-key", "format-key"]) {
     expect(exists(id)).toBe(true);
   }
 });
@@ -760,7 +798,6 @@ test("retro header: the sign stays unlit when ready and lights while live", asyn
   expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
   expect(host("mixer-sign").props.accessibilityLabel).toBe("on-air");
   expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#4a4136");
-  expect(exists("live-dot")).toBe(false);
 
   ReactTestRenderer.act(() => tree?.unmount());
   api.getActiveOutput.mockResolvedValue({
@@ -772,13 +809,11 @@ test("retro header: the sign stays unlit when ready and lights while live", asyn
   await renderApp(); // the saved pairing restores straight into the mixer
   expect(host("status-pill").props.accessibilityLabel).toBe("Audio is live");
   expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#ff3b2a");
-  expect(exists("live-dot")).toBe(true);
 });
 
-test("live state warms the active route row and makes the lamp glow; ready does neither", async () => {
+test("live state makes the lamp glow; ready does not", async () => {
   await renderApp();
   await pairWith();
-  expect(flat(host("output-row").props.style).backgroundColor).toBe("transparent");
   expect(flat(host("live-lamp").props.style).shadowOpacity).toBe(0);
 
   ReactTestRenderer.act(() => tree?.unmount());
@@ -789,7 +824,6 @@ test("live state warms the active route row and makes the lamp glow; ready does 
     state: "live",
   });
   await renderApp();
-  expect(flat(host("output-row").props.style).backgroundColor).toBe("#3a221c");
   expect(flat(host("live-lamp").props.style)).toMatchObject({
     shadowColor: "#ff3b2a",
     shadowOpacity: 0.6,
@@ -842,7 +876,7 @@ test("a firewall block keeps the live dot off, matching the header", async () =>
   await renderApp();
   await pairWith();
   expect(host("status-pill").props.accessibilityLabel).toBe("Firewall blocking audio");
-  expect(exists("live-dot")).toBe(false);
+  expect(flat(host("live-lamp").props.style).shadowOpacity).toBe(0);
 });
 
 test("volume shows on an LED readout that dims when the desktop is paused", async () => {

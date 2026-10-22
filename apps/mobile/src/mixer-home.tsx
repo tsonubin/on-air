@@ -7,133 +7,16 @@ import { NativeFader } from "./native-fader";
 import { colors, layout, radius, type } from "./theme";
 import { Card } from "./ui/card";
 import { FirewallNotice } from "./ui/firewall-notice";
-import { IconTile } from "./ui/icon-tile";
 import { icons } from "./ui/icons";
 import { LedReadout } from "./ui/led-readout";
 import { NativeIcon } from "./ui/native-icon";
 import { Notice } from "./ui/notice";
+import { PanelKey } from "./ui/panel-key";
 import { Sign } from "./ui/sign";
 
 /** Section caption ("Now streaming", "Playback"), like the desktop's SOURCE / DESTINATION. */
 function SectionLabel({ children }: { children: string }) {
   return <Text style={[type.label, { color: colors.tertiaryLabel }]}>{children}</Text>;
-}
-
-const ROW_PADDING = 18;
-const TILE = 58;
-const ARROW = 24;
-const ROW_GAP = 16;
-
-function RouteRow({
-  icon,
-  title,
-  subtitle,
-  accessibilityLabel,
-  accessibilityHint,
-  onPress,
-  testID,
-  dense = false,
-  live = false,
-}: {
-  icon: IconName;
-  title: string;
-  subtitle: string;
-  accessibilityLabel: string;
-  accessibilityHint: string;
-  onPress: () => void;
-  testID: string;
-  dense?: boolean;
-  /** Marks the row carrying live audio with the red lamp dot. */
-  live?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityHint={accessibilityHint}
-      onPress={onPress}
-      testID={testID}
-      style={({ pressed }) => ({
-        minHeight: dense ? 82 : 98,
-        paddingHorizontal: ROW_PADDING,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: ROW_GAP,
-        backgroundColor: pressed
-          ? colors.surfacePressed
-          : live
-            ? colors.selectedSurface
-            : "transparent",
-      })}
-    >
-      <IconTile name={icon} size="lg" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text
-            numberOfLines={1}
-            style={[type.title, { flexShrink: 1, color: colors.label, fontSize: 19 }]}
-          >
-            {title}
-          </Text>
-          {live ? (
-            <Text
-              testID="live-dot"
-              accessibilityElementsHidden
-              importantForAccessibility="no"
-              style={{ color: colors.accent, fontSize: 10 }}
-            >
-              ●
-            </Text>
-          ) : null}
-        </View>
-        <Text numberOfLines={1} style={[type.body, { color: colors.secondaryLabel }]}>
-          {subtitle}
-        </Text>
-      </View>
-      <NativeIcon name={icons.chevron} size={19} color={colors.tertiaryLabel} />
-    </Pressable>
-  );
-}
-
-/** The separator between the two route rows, with the arrow centred under the source tile. */
-function RouteDivider() {
-  const arrowInset = ROW_PADDING + TILE / 2 - ARROW / 2;
-  return (
-    <View
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{
-        height: ARROW,
-        marginVertical: -ARROW / 2,
-        zIndex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-      }}
-    >
-      <View
-        style={{
-          marginLeft: arrowInset,
-          width: ARROW,
-          height: ARROW,
-          borderRadius: ARROW / 2,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.surface,
-        }}
-      >
-        <NativeIcon name={icons.route} size={16} color={colors.amber} />
-      </View>
-      <View
-        style={{
-          flex: 1,
-          height: 1,
-          marginLeft: ROW_PADDING + TILE + ROW_GAP - arrowInset - ARROW,
-          backgroundColor: colors.separator,
-        }}
-      />
-    </View>
-  );
 }
 
 type HeaderStatus = { text: string; announcement: string; live: boolean };
@@ -314,11 +197,12 @@ export function MixerHome({
   volumeDisabled,
   soundDisabled,
   cd,
+  eqFlat,
   onChangeInput,
   onChangeOutput,
-  onOpenSound,
+  onOpenEqualizer,
+  onOpenFormat,
   onOpenMore,
-  onDisconnect,
   onVolumeChange,
   onCdPlayPause,
   onCdPrev,
@@ -335,32 +219,36 @@ export function MixerHome({
   volumeDisabled: boolean;
   soundDisabled: boolean;
   cd?: CdStatus | null;
+  /** Every EQ band sits at 0 dB. */
+  eqFlat: boolean;
   onChangeInput: () => void;
   onChangeOutput: () => void;
-  onOpenSound: () => void;
+  onOpenEqualizer: () => void;
+  onOpenFormat: () => void;
   onOpenMore: () => void;
-  onDisconnect: () => void;
   onVolumeChange: (value: number) => void;
   onCdPlayPause?: () => void;
   onCdPrev?: () => void;
   onCdNext?: () => void;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
   const compact = width < layout.compactBreakpoint;
   const wide = width >= layout.wideBreakpoint;
   const shortWide = wide && height < 600;
+  // The four keys share a row until large text or a narrow screen would crowd them.
+  const keyGrid = fontScale > 1.3 || width < 340;
+  const keyStyle = { flexGrow: 1, flexBasis: keyGrid ? "48%" : 0 } as const;
   const source = activeInput || "Choose a source";
   const output = activeOutput || "Choose a speaker";
-  const outputSubtitle = !activeOutput
-    ? "No speaker selected"
-    : outputPhase === "starting"
+  const speakerNote =
+    activeOutput && outputPhase === "starting"
       ? "Connecting…"
-      : outputPhase === "failed"
+      : activeOutput && outputPhase === "failed"
         ? "Speaker failed. Choose it again."
-        : "Selected speaker";
-  // What the header shows; a firewall block overrides live, and the route's
-  // live dot follows the header so the two never disagree.
+        : null;
+  // What the header shows; a firewall block overrides live, and the lamp
+  // follows the header so the two never disagree.
   const headerStatus: HeaderStatus = firewallWarning
     ? { text: "Audio blocked", announcement: "Firewall blocking audio", live: false }
     : status;
@@ -402,34 +290,6 @@ export function MixerHome({
               gap: shortWide ? 12 : wide ? 24 : compact ? 18 : 22,
             }}
           >
-            <View style={{ gap: 10 }}>
-              <SectionLabel>Now streaming</SectionLabel>
-              <Card>
-                <RouteRow
-                  icon={icons.monitor}
-                  title={source}
-                  subtitle="This Mac"
-                  accessibilityLabel={`Source: ${source}`}
-                  accessibilityHint="Choose what the desktop captures"
-                  onPress={onChangeInput}
-                  testID="source-row"
-                  dense={shortWide}
-                />
-                <RouteDivider />
-                <RouteRow
-                  icon={icons.speaker}
-                  title={output}
-                  subtitle={outputSubtitle}
-                  accessibilityLabel={`Speaker: ${output}`}
-                  accessibilityHint="Choose where the audio plays"
-                  onPress={onChangeOutput}
-                  testID="output-row"
-                  dense={shortWide}
-                  live={headerStatus.live}
-                />
-              </Card>
-            </View>
-
             {cd?.present ? (
               <CdDeck
                 status={cd}
@@ -458,13 +318,13 @@ export function MixerHome({
                   shadowColor: colors.accent,
                   shadowOffset: { width: 0, height: 0 },
                   shadowRadius: 12,
-                  shadowOpacity: status.live ? 0.6 : 0,
+                  shadowOpacity: headerStatus.live ? 0.6 : 0,
                 }}
               >
                 <NativeIcon
                   name={icons.live}
                   size={shortWide ? 52 : compact ? 58 : 68}
-                  color={status.live ? colors.accent : colors.liveDim}
+                  color={headerStatus.live ? colors.accent : colors.liveDim}
                 />
               </View>
               <View style={{ flexShrink: 1, gap: 5 }}>
@@ -474,6 +334,9 @@ export function MixerHome({
                 <Text numberOfLines={2} style={[type.body, { color: colors.secondaryLabel }]}>
                   {`${source} → ${output}`}
                 </Text>
+                {speakerNote ? (
+                  <Text style={[type.body, { color: colors.secondaryLabel }]}>{speakerNote}</Text>
+                ) : null}
               </View>
             </View>
           </View>
@@ -531,51 +394,40 @@ export function MixerHome({
               </View>
             </Card>
 
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Sound settings"
-              accessibilityState={{ disabled: soundDisabled }}
-              onPress={onOpenSound}
-              disabled={soundDisabled}
-              testID="sound-settings-button"
-              style={({ pressed }) => ({
-                minHeight: 68,
-                paddingHorizontal: 18,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 16,
-                borderRadius: radius.lg,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: colors.border,
-                borderTopColor: colors.borderStrong,
-                backgroundColor: pressed ? colors.surfacePressed : colors.surface,
-                opacity: soundDisabled ? 0.5 : 1,
-              })}
-            >
-              <NativeIcon name={icons.tune} size={28} />
-              <Text style={[type.body, { flex: 1, color: colors.label, fontSize: 17 }]}>
-                Sound settings
-              </Text>
-              <NativeIcon name={icons.chevron} size={19} color={colors.tertiaryLabel} />
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Disconnect remote"
-              onPress={onDisconnect}
-              testID="disconnect-button"
-              style={({ pressed }) => ({
-                minHeight: 48,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: pressed ? 0.65 : 1,
-              })}
-            >
-              <Text style={[type.label, { color: colors.onError, fontSize: 12 }]}>
-                Disconnect remote
-              </Text>
-            </Pressable>
+            <View testID="mixer-keys" style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <PanelKey
+                label="Source"
+                accessibilityHint="Choose what the desktop captures"
+                onPress={onChangeInput}
+                style={keyStyle}
+                testID="source-key"
+              />
+              <PanelKey
+                label="Speaker"
+                accessibilityHint="Choose where the audio plays"
+                onPress={onChangeOutput}
+                style={keyStyle}
+                testID="speaker-key"
+              />
+              <PanelKey
+                label="EQ"
+                accessibilityLabel="Equalizer"
+                accessibilityValue={{ text: eqFlat ? "Flat" : "Custom" }}
+                indicator={!eqFlat}
+                disabled={soundDisabled}
+                onPress={onOpenEqualizer}
+                style={keyStyle}
+                testID="eq-key"
+              />
+              <PanelKey
+                label="Format"
+                accessibilityLabel="Audio format"
+                disabled={soundDisabled}
+                onPress={onOpenFormat}
+                style={keyStyle}
+                testID="format-key"
+              />
+            </View>
           </View>
         </View>
       </ScrollView>
