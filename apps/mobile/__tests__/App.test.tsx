@@ -161,6 +161,15 @@ function exists(id: string): boolean {
   );
 }
 
+/** Moves a fader by one accessibility step, as VoiceOver's swipe up / down does. */
+function stepFader(id: string, action: "increment" | "decrement", times = 1) {
+  for (let i = 0; i < times; i += 1) {
+    ReactTestRenderer.act(() =>
+      host(id).props.onAccessibilityAction({ nativeEvent: { actionName: action } }),
+    );
+  }
+}
+
 /** The first sentence of the LED window's summary: what the status pill used to announce. */
 const announced = () => (host("led-window").props.accessibilityLabel as string).split(". ")[0];
 
@@ -250,7 +259,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   expect(text()).toContain("Choose a speaker");
   expect(announced()).toBe("Status: Ready");
   expect(FakeSocket.last?.url).toBe(`ws://192.168.5.14:47990/api/ws?token=${TOKEN}`);
-  expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
+  expect(host("volume-slider").props.accessibilityState).toEqual({ disabled: true });
 
   // Choose a source.
   await press("source-key");
@@ -289,12 +298,12 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
 
   // Volume commits after the drag pauses.
   jest.useFakeTimers();
-  ReactTestRenderer.act(() => host("volume-slider-native").props.onValueChange(73));
+  stepFader("volume-slider", "increment");
   expect(api.setVolume).not.toHaveBeenCalled();
   await ReactTestRenderer.act(async () => {
     jest.advanceTimersByTime(180);
   });
-  expect(api.setVolume).toHaveBeenCalledWith(BASE, 73, TOKEN);
+  expect(api.setVolume).toHaveBeenCalledWith(BASE, 55, TOKEN);
 
   // Equalizer, straight from its key: two quick band edits keep both values and serialise.
   await press("eq-key");
@@ -359,15 +368,15 @@ test("a failed volume write rolls the readout back to what the desktop holds", a
     new client.HttpError("/api/outputs/volume", 502, '{"error":"","code":"transport_unreachable"}'),
   );
   jest.useFakeTimers();
-  ReactTestRenderer.act(() => host("volume-slider-native").props.onValueChange(73));
+  stepFader("volume-slider", "increment");
   await ReactTestRenderer.act(async () => {
     jest.advanceTimersByTime(180);
   });
   jest.useRealTimers();
   await flush();
-  expect(api.setVolume).toHaveBeenCalledWith(BASE, 73, TOKEN);
+  expect(api.setVolume).toHaveBeenCalledWith(BASE, 55, TOKEN);
   expect(numbersShown()).toContain(50);
-  expect(numbersShown()).not.toContain(73);
+  expect(numbersShown()).not.toContain(55);
   expect(text()).toContain("speaker did not answer");
   // Errors read as plain faceplate text under the window, with no box.
   const notice = flat(host("mixer-error").props.style);
@@ -385,7 +394,7 @@ test("a speaker that is still starting is not shown as live; a failed one can be
   await renderApp();
   await pairWith();
   expect(announced()).toBe("Status: Connecting speaker");
-  expect(host("volume-slider-native").props.onValueChange).toBeUndefined();
+  expect(host("volume-slider").props.accessibilityState).toEqual({ disabled: true });
   expect(host("led-status").props.children).toBe("CONNECTING");
 
   api.getActiveOutput.mockResolvedValue({
@@ -660,6 +669,19 @@ test("a paused desktop keeps its pairing and disables sound settings", async () 
   expect(store.deleteItemAsync).not.toHaveBeenCalled();
 });
 
+test("the mixer is one faceplate: no bordered boxes anywhere on home", async () => {
+  await renderApp();
+  await pairWith();
+  const boxes = host("mixer-screen").findAll(
+    (n) =>
+      ["View", "Pressable"].includes(n.type as string) &&
+      Number(flat(n.props.style).borderWidth ?? 0) > 0,
+  );
+  // The ONAIR sign is a lamp housing, not a group box; it is the only bordered shape left.
+  expect(boxes.map((b) => b.props.testID)).toEqual(["mixer-sign"]);
+  expect(exists("faceplate-finish")).toBe(true);
+});
+
 test("the LED window's format corner shows the output sample rate", async () => {
   await renderApp();
   await pairWith();
@@ -747,9 +769,8 @@ test("compact disc transport applies the returned state", async () => {
   expect(text()).toContain("So What");
   // Transport buttons are faceplate keys, like the desktop's.
   expect(flat(host("cd-play").props.style)).toMatchObject({
-    backgroundColor: "#221f1a",
-    borderColor: "#3a342a",
-    borderWidth: 1,
+    backgroundColor: "#1d1a15",
+    experimental_backgroundImage: "linear-gradient(180deg, #2a261f, #1d1a15)",
   });
   await press("cd-next");
   expect(api.controlCd).toHaveBeenCalledWith(BASE, "next", TOKEN);
@@ -776,7 +797,7 @@ test("layouts: two panes when unfolded, compact rows in phone landscape", async 
   });
   ReactTestRenderer.act(() => tree?.update(<RootLayout />));
   expect(exists("mixer-landscape-layout")).toBe(true);
-  for (const id of ["source-key", "speaker-key", "volume-slider-native", "eq-key", "format-key"]) {
+  for (const id of ["source-key", "speaker-key", "volume-slider", "eq-key", "format-key"]) {
     expect(exists(id)).toBe(true);
   }
 });
