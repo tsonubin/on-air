@@ -1,25 +1,11 @@
 import { Text, View } from "react-native";
-import { colors, radius } from "@/theme";
+import { colors, type } from "@/theme";
 
-/** An inline alert on the error surface. */
+/** An inline alert printed on the faceplate under the LED window: soft red text, no box. */
 export function Notice({ message, testID }: { message: string; testID?: string }) {
   return (
-    <View
-      testID={testID}
-      style={{
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        borderRadius: radius.md,
-        borderCurve: "continuous",
-        backgroundColor: colors.errorSurface,
-        borderWidth: 1,
-        borderColor: colors.errorBorder,
-      }}
-    >
-      <Text
-        accessibilityRole="alert"
-        style={{ color: colors.onError, fontSize: 15, lineHeight: 20 }}
-      >
+    <View testID={testID} style={{ paddingHorizontal: 2 }}>
+      <Text accessibilityRole="alert" style={[type.body, { color: colors.onError }]}>
         {message}
       </Text>
     </View>

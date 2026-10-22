@@ -1,58 +1,77 @@
-import { FieldGroup } from "@expo/ui";
 import { Stack } from "expo-router/stack";
-import { NativeFader } from "@/native-fader";
+import { Platform, Pressable, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { EqPanel } from "@/eq-panel";
 import { useRemoteSession } from "@/remote-session";
-import { SettingsForm, sectionModifiers } from "@/settings-form";
-import { FormText, sectionTitle } from "@/ui/form-text";
+import { colors, layout, type } from "@/theme";
+import { Faceplate } from "@/ui/faceplate";
 
-const bands = [
-  { label: "Bass · 60 Hz", spoken: "Bass, 60 hertz" },
-  { label: "Warmth · 250 Hz", spoken: "Warmth, 250 hertz" },
-  { label: "Midrange · 1 kHz", spoken: "Midrange, 1 kilohertz" },
-  { label: "Presence · 4 kHz", spoken: "Presence, 4 kilohertz" },
-  { label: "Air · 12 kHz", spoken: "Air, 12 kilohertz" },
-];
+/** Android's header Reset: an amber key caption, dimmed while there is nothing to reset. */
+function HeaderReset({ disabled, onPress }: { disabled: boolean; onPress: () => void }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Reset equalizer"
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      testID="eq-reset"
+      style={({ pressed }) => ({
+        minHeight: layout.minTarget,
+        justifyContent: "center",
+        opacity: pressed ? 0.65 : 1,
+      })}
+    >
+      <Text
+        style={[
+          type.label,
+          { fontSize: 13, color: disabled ? colors.tertiaryLabel : colors.amber },
+        ]}
+      >
+        Reset
+      </Text>
+    </Pressable>
+  );
+}
 
 export default function EqualizerScreen() {
   const { gains, changeBand, applyEq, view } = useRemoteSession();
-  const flat = gains.every((g) => g === 0);
+  const insets = useSafeAreaInsets();
+  const resetDisabled = gains.every((g) => g === 0) || !view.controlsEnabled;
+  const reset = () => applyEq([0, 0, 0, 0, 0]);
   return (
     <>
-      <SettingsForm testID="equalizer-screen">
-        <FieldGroup.Section modifiers={sectionModifiers}>
-          {sectionTitle("Five-band equalizer")}
-          {gains.map((gain, index) => (
-            <NativeFader
-              key={bands[index].label}
-              label={bands[index].label}
-              accessibilityLabel={bands[index].spoken}
-              value={gain}
-              min={-12}
-              max={12}
-              step={0.5}
-              unit="dB"
-              signed
-              testId={`eq-band-${index}`}
-              disabled={!view.controlsEnabled}
-              onChange={(value) => changeBand(index, value)}
-            />
-          ))}
-          <FieldGroup.SectionFooter>
-            <FormText variant="footnote">
-              Move left to reduce a band, or right to boost it. 0 dB leaves the sound unchanged.
-              Changes are applied as you adjust.
-            </FormText>
-          </FieldGroup.SectionFooter>
-        </FieldGroup.Section>
-      </SettingsForm>
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button
-          disabled={flat || !view.controlsEnabled}
-          onPress={() => applyEq([0, 0, 0, 0, 0])}
+      <Faceplate testID="equalizer-screen">
+        {/* The native header covers the top; in landscape the sides clear the sensor housing. */}
+        <View
+          testID="equalizer-body"
+          style={{
+            flex: 1,
+            paddingLeft: Math.max(insets.left, 16),
+            paddingRight: Math.max(insets.right, 16),
+            paddingTop: 16,
+            paddingBottom: Math.max(insets.bottom, 16),
+          }}
         >
-          Reset
-        </Stack.Toolbar.Button>
-      </Stack.Toolbar>
+          <EqPanel
+            gains={gains}
+            disabled={!view.controlsEnabled}
+            onChangeBand={(index, value) => changeBand(index, value)}
+          />
+        </View>
+      </Faceplate>
+      {Platform.OS === "android" ? (
+        // Android's toolbar buttons draw only an image icon, so Reset is a header caption there.
+        <Stack.Screen
+          options={{ headerRight: () => <HeaderReset disabled={resetDisabled} onPress={reset} /> }}
+        />
+      ) : (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button disabled={resetDisabled} onPress={reset}>
+            Reset
+          </Stack.Toolbar.Button>
+        </Stack.Toolbar>
+      )}
     </>
   );
 }

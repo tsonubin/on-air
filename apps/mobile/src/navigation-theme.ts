@@ -8,7 +8,8 @@ export const navigationTheme = {
   colors: {
     ...DarkTheme.colors,
     background: colors.background,
-    card: colors.surface,
+    // The header starts where the faceplate gradient does, so the two read as one plate.
+    card: colors.faceTop,
     text: colors.label,
     border: colors.separator,
     primary: colors.amber,
@@ -17,27 +18,22 @@ export const navigationTheme = {
 };
 
 /**
- * A screen's header shows its title as an uppercase caption. iOS builds a back
- * button's label from the previous screen's `headerTitle`, so a screen pushed
- * from another titled screen names its back button in plain case.
+ * A screen's header shows its title as an uppercase caption. Every screen is
+ * pushed straight from the Mixer, whose plain `title` iOS uses as the back label.
  */
-export function titledScreen(title: string, backTitle?: string) {
-  return {
-    title,
-    headerTitle: title.toUpperCase(),
-    ...(backTitle ? { headerBackTitle: backTitle } : {}),
-  };
+export function titledScreen(title: string) {
+  return { title, headerTitle: title.toUpperCase() };
 }
 
 /** The pushed screens, in stack order. Mixer (index) has no header. */
 export const stackScreens = [
-  { name: "sound", options: titledScreen("Sound") },
-  { name: "equalizer", options: titledScreen("Equalizer", "Sound") },
-  { name: "audio-format", options: titledScreen("Audio format", "Sound") },
+  { name: "equalizer", options: titledScreen("Equalizer") },
+  { name: "audio-format", options: titledScreen("Audio format") },
   { name: "connection", options: titledScreen("Connection") },
 ] as const;
 
 export const screenHeaderOptions = {
   headerTintColor: colors.amber,
   headerTitleStyle: { fontFamily: fonts.monoMedium, color: colors.label },
+  headerShadowVisible: false,
 };

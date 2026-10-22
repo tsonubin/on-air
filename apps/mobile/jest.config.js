@@ -22,7 +22,7 @@ module.exports = {
     "^@expo/material-symbols/.*\\.xml$": "<rootDir>/__mocks__/material-symbol.js",
     "^expo-status-bar$": "<rootDir>/__mocks__/expo-status-bar.js",
     "^expo-font$": "<rootDir>/__mocks__/expo-font.js",
-    "\\.(ttf|otf)$": "<rootDir>/__mocks__/file.js",
+    "\\.(ttf|otf|png)$": "<rootDir>/__mocks__/file.js",
     "^react-native-safe-area-context$": "<rootDir>/__mocks__/safe-area-context.js",
   },
 };

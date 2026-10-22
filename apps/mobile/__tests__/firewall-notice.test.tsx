@@ -14,6 +14,10 @@ test("remote firewall help explains host authorization and exposes selectable re
     />,
   );
   expect(view.UNSAFE_queryAllByProps({ testID: "firewall-command" })).toHaveLength(0);
+  // Plain faceplate text: no red box around the warning.
+  const box = view.UNSAFE_getByProps({ testID: "firewall-warning" }).props.style;
+  expect(box.backgroundColor).toBeUndefined();
+  expect(box.borderWidth).toBeUndefined();
   act(() => view.UNSAFE_getByProps({ label: "Firewall help" }).props.onPress());
   const text = view.UNSAFE_getByProps({ testID: "firewall-command" });
   expect(text.props.selectable).toBe(true);

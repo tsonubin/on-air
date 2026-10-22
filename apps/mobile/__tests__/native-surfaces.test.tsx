@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { Platform } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import {
   navigationTheme,
@@ -12,8 +13,6 @@ import { FormText } from "@/ui/form-text";
 import { NativeIcon } from "@/ui/native-icon";
 import AudioFormatScreen from "../app/audio-format";
 import ConnectionScreen from "../app/connection";
-import EqualizerScreen from "../app/equalizer";
-import SoundScreen from "../app/sound";
 
 jest.mock("@/remote-session", () => ({
   useRemoteSession: () => ({
@@ -54,7 +53,7 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
   expect(navigationTheme.dark).toBe(true);
   expect(navigationTheme.colors).toMatchObject({
     background: "#0a0908",
-    card: "#1a1814",
+    card: "#1f1b16",
     text: "#f3ead4",
     border: "#2e2a24",
     primary: "#e0a24b",
@@ -63,6 +62,7 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
   expect(screenHeaderOptions).toMatchObject({
     headerTintColor: "#e0a24b",
     headerTitleStyle: { fontFamily: "IBMPlexMono-Medium", color: "#f3ead4" },
+    headerShadowVisible: false,
   });
 });
 
@@ -71,17 +71,13 @@ test("native header titles are uppercase captions; back buttons keep the plain t
     title: "Audio format",
     headerTitle: "AUDIO FORMAT",
   });
-  // iOS builds the back label from the previous screen's headerTitle, so a
-  // screen pushed from Sound names its back button explicitly.
-  expect(titledScreen("Equalizer", "Sound")).toEqual({
-    title: "Equalizer",
-    headerTitle: "EQUALIZER",
-    headerBackTitle: "Sound",
-  });
+  // Every screen is pushed straight from the Mixer, whose plain title becomes
+  // the back label; the Sound menu and its "Sound" back labels are gone.
   const byName = Object.fromEntries(stackScreens.map((s) => [s.name, s.options]));
-  expect(byName.equalizer.headerBackTitle).toBe("Sound");
-  expect(byName["audio-format"].headerBackTitle).toBe("Sound");
-  expect(Object.keys(byName)).toEqual(["sound", "equalizer", "audio-format", "connection"]);
+  expect(Object.keys(byName)).toEqual(["equalizer", "audio-format", "connection"]);
+  for (const options of Object.values(byName)) {
+    expect(options).not.toHaveProperty("headerBackTitle");
+  }
 });
 
 test("sheets are faceplate-backed and amber-tinted on iOS", () => {
@@ -93,15 +89,33 @@ test("sheets are faceplate-backed and amber-tinted on iOS", () => {
   );
 });
 
-test("settings forms hide the system background and seed amber", () => {
+test("settings forms sit on the satin faceplate, clear of the system background", () => {
   const r = create(<SettingsForm testID="f">{null}</SettingsForm>);
-  expect(hosts(r, "ExpoHost")[0].props.seedColor).toBe("#e0a24b");
+  const host = hosts(r, "ExpoHost")[0];
+  expect(host.props.seedColor).toBe("#e0a24b");
+  expect(host.props.style).toMatchObject({ backgroundColor: "transparent" });
   expect(hosts(r, "ExpoFieldGroup")[0].props.modifiers).toEqual(
     expect.arrayContaining([
       { $type: "scrollContentBackground", visible: "hidden" },
-      { $type: "background", color: "#0a0908" },
+      { $type: "background", color: "transparent" },
     ]),
   );
+  expect(
+    r.root.findAll((n) => n.props.testID === "faceplate-finish" && typeof n.type === "string"),
+  ).toHaveLength(1);
+});
+
+test("Android settings forms clear Compose's own surface so the faceplate shows", () => {
+  const original = Platform.OS;
+  (Platform as { OS: string }).OS = "android";
+  try {
+    const r = create(<SettingsForm testID="f">{null}</SettingsForm>);
+    expect(hosts(r, "ExpoFieldGroup")[0].props.style).toMatchObject({
+      backgroundColor: "transparent",
+    });
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
 });
 
 test("form text uses the vendored families and uppercases labels", () => {
@@ -127,26 +141,28 @@ test("form text uses the vendored families and uppercases labels", () => {
 });
 
 test("settings sections sit on faceplate rows under mono section titles", () => {
-  const r = create(<SoundScreen />);
+  const r = create(<AudioFormatScreen />);
   const sections = hosts(r, "ExpoFieldSection");
   expect(sections.length).toBeGreaterThan(0);
   for (const section of sections) {
-    expect(section.props.modifiers).toEqual([{ $type: "listRowBackground", color: "#1a1814" }]);
+    expect(section.props.modifiers).toEqual([
+      { $type: "listRowBackground", color: "rgba(42,38,31,0.55)" },
+    ]);
   }
   const headers = hosts(r, "ExpoFieldSectionHeader").map(
     (h) => h.findAll((n) => isHost(n, "ExpoText"))[0].props.children,
   );
-  expect(headers).toEqual(["TONE", "ADVANCED"]);
+  expect(headers).toEqual(["SAMPLE RATE", "AUDIO PERFORMANCE"]);
   // The caption must fill the header slot, not become a stray first row.
   const rowTexts = hosts(r, "ExpoFieldSectionRows").flatMap((rows) =>
     rows.findAll((n) => isHost(n, "ExpoText")).map((t) => t.props.children),
   );
-  expect(rowTexts).not.toContain("TONE");
-  expect(rowTexts).not.toContain("ADVANCED");
+  expect(rowTexts).not.toContain("SAMPLE RATE");
+  expect(rowTexts).not.toContain("AUDIO PERFORMANCE");
 });
 
 test("every settings screen puts its section captions in the header slot", () => {
-  for (const Screen of [EqualizerScreen, AudioFormatScreen, ConnectionScreen]) {
+  for (const Screen of [AudioFormatScreen, ConnectionScreen]) {
     const r = create(<Screen />);
     const sections = hosts(r, "ExpoFieldSection");
     const titled = sections.filter(
