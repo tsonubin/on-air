@@ -13,6 +13,10 @@ Notable changes to on-air. The format follows
 
 ### Changed
 
+- Phone remote: the mixer is one LED faceplate, with a display window for
+  the source, speaker and status, a fader for volume, keys for source,
+  speaker, EQ and format, and five vertical EQ faders. The Sound menu is
+  gone; the EQ and format screens open straight from their keys.
 - Repository reorganised for contributors: design records live in
   `docs/design`, the domain glossary in `docs/glossary.md`; added
   `CONTRIBUTING.md`, `SECURITY.md` and this changelog.
