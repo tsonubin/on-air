@@ -8,7 +8,8 @@ export const navigationTheme = {
   colors: {
     ...DarkTheme.colors,
     background: colors.background,
-    card: colors.surface,
+    // The header starts where the faceplate gradient does, so the two read as one plate.
+    card: colors.faceTop,
     text: colors.label,
     border: colors.separator,
     primary: colors.amber,
@@ -40,4 +41,5 @@ export const stackScreens = [
 export const screenHeaderOptions = {
   headerTintColor: colors.amber,
   headerTitleStyle: { fontFamily: fonts.monoMedium, color: colors.label },
+  headerShadowVisible: false,
 };

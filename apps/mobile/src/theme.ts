@@ -4,7 +4,7 @@ import type { TextStyle } from "react-native";
  * The app is dark-only (`app.json` sets `userInterfaceStyle: "dark"`), and its
  * palette mirrors the desktop tray app's tokens in `apps/desktop/src/App.css`:
  * warm faceplates, cream ink, amber values and controls. Red is reserved for
- * the live state (the lit sign, the lamp, the LIVE status, the active route).
+ * the live state (the lit sign and the lamp); standby is warm brown-gray.
  */
 export const colors = {
   background: "#0a0908",
@@ -21,7 +21,7 @@ export const colors = {
   tertiaryLabel: "#9a8f78",
   accent: "#ff3b2a",
   onAccent: "#ffffff",
-  liveDim: "#6a2a22",
+  liveDim: "#3a332a",
   amber: "#e0a24b",
   amberBright: "#f0c56a",
   key: "#5c4a32",
@@ -31,12 +31,25 @@ export const colors = {
   signLitText: "#ff3b2a",
   signLitWell: "#1a0605",
   signLitLine: "#8a3a30",
-  signOffText: "#5a1814",
+  signOffText: "#4a4136",
   signOffWell: "#0e0c0a",
   disabled: "#5b5246",
   errorSurface: "#3a1410",
   errorBorder: "#6a2a22",
   onError: "#f0b4ac",
+  // Satin anodized faceplate (finish A): gradient, top highlight, translucent form rows.
+  faceTop: "#1f1b16",
+  faceBottom: "#16130f",
+  faceHighlight: "rgba(255,236,200,0.07)",
+  faceRow: "rgba(42,38,31,0.55)",
+  // Engraved grooves, beveled keys and the metal fader caps.
+  grooveDark: "#0d0b09",
+  grooveLight: "rgba(255,236,200,0.06)",
+  keyTop: "#2a261f",
+  keyBottom: "#1d1a15",
+  keyHighlight: "rgba(255,236,200,0.08)",
+  capTop: "#8a8174",
+  capBottom: "#4e473d",
 } as const;
 
 /**

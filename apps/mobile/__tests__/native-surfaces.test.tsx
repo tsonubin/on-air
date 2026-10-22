@@ -54,7 +54,7 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
   expect(navigationTheme.dark).toBe(true);
   expect(navigationTheme.colors).toMatchObject({
     background: "#0a0908",
-    card: "#1a1814",
+    card: "#1f1b16",
     text: "#f3ead4",
     border: "#2e2a24",
     primary: "#e0a24b",
@@ -63,6 +63,7 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
   expect(screenHeaderOptions).toMatchObject({
     headerTintColor: "#e0a24b",
     headerTitleStyle: { fontFamily: "IBMPlexMono-Medium", color: "#f3ead4" },
+    headerShadowVisible: false,
   });
 });
 

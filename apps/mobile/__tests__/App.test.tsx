@@ -759,7 +759,7 @@ test("retro header: the sign stays unlit when ready and lights while live", asyn
   await pairWith();
   expect(host("status-pill").props.accessibilityLabel).toBe("Status: Ready");
   expect(host("mixer-sign").props.accessibilityLabel).toBe("on-air");
-  expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#5a1814");
+  expect(flat(textsIn(host("mixer-sign"))[0].props.style).color).toBe("#4a4136");
   expect(exists("live-dot")).toBe(false);
 
   ReactTestRenderer.act(() => tree?.unmount());
@@ -877,7 +877,7 @@ test("volume shows on an LED readout that dims when the desktop is paused", asyn
 test("pairing: unlit sign, LED code field and an amber Connect key", async () => {
   await renderApp();
   expect(host("remote-title").props.accessibilityLabel).toBe("on-air");
-  expect(flat(textsIn(host("remote-title"))[0].props.style).color).toBe("#5a1814");
+  expect(flat(textsIn(host("remote-title"))[0].props.style).color).toBe("#4a4136");
   expect(text()).toContain("Pair your Mac");
 
   const pin = host("pin-input");

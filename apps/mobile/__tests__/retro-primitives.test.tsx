@@ -44,7 +44,7 @@ test("the sign is named on-air and lights only when live", () => {
 
   const unlit = create(<Sign lit={false} testID="s" />);
   expect(flat(textWith(unlit, "ONAIR").props.style)).toMatchObject({
-    color: "#5a1814",
+    color: "#4a4136",
     textShadowRadius: 0,
   });
   expect(flat(hostById(unlit, "s").props.style)).toMatchObject({ backgroundColor: "#0e0c0a" });
