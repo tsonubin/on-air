@@ -307,17 +307,15 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
 
   // Equalizer, straight from its key: two quick band edits keep both values and serialise.
   await press("eq-key");
-  expect(text()).toContain("Bass · 60 Hz");
-  ReactTestRenderer.act(() => {
-    host("eq-band-0-native").props.onValueChange(0.5);
-    host("eq-band-1-native").props.onValueChange(1);
-  });
+  expect(host("eq-band-0").props.accessibilityLabel).toBe("Bass, 60 hertz");
+  stepFader("eq-band-0", "increment");
+  stepFader("eq-band-1", "increment", 2);
   await ReactTestRenderer.act(async () => {
     jest.advanceTimersByTime(180);
   });
   jest.useRealTimers();
   await flush();
-  expect(api.setEq).toHaveBeenLastCalledWith(BASE, [0.5, 1, 0, 0, 0], TOKEN);
+  expect(api.setEq).toHaveBeenLastCalledWith(BASE, [1, 2, 0, 0, 0], TOKEN);
 
   // Audio format, from its own key on the mixer.
   ReactTestRenderer.act(() => expoRouter.router.back());

@@ -12,7 +12,6 @@ import { FormText } from "@/ui/form-text";
 import { NativeIcon } from "@/ui/native-icon";
 import AudioFormatScreen from "../app/audio-format";
 import ConnectionScreen from "../app/connection";
-import EqualizerScreen from "../app/equalizer";
 
 jest.mock("@/remote-session", () => ({
   useRemoteSession: () => ({
@@ -142,7 +141,7 @@ test("settings sections sit on faceplate rows under mono section titles", () => 
 });
 
 test("every settings screen puts its section captions in the header slot", () => {
-  for (const Screen of [EqualizerScreen, AudioFormatScreen, ConnectionScreen]) {
+  for (const Screen of [AudioFormatScreen, ConnectionScreen]) {
     const r = create(<Screen />);
     const sections = hosts(r, "ExpoFieldSection");
     const titled = sections.filter(
