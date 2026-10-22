@@ -1,4 +1,41 @@
-import { deriveUiState, describeUiState } from "@/ui-state";
+import { deriveUiState, describeUiState, homeStatus, type UiState } from "@/ui-state";
+
+test("home status: the LED word, announcement and lamp for every state", () => {
+  const s = (uiState: UiState, extra: Partial<Parameters<typeof homeStatus>[0]> = {}) =>
+    homeStatus({ uiState, firewallBlocked: false, ...extra });
+  expect(s("live", { firewallBlocked: true })).toEqual({
+    word: "BLOCKED",
+    announcement: "Firewall blocking audio",
+    live: false,
+  });
+  expect(s("live")).toEqual({ word: "ON AIR", announcement: "Audio is live", live: true });
+  expect(s("starting")).toEqual({
+    word: "CONNECTING",
+    announcement: "Status: Connecting speaker",
+    live: false,
+  });
+  expect(s("connecting")).toEqual({
+    word: "CONNECTING",
+    announcement: "Status: Connecting",
+    live: false,
+  });
+  expect(s("reconnecting")).toEqual({
+    word: "RECONNECT",
+    announcement: "Status: Reconnecting",
+    live: false,
+  });
+  expect(s("paused")).toEqual({
+    word: "PAUSED",
+    announcement: "Desktop service is paused",
+    live: false,
+  });
+  expect(s("ready", { outputPhase: "failed" })).toEqual({
+    word: "FAILED",
+    announcement: "Status: Speaker failed",
+    live: false,
+  });
+  expect(s("ready")).toEqual({ word: "STANDBY", announcement: "Status: Ready", live: false });
+});
 
 test("derives one state from hydration, pairing, phase and casting", () => {
   const base = { hydrated: true, paired: true, phase: "connected" as const, output: null };
