@@ -7,7 +7,11 @@ import type { HomeStatus } from "./ui-state";
 
 /** A silkscreened caption printed inside the window. */
 function Caption({ children }: { children: string }) {
-  return <Text style={[type.label, { color: colors.tertiaryLabel }]}>{children}</Text>;
+  return (
+    <Text maxFontSizeMultiplier={1.3} style={[type.label, { color: colors.tertiaryLabel }]}>
+      {children}
+    </Text>
+  );
 }
 
 /**

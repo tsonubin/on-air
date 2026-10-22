@@ -105,7 +105,14 @@ export function PanelKey({
       {indicator ? (
         <View
           testID={`${testID}-indicator`}
-          style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.amber }}
+          style={{
+            position: "absolute",
+            top: 10,
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: colors.amber,
+          }}
         />
       ) : null}
       {busy ? (

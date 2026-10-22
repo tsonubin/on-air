@@ -195,6 +195,9 @@ export function Fader(props: FaderProps) {
               borderRadius: radius.sm,
               experimental_backgroundImage: `linear-gradient(180deg, ${colors.capTop}, ${colors.capBottom})`,
               boxShadow: "0 2px 3px rgba(0,0,0,0.6)",
+              // The index line stretches along the cross axis, so the cap lays out
+              // across the travel: a row for a horizontal fader, a column for a vertical one.
+              flexDirection: horizontal ? "row" : "column",
               alignItems: "center",
               justifyContent: "center",
             },
@@ -203,6 +206,7 @@ export function Fader(props: FaderProps) {
           ]}
         >
           <View
+            testID={`${testID}-cap-line`}
             style={
               horizontal
                 ? {

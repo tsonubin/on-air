@@ -68,6 +68,9 @@ test("the indicator is an amber dot", () => {
     width: 6,
     height: 6,
     backgroundColor: "#e0a24b",
+    // Pinned above the caption, so a key with a dot keeps its caption in line with the others.
+    position: "absolute",
+    top: 10,
   });
   expect(
     exists(create(<PanelKey label="EQ" onPress={jest.fn()} testID="k" />), "k-indicator"),

@@ -55,7 +55,9 @@ export function EqPanel({
       <LedWindow
         style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
       >
-        <Text style={caption}>Curve</Text>
+        <Text maxFontSizeMultiplier={1.3} style={caption}>
+          Curve
+        </Text>
         <LedText size={18} testID="eq-curve">
           {flat ? "FLAT" : "CUSTOM"}
         </LedText>
@@ -77,7 +79,7 @@ export function EqPanel({
           }}
         >
           {["+12", "+6", "0", "−6", "−12"].map((mark) => (
-            <Text key={mark} style={caption}>
+            <Text key={mark} maxFontSizeMultiplier={1.3} style={caption}>
               {mark}
             </Text>
           ))}

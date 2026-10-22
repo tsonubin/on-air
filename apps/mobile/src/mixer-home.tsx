@@ -123,6 +123,7 @@ function Scale({ marks }: { marks: string[] }) {
           key={mark}
           accessibilityElementsHidden
           importantForAccessibility="no"
+          maxFontSizeMultiplier={1.3}
           style={[type.label, { color: colors.tertiaryLabel }]}
         >
           {mark}
@@ -256,7 +257,12 @@ export function MixerHome({
                   justifyContent: "space-between",
                 }}
               >
-                <Text style={[type.label, { color: colors.tertiaryLabel }]}>Volume</Text>
+                <Text
+                  maxFontSizeMultiplier={1.3}
+                  style={[type.label, { color: colors.tertiaryLabel }]}
+                >
+                  Volume
+                </Text>
                 <LedReadout
                   value={String(Math.round(volume))}
                   digits={3}

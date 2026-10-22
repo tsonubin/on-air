@@ -934,6 +934,23 @@ test("a firewall block keeps the live dot off, matching the header", async () =>
   expect(warning.borderWidth).toBeUndefined();
 });
 
+test("the volume caption and printed scale cap text scaling", async () => {
+  await renderApp();
+  await pairWith();
+  const printed = host("mixer-screen").findAll(
+    (n) =>
+      (n.type as unknown) === "Text" &&
+      ["Volume", "0", "50", "100"].includes(n.props.children as string) &&
+      n.props.accessibilityElementsHidden !== undefined,
+  );
+  const caption = host("mixer-screen").find(
+    (n) => (n.type as unknown) === "Text" && n.props.children === "Volume",
+  );
+  expect(caption.props.maxFontSizeMultiplier).toBe(1.3);
+  expect(printed.length).toBe(3); // the three scale marks
+  for (const text of printed) expect(text.props.maxFontSizeMultiplier).toBe(1.3);
+});
+
 test("volume shows on an LED readout that dims when the desktop is paused", async () => {
   // Volume is only adjustable while a speaker is live.
   api.getActiveOutput.mockResolvedValue({

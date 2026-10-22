@@ -41,6 +41,17 @@ test("the window shows source, speaker, status and format, and reads as one summ
   });
 });
 
+test("the window's printed captions cap text scaling like the LEDs", () => {
+  const r = create(<LedDisplay source="Spotify" speaker="Den" status={LIVE} rate={RATE} />);
+  const captions = r.root.findAll(
+    (n) =>
+      (n.type as unknown) === "Text" && ["Source", "Speaker"].includes(n.props.children as string),
+  );
+  expect(captions).toHaveLength(2);
+  for (const caption of captions) expect(caption.props.maxFontSizeMultiplier).toBe(1.3);
+  expect(hostById(r, "led-format").props.maxFontSizeMultiplier).toBe(1.3);
+});
+
 test("empty rows ask for a choice, dimmed, and say so aloud", () => {
   const r = create(<LedDisplay source="" speaker="" status={STANDBY} rate={RATE} />);
   expect(hostById(r, "led-source").props.children).toBe("Choose a source");

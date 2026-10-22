@@ -112,6 +112,20 @@ test("fill runs from the origin", () => {
   });
 });
 
+test("the cap's index line runs across the cap in both orientations", () => {
+  // Found on device: a column cap stretched the line's width, leaving a 0-tall line.
+  const across = (r: ReactTestRenderer.ReactTestRenderer, id: string) => ({
+    cap: flat(node(r, `${id}-cap`).props.style),
+    line: flat(node(r, `${id}-cap-line`).props.style),
+  });
+  const horizontal = across(create(volume()), "vol");
+  expect(horizontal.cap.flexDirection).toBe("row");
+  expect(horizontal.line).toMatchObject({ width: 1, alignSelf: "stretch" });
+  const vertical = across(create(band()), "band");
+  expect(vertical.cap.flexDirection).toBe("column");
+  expect(vertical.line).toMatchObject({ height: 1, alignSelf: "stretch" });
+});
+
 test("a touch alone never changes the value", async () => {
   const r = create(volume());
   act(() => node(r, "vol-track").props.onLayout(layout(300, 44)));

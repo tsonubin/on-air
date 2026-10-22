@@ -82,6 +82,15 @@ test("the scale, 0 dB line and readouts are decoration", () => {
   expect(hidden).toBe(true);
 });
 
+test("printed captions and scale marks cap text scaling", () => {
+  const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  const marks = textsIn(hostById(r, "eq-scale"));
+  expect(marks.map((t) => t.props.children)).toEqual(["+12", "+6", "0", "−6", "−12"]);
+  const curve = r.root.find((n) => (n.type as unknown) === "Text" && n.props.children === "Curve");
+  const printed = [...marks, curve];
+  for (const text of printed) expect(text.props.maxFontSizeMultiplier).toBe(1.3);
+});
+
 test("the footnote explains the faders", () => {
   const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
   expect(textsIn(r.root).map((t) => t.props.children)).toContain(
