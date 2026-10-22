@@ -1,8 +1,10 @@
 import type { ReactElement } from "react";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import { Card } from "@/ui/card";
+import { Faceplate, Groove } from "@/ui/faceplate";
 import { IconTile } from "@/ui/icon-tile";
 import { LedReadout } from "@/ui/led-readout";
+import { LedWindow } from "@/ui/led-window";
 import { Sign } from "@/ui/sign";
 
 // Style props are arbitrarily nested arrays of objects; flatten like StyleSheet.flatten.
@@ -66,6 +68,10 @@ test("LED readout: ghost segments are hidden, the value is amber, dim is muted",
     accessible: true,
     accessibilityLabel: "Volume 70",
   });
+  // The readout sits in the same recessed well as every LED window: a shadow, not a border.
+  const well = flat(hostById(r, "led").props.style);
+  expect(well.boxShadow).toBe("inset 0 2px 6px rgba(0,0,0,0.7), 0 1px 0 rgba(255,236,200,0.06)");
+  expect(well.borderWidth).toBeUndefined();
   expect(textWith(r, "888").props).toMatchObject({
     accessibilityElementsHidden: true,
     importantForAccessibility: "no",
@@ -99,4 +105,44 @@ test("icon tiles use the machined medium radius", () => {
   const r = create(<IconTile name="speaker" />);
   const tile = r.root.find((n) => isHost(n, "View") && flat(n.props.style).width === 54);
   expect(flat(tile.props.style)).toMatchObject({ borderRadius: 6, backgroundColor: "#2a261f" });
+});
+
+test("faceplate: satin gradient, top highlight and a fine repeating grain, all hidden", () => {
+  const r = create(<Faceplate testID="f">{null}</Faceplate>);
+  const finish = hostById(r, "faceplate-finish");
+  expect(finish.props).toMatchObject({
+    pointerEvents: "none",
+    accessibilityElementsHidden: true,
+    importantForAccessibility: "no-hide-descendants",
+  });
+  expect(flat(finish.props.style).experimental_backgroundImage).toBe(
+    "radial-gradient(ellipse 120% 45% at 50% 0%, rgba(255,236,200,0.07), transparent), linear-gradient(180deg, #1f1b16, #16130f)",
+  );
+  const grain = finish.find((n) => isHost(n, "Image"));
+  expect(grain.props.resizeMode).toBe("repeat");
+  expect(flat(grain.props.style).opacity).toBe(0.035);
+});
+
+test("groove: an engraved dark line over a faint light one", () => {
+  const r = create(<Groove testID="g" />);
+  expect(hostById(r, "g").props.accessibilityElementsHidden).toBe(true);
+  expect(flat(hostById(r, "g").props.style)).toMatchObject({
+    borderTopWidth: 1,
+    borderTopColor: "#0d0b09",
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,236,200,0.06)",
+  });
+});
+
+test("LED window: a recessed well with no border", () => {
+  const r = create(<LedWindow testID="w" />);
+  const style = flat(hostById(r, "w").props.style);
+  expect(style).toMatchObject({
+    backgroundColor: "#070605",
+    borderRadius: 6,
+    boxShadow: "inset 0 2px 6px rgba(0,0,0,0.7), 0 1px 0 rgba(255,236,200,0.06)",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  });
+  expect(style.borderWidth).toBeUndefined();
 });

@@ -1,5 +1,6 @@
 import { Text, View } from "react-native";
-import { colors, radius, type } from "@/theme";
+import { colors, type } from "@/theme";
+import { wellStyle } from "./led-window";
 
 /** Caps Dynamic Type so the digits stay inside their recess at the largest sizes. */
 const MAX_SCALE = 1.3;
@@ -33,14 +34,7 @@ export function LedReadout({
       accessible
       accessibilityLabel={accessibilityLabel}
       testID={testID}
-      style={{
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: radius.sm,
-        borderWidth: 1,
-        borderColor: colors.separator,
-        backgroundColor: colors.ledWell,
-      }}
+      style={[wellStyle, { paddingHorizontal: 8, paddingVertical: 4 }]}
     >
       <Text
         accessibilityElementsHidden
