@@ -145,6 +145,16 @@ test("settings sections sit on faceplate rows under mono section titles", () => 
   expect(rowTexts).not.toContain("ADVANCED");
 });
 
+test("settings link rows let the section's row show through on Android", () => {
+  // Android's FieldGroup.Section wraps each row in its own Material ListItem, so
+  // an opaque nested ListItem paints a second, inset box inside the row.
+  const items = hosts(create(<SoundScreen />), "ExpoListItem");
+  expect(items.map((item) => item.props.testID)).toEqual(["equalizer-link", "audio-format-link"]);
+  for (const item of items) {
+    expect(item.props.colors).toEqual({ containerColor: "transparent" });
+  }
+});
+
 test("every settings screen puts its section captions in the header slot", () => {
   for (const Screen of [EqualizerScreen, AudioFormatScreen, ConnectionScreen]) {
     const r = create(<Screen />);
