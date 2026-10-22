@@ -100,9 +100,24 @@ test("faceplate: satin gradient, top highlight and a fine repeating grain, all h
   expect(flat(finish.props.style).experimental_backgroundImage).toBe(
     "radial-gradient(ellipse 120% 45% at 50% 0%, rgba(255,236,200,0.07), transparent), linear-gradient(180deg, #1f1b16, #16130f)",
   );
-  const grain = finish.find((n) => isHost(n, "Image"));
-  expect(grain.props.resizeMode).toBe("repeat");
+  // The grain sits in one faint layer, tiled to cover the faceplate once it is measured.
+  const grain = hostById(r, "faceplate-grain");
   expect(flat(grain.props.style).opacity).toBe(0.035);
+  expect(grain.findAll((n) => isHost(n, "Image"))).toHaveLength(0);
+});
+
+test("faceplate grain tiles cover the whole plate, not just one corner", () => {
+  // Found on device: resizeMode "repeat" drew a single 128 pt tile, a visible lighter square.
+  const r = create(<Faceplate testID="f">{null}</Faceplate>);
+  ReactTestRenderer.act(() =>
+    hostById(r, "faceplate-finish").props.onLayout({
+      nativeEvent: { layout: { x: 0, y: 0, width: 390, height: 844 } },
+    }),
+  );
+  const tiles = hostById(r, "faceplate-grain").findAll((n) => isHost(n, "Image"));
+  expect(tiles).toHaveLength(4 * 7); // ceil(390 / 128) × ceil(844 / 128)
+  expect(flat(tiles[0].props.style)).toMatchObject({ width: 128, height: 128, left: 0, top: 0 });
+  expect(flat(tiles[tiles.length - 1].props.style)).toMatchObject({ left: 384, top: 768 });
 });
 
 test("groove: an engraved dark line over a faint light one", () => {
