@@ -1,8 +1,6 @@
 import type { ReactElement } from "react";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
-import { Card } from "@/ui/card";
 import { Faceplate, Groove } from "@/ui/faceplate";
-import { IconTile } from "@/ui/icon-tile";
 import { isDsegText, LedReadout, LedText } from "@/ui/led-readout";
 import { LedWindow } from "@/ui/led-window";
 import { Sign } from "@/ui/sign";
@@ -89,22 +87,6 @@ test("LED readout: ghost segments are hidden, the value is amber, dim is muted",
     color: "#9a8f78",
     textShadowRadius: 0,
   });
-});
-
-test("faceplate card: machined radius and a lighter top edge", () => {
-  const r = create(<Card testID="c">{null}</Card>);
-  expect(flat(hostById(r, "c").props.style)).toMatchObject({
-    backgroundColor: "#1a1814",
-    borderRadius: 8,
-    borderColor: "#3a342a",
-    borderTopColor: "#4a4338",
-  });
-});
-
-test("icon tiles use the machined medium radius", () => {
-  const r = create(<IconTile name="speaker" />);
-  const tile = r.root.find((n) => isHost(n, "View") && flat(n.props.style).width === 54);
-  expect(flat(tile.props.style)).toMatchObject({ borderRadius: 6, backgroundColor: "#2a261f" });
 });
 
 test("faceplate: satin gradient, top highlight and a fine repeating grain, all hidden", () => {

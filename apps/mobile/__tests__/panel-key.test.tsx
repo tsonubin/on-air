@@ -82,6 +82,13 @@ test("a lit busy key shows a dark spinner instead of its caption", () => {
   expect(key.props.accessibilityState.busy).toBe(true);
 });
 
+test("a busy key can't be pressed but stays at full strength so its spinner shows", () => {
+  const r = create(<PanelKey label="Connect" onPress={jest.fn()} lit busy disabled testID="k" />);
+  const key = hostById(r, "k");
+  expect(key.props.onPress).toBeUndefined();
+  expect(flat(key.props.style).opacity).toBeUndefined();
+});
+
 test("a round key is a 36 pt icon button with hit slop to 44", () => {
   const r = create(
     <PanelKey

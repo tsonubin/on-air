@@ -967,7 +967,7 @@ test("pairing: unlit sign, LED code field and an amber Connect key", async () =>
   });
   expect(pin.props.placeholderTextColor).toBe("#1c1812");
 
-  expect(flat(host("pair-button").props.style)).toMatchObject({ backgroundColor: "#1a1814" });
+  expect(flat(host("pair-button").props.style)).toMatchObject({ backgroundColor: "#1d1a15" });
   ReactTestRenderer.act(() => host("pin-input").props.onChangeText("123456"));
   expect(flat(host("pair-button").props.style)).toMatchObject({ backgroundColor: "#e0a24b" });
   expect(flat(textsIn(host("pair-button"))[0].props.style).color).toBe("#141210");
@@ -982,6 +982,18 @@ test("pairing: text fields take an amber caret, not Android's default accent", a
       selectionHandleColor: "#e0a24b",
     });
   }
+});
+
+test("pairing is one faceplate: no bordered boxes", async () => {
+  await renderApp();
+  await press("manual-setup-button");
+  const boxes = host("pairing-screen").findAll(
+    (n) =>
+      ["View", "Pressable", "TextInput"].includes(n.type as string) &&
+      Number(flat(n.props.style).borderWidth ?? 0) > 0,
+  );
+  expect(boxes.map((b) => b.props.testID)).toEqual(["remote-title"]); // only the sign's housing
+  expect(exists("faceplate-finish")).toBe(true);
 });
 
 test("pairing: the Connect key stays lit with a visible spinner while the code is checked", async () => {

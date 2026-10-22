@@ -97,7 +97,8 @@ export function PanelKey({
           borderCurve: "continuous",
         },
         keyFace({ pressed, lit }),
-        disabled && { opacity: 0.45 },
+        // A busy key is not pressable either, but stays at full strength so its spinner shows.
+        disabled && !busy && { opacity: 0.45 },
         style,
       ]}
     >
