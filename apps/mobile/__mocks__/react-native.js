@@ -55,6 +55,33 @@ const Keyboard = {
   },
 };
 
+// PanResponder maps the responder props a test fires to the config's pan
+// callbacks, computing dx/dy from nativeEvent.pageX/pageY relative to the grant.
+const PanResponder = {
+  create(config) {
+    let start = { x: 0, y: 0 };
+    const gesture = (e) => ({
+      dx: e.nativeEvent.pageX - start.x,
+      dy: e.nativeEvent.pageY - start.y,
+    });
+    return {
+      panHandlers: {
+        onStartShouldSetResponder: (e) =>
+          config.onStartShouldSetPanResponder?.(e, { dx: 0, dy: 0 }) ?? false,
+        onResponderTerminationRequest: (e) =>
+          config.onPanResponderTerminationRequest?.(e, gesture(e)) ?? true,
+        onResponderGrant: (e) => {
+          start = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+          config.onPanResponderGrant?.(e, { dx: 0, dy: 0 });
+        },
+        onResponderMove: (e) => config.onPanResponderMove?.(e, gesture(e)),
+        onResponderRelease: (e) => config.onPanResponderRelease?.(e, gesture(e)),
+        onResponderTerminate: (e) => config.onPanResponderTerminate?.(e, gesture(e)),
+      },
+    };
+  },
+};
+
 // Pressable honours `disabled` and resolves function styles like the real one,
 // so a test that presses a disabled control fails instead of passing silently.
 function Pressable(props) {
@@ -72,6 +99,7 @@ module.exports = {
   Image: mock("Image"),
   Keyboard,
   KeyboardAvoidingView: mock("KeyboardAvoidingView"),
+  PanResponder,
   Pressable,
   SafeAreaView: mock("SafeAreaView"),
   ScrollView: mock("ScrollView"),
