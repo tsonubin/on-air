@@ -3,7 +3,7 @@ import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import { Card } from "@/ui/card";
 import { Faceplate, Groove } from "@/ui/faceplate";
 import { IconTile } from "@/ui/icon-tile";
-import { LedReadout } from "@/ui/led-readout";
+import { isDsegText, LedReadout, LedText } from "@/ui/led-readout";
 import { LedWindow } from "@/ui/led-window";
 import { Sign } from "@/ui/sign";
 
@@ -132,6 +132,57 @@ test("groove: an engraved dark line over a faint light one", () => {
     borderBottomWidth: 1,
     borderBottomColor: "rgba(255,236,200,0.06)",
   });
+});
+
+test("LED text: ASCII in 14-segment amber, uppercased by style, one line", () => {
+  const r = create(
+    <LedText size={18} testID="t">
+      Living room
+    </LedText>,
+  );
+  const t = hostById(r, "t");
+  expect(t.props.children).toBe("Living room");
+  expect(t.props).toMatchObject({
+    numberOfLines: 1,
+    ellipsizeMode: "tail",
+    adjustsFontSizeToFit: true,
+    minimumFontScale: 0.75,
+    maxFontSizeMultiplier: 1.3,
+  });
+  expect(flat(t.props.style)).toMatchObject({
+    fontFamily: "DSEG14ClassicMini-Regular",
+    fontSize: 18,
+    textTransform: "uppercase",
+    color: "#e0a24b",
+  });
+});
+
+test("LED text: names DSEG14 cannot draw fall back to Plex Mono and still stay on one line", () => {
+  const name = "Küche – HomePod 🎵 Wohnzimmer Lautsprecher";
+  const t = hostById(
+    create(
+      <LedText size={18} testID="t">
+        {name}
+      </LedText>,
+    ),
+    "t",
+  );
+  expect(flat(t.props.style).fontFamily).toBe("IBMPlexMono-Medium");
+  expect(t.props.numberOfLines).toBe(1);
+  expect(isDsegText("ON AIR 44.1K")).toBe(true);
+  expect(isDsegText("Café")).toBe(false);
+});
+
+test("LED text: dim is muted with no glow", () => {
+  const t = hostById(
+    create(
+      <LedText size={18} dim testID="t">
+        Choose a source
+      </LedText>,
+    ),
+    "t",
+  );
+  expect(flat(t.props.style)).toMatchObject({ color: "#9a8f78", textShadowRadius: 0 });
 });
 
 test("LED window: a recessed well with no border", () => {
