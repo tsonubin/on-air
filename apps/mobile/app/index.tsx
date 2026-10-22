@@ -1,4 +1,4 @@
-import { FieldGroup, Host } from "@expo/ui";
+import { FieldGroup } from "@expo/ui";
 import type { OutputInfo } from "@on-air/api-types";
 import { outputPhase } from "@on-air/api-types";
 import { router } from "expo-router";
@@ -7,7 +7,7 @@ import { View } from "react-native";
 import { MixerHome } from "@/mixer-home";
 import { PairingHome } from "@/pairing-home";
 import { type DevicePairTarget, useRemoteSession } from "@/remote-session";
-import { sectionModifiers } from "@/settings-form";
+import { SettingsForm, sectionModifiers } from "@/settings-form";
 import { DevicePairSheet } from "@/sheets/device-pair-sheet";
 import { OutputSheet } from "@/sheets/output-sheet";
 import { SourceSheet } from "@/sheets/source-sheet";
@@ -17,14 +17,12 @@ import { homeStatus } from "@/ui-state";
 
 function RestoringScreen() {
   return (
-    <Host style={{ flex: 1 }} colorScheme="dark" seedColor={colors.amber}>
-      <FieldGroup testID="pairing-restore">
-        <FieldGroup.Section modifiers={sectionModifiers}>
-          {sectionTitle("on-air remote")}
-          <FormText variant="body">Restoring your desktop connection…</FormText>
-        </FieldGroup.Section>
-      </FieldGroup>
-    </Host>
+    <SettingsForm testID="pairing-restore">
+      <FieldGroup.Section modifiers={sectionModifiers}>
+        {sectionTitle("on-air remote")}
+        <FormText variant="body">Restoring your desktop connection…</FormText>
+      </FieldGroup.Section>
+    </SettingsForm>
   );
 }
 

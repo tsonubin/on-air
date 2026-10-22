@@ -687,6 +687,22 @@ test("the LED window's format corner shows the output sample rate", async () => 
   expect(host("led-source").props.children).toBe("Mock Monitor");
 });
 
+test("restoring a saved pairing shows the faceplate while it loads", async () => {
+  // Hold the keychain read open so the restoring screen stays up to be inspected.
+  let release!: (saved: string | null) => void;
+  store.getItemAsync.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+  await ReactTestRenderer.act(async () => {
+    tree = ReactTestRenderer.create(<RootLayout />);
+  });
+  expect(exists("pairing-restore")).toBe(true);
+  expect(exists("faceplate-finish")).toBe(true);
+  await ReactTestRenderer.act(async () => {
+    release(JSON.stringify({ host: "192.168.5.14", port: 47990, token: "saved-token" }));
+  });
+  await flush();
+  expect(exists("mixer-screen")).toBe(true);
+});
+
 test("the four mixer keys open the sheets and the sound screens", async () => {
   await renderApp();
   await pairWith();

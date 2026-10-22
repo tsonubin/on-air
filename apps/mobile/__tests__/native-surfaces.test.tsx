@@ -1,4 +1,5 @@
 import type { ReactElement } from "react";
+import { Platform } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import {
   navigationTheme,
@@ -88,15 +89,33 @@ test("sheets are faceplate-backed and amber-tinted on iOS", () => {
   );
 });
 
-test("settings forms hide the system background and seed amber", () => {
+test("settings forms sit on the satin faceplate, clear of the system background", () => {
   const r = create(<SettingsForm testID="f">{null}</SettingsForm>);
-  expect(hosts(r, "ExpoHost")[0].props.seedColor).toBe("#e0a24b");
+  const host = hosts(r, "ExpoHost")[0];
+  expect(host.props.seedColor).toBe("#e0a24b");
+  expect(host.props.style).toMatchObject({ backgroundColor: "transparent" });
   expect(hosts(r, "ExpoFieldGroup")[0].props.modifiers).toEqual(
     expect.arrayContaining([
       { $type: "scrollContentBackground", visible: "hidden" },
-      { $type: "background", color: "#0a0908" },
+      { $type: "background", color: "transparent" },
     ]),
   );
+  expect(
+    r.root.findAll((n) => n.props.testID === "faceplate-finish" && typeof n.type === "string"),
+  ).toHaveLength(1);
+});
+
+test("Android settings forms clear Compose's own surface so the faceplate shows", () => {
+  const original = Platform.OS;
+  (Platform as { OS: string }).OS = "android";
+  try {
+    const r = create(<SettingsForm testID="f">{null}</SettingsForm>);
+    expect(hosts(r, "ExpoFieldGroup")[0].props.style).toMatchObject({
+      backgroundColor: "transparent",
+    });
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
 });
 
 test("form text uses the vendored families and uppercases labels", () => {
@@ -126,7 +145,9 @@ test("settings sections sit on faceplate rows under mono section titles", () => 
   const sections = hosts(r, "ExpoFieldSection");
   expect(sections.length).toBeGreaterThan(0);
   for (const section of sections) {
-    expect(section.props.modifiers).toEqual([{ $type: "listRowBackground", color: "#1a1814" }]);
+    expect(section.props.modifiers).toEqual([
+      { $type: "listRowBackground", color: "rgba(42,38,31,0.55)" },
+    ]);
   }
   const headers = hosts(r, "ExpoFieldSectionHeader").map(
     (h) => h.findAll((n) => isHost(n, "ExpoText"))[0].props.children,
