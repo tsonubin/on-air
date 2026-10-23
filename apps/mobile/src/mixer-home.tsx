@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LedDisplay } from "./led-display";
 import { formatRate } from "./readouts";
 import { colors, layout, type } from "./theme";
+import { isTwoPane } from "./two-pane";
 import { Faceplate, Groove } from "./ui/faceplate";
 import { Fader } from "./ui/fader";
 import { FirewallNotice } from "./ui/firewall-notice";
@@ -49,15 +50,16 @@ function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
 const KEY_GAP = 8;
 
 /**
- * Whether the four key captions fit side by side in a row this wide. The
- * captions are Plex Mono (0.6 em advance) at 11 pt with 1.76 pt tracking,
- * capped at 1.3× text size, in keys with 8 pt padding each side; the longest
- * is seven letters (SPEAKER, FORMAT and SOURCE are six or seven).
+ * Whether the key captions fit side by side in a row this wide. The captions
+ * are Plex Mono (0.6 em advance) at 11 pt with 1.76 pt tracking, capped at
+ * 1.3× text size, in keys with 8 pt padding each side; the longest is seven
+ * letters (SPEAKER, FORMAT and SOURCE are six or seven). Four keys normally,
+ * three when the equalizer has its own pane.
  */
-export function keysFitInRow(rowWidth: number, fontScale: number): boolean {
+export function keysFitInRow(rowWidth: number, fontScale: number, keys = 4): boolean {
   const scale = Math.min(fontScale, 1.3);
   const caption = 7 * (11 * scale * 0.6 + 1.76);
-  const key = (rowWidth - 3 * KEY_GAP) / 4;
+  const key = (rowWidth - (keys - 1) * KEY_GAP) / keys;
   return key >= caption + 2 * 8 + 2;
 }
 
@@ -171,6 +173,7 @@ export function MixerHome({
   onCdPlayPause,
   onCdPrev,
   onCdNext,
+  eqPane,
 }: {
   activeInput: string;
   activeOutput: string;
@@ -197,18 +200,25 @@ export function MixerHome({
   onCdPlayPause?: () => void;
   onCdPrev?: () => void;
   onCdNext?: () => void;
+  /** The equalizer, shown beside the mixer when the window is roomy enough (`isTwoPane`). */
+  eqPane?: React.ReactNode;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
   const { width, height, fontScale } = useWindowDimensions();
   const compact = width < layout.compactBreakpoint;
-  const wide = width >= layout.wideBreakpoint;
+  const twoPane = eqPane != null && isTwoPane(width, height);
+  // The mixer's own two-column layout is only for windows too short for the EQ pane.
+  const wide = !twoPane && width >= layout.wideBreakpoint;
   const shortWide = wide && height < 600;
   const gap = shortWide ? 12 : compact ? 18 : 22;
-  // The four keys share a row while their captions fit; the row is measured, and
+  const pad = compact ? 16 : 20;
+  // The keys share a row while their captions fit; the row is measured, and
   // estimated from the window until then.
   const [keysWidth, setKeysWidth] = useState(0);
-  const keysRow = keysWidth || Math.min(width, layout.maxWidth) - 2 * (compact ? 16 : 20);
-  const keyGrid = !keysFitInRow(keysRow, fontScale);
+  const keyCount = twoPane ? 3 : 4;
+  const keysRow =
+    keysWidth || (twoPane ? (width - 4 * pad - 2) / 2 : Math.min(width, layout.maxWidth) - 2 * pad);
+  const keyGrid = !keysFitInRow(keysRow, fontScale, keyCount);
   const keyStyle = { flexGrow: 1, flexBasis: keyGrid ? "48%" : 0 } as const;
   // The big LED follows the fader's draft, so it moves with the finger.
   const [shownVolume, setShownVolume] = useState(volume);
@@ -217,143 +227,185 @@ export function MixerHome({
   return (
     <Faceplate testID="mixer-screen">
       <Header live={status.live} onMore={onOpenMore} />
-      <ScrollView
-        style={{ flex: 1 }}
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingHorizontal: compact ? 16 : 20,
-          paddingTop: shortWide ? 4 : 8,
-          paddingBottom: Math.max(insets.bottom, 18) + 12,
-          width: "100%",
-          maxWidth: layout.maxWidth,
-          alignSelf: "center",
-        }}
-      >
-        <View
-          testID={
-            shortWide ? "mixer-landscape-layout" : wide ? "mixer-wide-layout" : "mixer-phone-layout"
-          }
-          style={{
+      {/* The mixer's scroll view is always the row's first child, so folding or
+          unfolding re-lays it out instead of remounting it (and a drag survives). */}
+      <View testID="mixer-panes" style={{ flex: 1, flexDirection: "row" }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentInsetAdjustmentBehavior="automatic"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            paddingHorizontal: pad,
+            paddingTop: shortWide ? 4 : 8,
+            paddingBottom: Math.max(insets.bottom, 18) + 12,
             width: "100%",
-            flexDirection: wide ? "row" : "column",
-            alignItems: wide ? "flex-start" : "stretch",
-            gap: wide ? 24 : gap,
+            maxWidth: layout.maxWidth,
+            alignSelf: "center",
           }}
         >
-          <View style={{ flex: wide ? 1.08 : undefined, gap }}>
-            <LedDisplay
-              source={activeInput}
-              speaker={activeOutput}
-              status={status}
-              rate={formatRate(outputSampleRate)}
-            />
-            {error ? <Notice message={error} testID="mixer-error" /> : null}
-            {speakerFailed ? (
-              <Text testID="speaker-failed" style={[type.body, { color: colors.secondaryLabel }]}>
-                Speaker failed. Choose it again.
-              </Text>
-            ) : null}
-            <FirewallNotice warning={firewallWarning} />
-            {cd?.present ? (
-              <CdDeck
-                status={cd}
-                onPlayPause={() => onCdPlayPause?.()}
-                onPrev={() => onCdPrev?.()}
-                onNext={() => onCdNext?.()}
+          <View
+            testID={
+              twoPane
+                ? "mixer-pane-layout"
+                : shortWide
+                  ? "mixer-landscape-layout"
+                  : wide
+                    ? "mixer-wide-layout"
+                    : "mixer-phone-layout"
+            }
+            style={{
+              width: "100%",
+              flexDirection: wide ? "row" : "column",
+              alignItems: wide ? "flex-start" : "stretch",
+              gap: wide ? 24 : gap,
+            }}
+          >
+            <View style={{ flex: wide ? 1.08 : undefined, gap }}>
+              <LedDisplay
+                source={activeInput}
+                speaker={activeOutput}
+                status={status}
+                rate={formatRate(outputSampleRate)}
               />
-            ) : null}
-          </View>
-
-          {wide ? null : <Groove />}
-
-          <View style={{ flex: wide ? 0.92 : undefined, gap }}>
-            <View style={{ gap: 10 }}>
-              <View
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={{
-                  flexDirection: "row",
-                  alignItems: "flex-end",
-                  justifyContent: "space-between",
-                }}
-              >
-                <Text
-                  maxFontSizeMultiplier={1.3}
-                  style={[type.label, { color: colors.tertiaryLabel }]}
-                >
-                  Volume
+              {error ? <Notice message={error} testID="mixer-error" /> : null}
+              {speakerFailed ? (
+                <Text testID="speaker-failed" style={[type.body, { color: colors.secondaryLabel }]}>
+                  Speaker failed. Choose it again.
                 </Text>
-                <LedReadout
-                  value={String(Math.round(shownVolume))}
-                  digits={3}
-                  size={shortWide ? 36 : 44}
-                  dim={volumeDisabled}
-                  accessibilityLabel={`Volume ${Math.round(shownVolume)}`}
-                  testID="volume-readout"
+              ) : null}
+              <FirewallNotice warning={firewallWarning} />
+              {cd?.present ? (
+                <CdDeck
+                  status={cd}
+                  onPlayPause={() => onCdPlayPause?.()}
+                  onPrev={() => onCdPrev?.()}
+                  onNext={() => onCdNext?.()}
+                />
+              ) : null}
+            </View>
+
+            {wide ? null : <Groove />}
+
+            <View style={{ flex: wide ? 0.92 : undefined, gap }}>
+              <View style={{ gap: 10 }}>
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-end",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={[type.label, { color: colors.tertiaryLabel }]}
+                  >
+                    Volume
+                  </Text>
+                  <LedReadout
+                    value={String(Math.round(shownVolume))}
+                    digits={3}
+                    size={shortWide ? 36 : 44}
+                    dim={volumeDisabled}
+                    accessibilityLabel={`Volume ${Math.round(shownVolume)}`}
+                    testID="volume-readout"
+                  />
+                </View>
+                <Fader
+                  orientation="horizontal"
+                  value={volume}
+                  min={0}
+                  max={100}
+                  step={1}
+                  origin={0}
+                  accessibilityStep={5}
+                  accessibilityLabel="Volume"
+                  formatValue={(value) => String(Math.round(value))}
+                  disabled={volumeDisabled}
+                  testID="volume-slider"
+                  onDraft={setShownVolume}
+                  onChange={onVolumeChange}
+                />
+                <Scale marks={["0", "50", "100"]} />
+              </View>
+
+              <Groove />
+
+              <View
+                testID="mixer-keys"
+                onLayout={(event) => setKeysWidth(event.nativeEvent.layout.width)}
+                style={{ flexDirection: "row", flexWrap: "wrap", gap: KEY_GAP }}
+              >
+                <PanelKey
+                  label="Source"
+                  accessibilityHint="Choose what the desktop captures"
+                  onPress={onChangeInput}
+                  style={keyStyle}
+                  testID="source-key"
+                />
+                <PanelKey
+                  label="Speaker"
+                  accessibilityHint="Choose where the audio plays"
+                  onPress={onChangeOutput}
+                  style={keyStyle}
+                  testID="speaker-key"
+                />
+                {twoPane ? null : (
+                  <PanelKey
+                    label="EQ"
+                    accessibilityLabel="Equalizer"
+                    accessibilityValue={{ text: eqFlat ? "Flat" : "Custom" }}
+                    indicator={!eqFlat}
+                    disabled={soundDisabled}
+                    onPress={onOpenEqualizer}
+                    style={keyStyle}
+                    testID="eq-key"
+                  />
+                )}
+                <PanelKey
+                  label="Format"
+                  accessibilityLabel="Audio format"
+                  disabled={soundDisabled}
+                  onPress={onOpenFormat}
+                  style={keyStyle}
+                  testID="format-key"
                 />
               </View>
-              <Fader
-                orientation="horizontal"
-                value={volume}
-                min={0}
-                max={100}
-                step={1}
-                origin={0}
-                accessibilityStep={5}
-                accessibilityLabel="Volume"
-                formatValue={(value) => String(Math.round(value))}
-                disabled={volumeDisabled}
-                testID="volume-slider"
-                onDraft={setShownVolume}
-                onChange={onVolumeChange}
-              />
-              <Scale marks={["0", "50", "100"]} />
-            </View>
-
-            <Groove />
-
-            <View
-              testID="mixer-keys"
-              onLayout={(event) => setKeysWidth(event.nativeEvent.layout.width)}
-              style={{ flexDirection: "row", flexWrap: "wrap", gap: KEY_GAP }}
-            >
-              <PanelKey
-                label="Source"
-                accessibilityHint="Choose what the desktop captures"
-                onPress={onChangeInput}
-                style={keyStyle}
-                testID="source-key"
-              />
-              <PanelKey
-                label="Speaker"
-                accessibilityHint="Choose where the audio plays"
-                onPress={onChangeOutput}
-                style={keyStyle}
-                testID="speaker-key"
-              />
-              <PanelKey
-                label="EQ"
-                accessibilityLabel="Equalizer"
-                accessibilityValue={{ text: eqFlat ? "Flat" : "Custom" }}
-                indicator={!eqFlat}
-                disabled={soundDisabled}
-                onPress={onOpenEqualizer}
-                style={keyStyle}
-                testID="eq-key"
-              />
-              <PanelKey
-                label="Format"
-                accessibilityLabel="Audio format"
-                disabled={soundDisabled}
-                onPress={onOpenFormat}
-                style={keyStyle}
-                testID="format-key"
-              />
             </View>
           </View>
-        </View>
-      </ScrollView>
+        </ScrollView>
+        {twoPane ? (
+          <>
+            {/* An engraved groove down the middle: on the iPhone Duo it sits on the fold. */}
+            <View
+              testID="pane-fold"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
+              style={{
+                marginVertical: 8,
+                borderLeftWidth: 1,
+                borderLeftColor: colors.grooveDark,
+                borderRightWidth: 1,
+                borderRightColor: colors.grooveLight,
+              }}
+            />
+            <ScrollView
+              testID="eq-pane-scroll"
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{
+                flexGrow: 1,
+                paddingHorizontal: pad,
+                paddingTop: 8,
+                paddingBottom: Math.max(insets.bottom, 18) + 12,
+              }}
+            >
+              {eqPane}
+            </ScrollView>
+          </>
+        ) : null}
+      </View>
     </Faceplate>
   );
 }
