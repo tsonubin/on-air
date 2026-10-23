@@ -52,9 +52,12 @@ Facts this rests on:
   `requireFullScreen` and `ScreenOrientation.lockAsync` no longer stop
   resizing on iOS 27. (Source: <https://expo.dev/changelog/sdk-58>.)
 - **Inner display width:** about 626–669 pt wide upright and 890–951 pt
-  sideways. Apple publishes 1878 × 2670 px; simulator reports differ. The
-  Duo simulator is the authority, so it is measured during the device pass.
-- **Outer display width:** phone-sized, under 450 pt.
+  sideways. Apple publishes 1878 × 2670 px. The iPhone Duo simulator
+  (iOS 27.1) reports its inner screen as 2007 × 2853 px, 669 × 951 pt at 3×.
+- **Outer display:** measured in the simulator as a 466 × 678 pt window
+  (1398 × 2034 px). Folded upright, the safe-area insets are top 0, right 84
+  (the rail), bottom 34 and left 0, and the navigation bar sits about 14 pt
+  below the window's top edge.
 
 ## Scope
 
@@ -122,7 +125,7 @@ view).
 
 | Device / state | Window (pt, approx.) | Layout |
 | --- | --- | --- |
-| Phones portrait, Duo folded | ≤ 450 wide | Phone (unchanged) |
+| Phones portrait, Duo folded | ≤ 466 wide | Phone (unchanged) |
 | Phones landscape | ~850 × 390 | Today's two-column mixer, no EQ pane (unchanged) |
 | Duo unfolded upright | ~626–669 × 890–951 | Mixer + EQ |
 | Duo unfolded sideways | ~890–951 × 626–669 | Mixer + EQ |
@@ -185,6 +188,15 @@ The mixer, pairing and EQ screens pad by
 `max(insets.left|right, their current padding)`. On the Duo, iOS puts system
 bars in a vertical rail at one edge, and the side insets keep our content
 clear of it. The native-header screens already follow the system.
+
+Found in the device pass:
+- **Headers:** on iOS 26+ an unstyled header is a transparent Liquid Glass
+  bar with no top inset for the screen below. The header is therefore opaque
+  and faceplate-colored. The screen behind it takes the same color, which
+  fills the gap the Duo leaves above the bar.
+- **Key row:** the estimate used before the key row is measured leaves out
+  the rail. The row is keyed by its layout, because React Native 0.88 does
+  not re-lay out the wrap when the keys' flex basis changes in place.
 
 ## Part 3: Release
 
