@@ -9,6 +9,7 @@ module.exports = {
   scrollContentBackground: (visible) => modifier("scrollContentBackground", { visible }),
   fixedSize: (config) => modifier("fixedSize", config),
   frame: (config) => modifier("frame", config),
+  ignoreSafeArea: (params) => modifier("ignoreSafeArea", params ?? {}),
   layoutPriority: (priority) => modifier("layoutPriority", { priority }),
   presentationBackground: (color) => modifier("presentationBackground", { color }),
   textSelection: (value) => modifier("textSelection", { value }),

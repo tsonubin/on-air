@@ -1,6 +1,7 @@
 import { BottomSheet, RNHostView } from "@expo/ui";
 import type { ReactNode } from "react";
 import { Platform, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, type } from "@/theme";
 import { Faceplate } from "@/ui/faceplate";
 import { PanelKey } from "@/ui/panel-key";
@@ -26,16 +27,25 @@ export function SheetPanel({
   testID: string;
   children: ReactNode;
 }) {
+  const insets = useSafeAreaInsets();
   return (
     <BottomSheet {...sheetProps(spec)} isPresented onDismiss={onClose} testID={testID}>
       {/* iOS sheets rest at a fixed detent, so the plate takes the sheet's size; Android's
           sheet sizes to its content, so the plate takes the sheet's width and its own height. */}
       <RNHostView matchContents={Platform.OS === "ios" ? false : { vertical: true }}>
         <Faceplate style={{ flex: 0, flexGrow: 1 }}>
-          {/* The native sheet already keeps its content clear of the home indicator. */}
+          {/* The native sheet keeps its content clear of the home indicator; the plate runs
+              under a side rail, so the content pads itself clear of one. */}
           <View
             testID={`${testID}-body`}
-            style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 12 }}
+            style={{
+              flex: 1,
+              paddingLeft: Math.max(insets.left, 16),
+              paddingRight: Math.max(insets.right, 16),
+              paddingTop: 8,
+              paddingBottom: 16,
+              gap: 12,
+            }}
           >
             <View
               style={{

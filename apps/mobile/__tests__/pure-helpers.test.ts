@@ -24,6 +24,8 @@ describe("sheetProps", () => {
     expect(source.modifiers).toEqual([
       { $type: "environment", key: "colorScheme", value: "dark" },
       { $type: "tint", color: "#e0a24b" },
+      // The plate runs under a side rail (iPhone Duo, landscape); the panel pads its content clear.
+      { $type: "ignoreSafeArea", regions: "container", edges: "horizontal" },
     ]);
     expect(sheetProps({ kind: "source", count: 3 }).snapPoints).toEqual([{ height: 358 }]);
     expect(sheetProps({ kind: "source", count: 6 }).snapPoints).toEqual(["full"]);

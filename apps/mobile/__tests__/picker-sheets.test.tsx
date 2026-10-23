@@ -1,5 +1,6 @@
 import type { ReactElement } from "react";
 import { Platform, Text } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import type { DevicePairTarget } from "@/remote-session";
 import { DevicePairSheet } from "@/sheets/device-pair-sheet";
@@ -103,6 +104,28 @@ test("the faceplate fills an iOS detent and grows to its content on Android", ()
     expect(host().props.matchContents).toEqual({ vertical: true });
   } finally {
     (Platform as { OS: string }).OS = original;
+  }
+});
+
+test("beside a side rail the plate runs under it and the content keeps clear", () => {
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 84, bottom: 34, left: 0 });
+  try {
+    const r = create(
+      <SheetPanel
+        spec={{ kind: "source", count: 1 }}
+        caption="Source"
+        onClose={jest.fn()}
+        testID="p"
+      >
+        <Text>Body</Text>
+      </SheetPanel>,
+    );
+    expect(flat(hostById(r, "p-body").props.style)).toMatchObject({
+      paddingLeft: 16,
+      paddingRight: 84,
+    });
+  } finally {
+    jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 47, right: 0, bottom: 34, left: 0 });
   }
 });
 

@@ -1,5 +1,5 @@
 import type { BottomSheetProps } from "@expo/ui";
-import { environment, tint } from "@expo/ui/swift-ui/modifiers";
+import { environment, ignoreSafeArea, tint } from "@expo/ui/swift-ui/modifiers";
 import { Platform } from "react-native";
 import { colors } from "@/theme";
 
@@ -48,7 +48,12 @@ export function sheetProps(spec: SheetSpec): SheetProps {
         // iOS keeps the content above the home indicator; that strip continues the plate's lower edge.
         containerColor: colors.faceBottom,
         contentPadding: 0,
-        modifiers: [environment({ key: "colorScheme", value: "dark" }), tint(colors.amber)],
+        modifiers: [
+          environment({ key: "colorScheme", value: "dark" }),
+          tint(colors.amber),
+          // The plate runs under a side rail (iPhone Duo, landscape); SheetPanel pads its content clear.
+          ignoreSafeArea({ regions: "container", edges: "horizontal" }),
+        ],
         snapPoints: iosSnapPoints(spec),
       },
       default: android,
