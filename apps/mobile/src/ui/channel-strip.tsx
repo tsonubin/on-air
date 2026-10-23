@@ -88,7 +88,8 @@ export function ChannelStrip({
         borderCurve: "continuous",
         backgroundColor: pressed ? colors.surfacePressed : look.surface,
         borderColor: look.border,
-        opacity: look.opacity,
+        // Disabled strips dim like a disabled key; the one connecting stays bright to show its work.
+        opacity: disabled && tone !== "connecting" ? 0.45 : look.opacity,
       })}
     >
       <Lamp state={look.lamp} testID={`${testID}-lamp`} />

@@ -124,6 +124,29 @@ test("a disabled strip ignores presses", () => {
   expect(hostById(r, "s").props.accessibilityState).toMatchObject({ disabled: true });
 });
 
+test("a disabled strip dims like a disabled key, but the one connecting stays bright", () => {
+  const strip = (tone: "idle" | "live" | "connecting") =>
+    flat(
+      hostById(
+        create(
+          <ChannelStrip
+            name="Den"
+            caption="Sonos"
+            action="Go"
+            tone={tone}
+            disabled
+            onPress={jest.fn()}
+            testID="s"
+          />,
+        ),
+        "s",
+      ).props.style,
+    );
+  expect(strip("idle").opacity).toBe(0.45);
+  expect(strip("live").opacity).toBe(0.45);
+  expect(strip("connecting").opacity).toBeUndefined();
+});
+
 test("a long name wraps beside a whole action word", () => {
   const r = create(
     <ChannelStrip
