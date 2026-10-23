@@ -35,7 +35,7 @@ export function SheetPanel({
           {/* The native sheet already keeps its content clear of the home indicator. */}
           <View
             testID={`${testID}-body`}
-            style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 12 }}
+            style={{ flex: 1, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 12 }}
           >
             <View
               style={{

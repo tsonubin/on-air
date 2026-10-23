@@ -33,7 +33,12 @@ export function SourceSheet({ onClose }: { onClose: () => void }) {
         </View>
       </LedWindow>
       <Groove />
-      <ScrollView contentContainerStyle={{ gap: 8 }}>
+      {/* Everything under the window scrolls, so larger text never pushes it out of the sheet. */}
+      <ScrollView
+        testID="source-sheet-scroll"
+        style={{ flexShrink: 1 }}
+        contentContainerStyle={{ gap: 8 }}
+      >
         {inputs.map(({ name, label }) => {
           const selected = name === activeInput;
           const switching = busyTarget === `input:${name}`;
@@ -53,15 +58,15 @@ export function SourceSheet({ onClose }: { onClose: () => void }) {
             />
           );
         })}
+        <Text
+          maxFontSizeMultiplier={1.3}
+          style={[type.body, { fontSize: 12, lineHeight: 16, color: colors.tertiaryLabel }]}
+        >
+          {inputs.length === 0
+            ? "No capture devices are available."
+            : "The Mac captures this device and streams it to the speaker."}
+        </Text>
       </ScrollView>
-      <Text
-        maxFontSizeMultiplier={1.3}
-        style={[type.body, { fontSize: 12, lineHeight: 16, color: colors.tertiaryLabel }]}
-      >
-        {inputs.length === 0
-          ? "No capture devices are available."
-          : "The Mac captures this device and streams it to the speaker."}
-      </Text>
     </SheetPanel>
   );
 }

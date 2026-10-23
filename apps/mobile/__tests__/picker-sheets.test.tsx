@@ -24,6 +24,16 @@ const textOf = (r: ReactTestRenderer.ReactTestRenderer) =>
     .map((n) => [n.props.children].flat().join(""))
     .join(" ");
 
+/** Whether a node's subtree holds a host element with this testID, or a text containing this copy. */
+const holds = (node: ReactTestInstance, { id, text }: { id?: string; text?: string }) =>
+  node.findAll(
+    (n) =>
+      (id !== undefined && typeof n.type === "string" && n.props.testID === id) ||
+      (text !== undefined &&
+        (n.type as unknown) === "Text" &&
+        [n.props.children].flat().join("") === text),
+  ).length > 0;
+
 async function press(node: ReactTestInstance) {
   const handler = node.props.onPress;
   if (!handler) throw new Error(`"${node.props.testID}" is disabled`);
@@ -58,7 +68,8 @@ test("a sheet panel is a full-bleed faceplate with a caption and Done", () => {
     testID: "p",
   });
   // The native sheet already keeps content clear of the home indicator; no second inset.
-  expect(flat(hostById(r, "p-body").props.style).paddingBottom).toBe(16);
+  // The body fills the sheet so a sheet's scroll view is bounded by its detent.
+  expect(flat(hostById(r, "p-body").props.style)).toMatchObject({ paddingBottom: 16, flex: 1 });
   sheet.props.onDismiss(); // swipe-down / Android back
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(hostById(r, "p-caption").props).toMatchObject({
@@ -189,6 +200,15 @@ describe("source sheet", () => {
     expect(hostById(r, "input-mock.monitor").props.onPress).toBeUndefined();
     await press(hostById(r, "source-sheet-done"));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("at large text sizes the footnote scrolls with the strips", () => {
+    mockSession = session();
+    const scroll = hostById(create(<SourceSheet onClose={jest.fn()} />), "source-sheet-scroll");
+    expect(flat(scroll.props.style).flexShrink).toBe(1);
+    expect(
+      holds(scroll, { text: "The Mac captures this device and streams it to the speaker." }),
+    ).toBe(true);
   });
 
   test("the footnote explains the pick, or says none are available", () => {
@@ -324,6 +344,14 @@ describe("speaker sheet", () => {
     const r = sheet();
     expect(hostById(r, "speaker-led").props.children).toBe("Scanning");
     expect(textOf(r)).toContain("Waiting for speakers on the LAN…");
+  });
+
+  test("at large text sizes the Add key and footnotes scroll with the strips", () => {
+    mockSession = session();
+    const scroll = hostById(sheet(), "output-sheet-scroll");
+    expect(flat(scroll.props.style).flexShrink).toBe(1);
+    expect(holds(scroll, { id: "add-bluetooth" })).toBe(true);
+    expect(holds(scroll, { text: "AirPlay speakers are picked from the desktop." })).toBe(true);
   });
 
   test("the window keeps the active speaker even when it drops off the list", () => {

@@ -122,7 +122,12 @@ export function OutputSheet({
         ) : null}
       </LedWindow>
       <Groove />
-      <ScrollView contentContainerStyle={{ gap: 8 }}>
+      {/* Everything under the window scrolls, so larger text never pushes it out of the sheet. */}
+      <ScrollView
+        testID="output-sheet-scroll"
+        style={{ flexShrink: 1 }}
+        contentContainerStyle={{ gap: 8 }}
+      >
         {outputs.map((output) => {
           const selected =
             activeOutput?.transport === output.transport && activeOutput.device_id === output.id;
@@ -143,25 +148,25 @@ export function OutputSheet({
             />
           );
         })}
+        <PanelKey
+          label="+ Add Bluetooth speaker"
+          accessibilityLabel="Add Bluetooth speaker"
+          disabled={!view.controlsEnabled}
+          onPress={() => void openBluetoothSettings()}
+          testID="add-bluetooth"
+          style={{ minHeight: 44 }}
+        />
+        {outputs.length === 0 ? (
+          <Text maxFontSizeMultiplier={1.3} style={footnote}>
+            Waiting for speakers on the LAN…
+          </Text>
+        ) : null}
+        {airplayMode === "avroute-picker" ? (
+          <Text maxFontSizeMultiplier={1.3} style={footnote}>
+            AirPlay speakers are picked from the desktop.
+          </Text>
+        ) : null}
       </ScrollView>
-      <PanelKey
-        label="+ Add Bluetooth speaker"
-        accessibilityLabel="Add Bluetooth speaker"
-        disabled={!view.controlsEnabled}
-        onPress={() => void openBluetoothSettings()}
-        testID="add-bluetooth"
-        style={{ minHeight: 44 }}
-      />
-      {outputs.length === 0 ? (
-        <Text maxFontSizeMultiplier={1.3} style={footnote}>
-          Waiting for speakers on the LAN…
-        </Text>
-      ) : null}
-      {airplayMode === "avroute-picker" ? (
-        <Text maxFontSizeMultiplier={1.3} style={footnote}>
-          AirPlay speakers are picked from the desktop.
-        </Text>
-      ) : null}
     </SheetPanel>
   );
 }
