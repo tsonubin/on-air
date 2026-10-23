@@ -18,6 +18,7 @@ import { useKeyboardClearance } from "./hooks/useKeyboardClearance";
 import { colors, fonts, layout, radius, type } from "./theme";
 import { Faceplate, Groove } from "./ui/faceplate";
 import { icons } from "./ui/icons";
+import { LedCodeInput } from "./ui/led-code-input";
 import { wellStyle } from "./ui/led-window";
 import { NativeIcon } from "./ui/native-icon";
 import { PanelKey } from "./ui/panel-key";
@@ -358,36 +359,18 @@ export function PairingHome({
                       </View>
                     </View>
 
-                    <TextInput
+                    <LedCodeInput
+                      length={6}
+                      compact={compact}
                       ref={pinInputRef}
                       value={pin}
                       onChangeText={onChangePin}
-                      placeholder="888888"
-                      placeholderTextColor={colors.ledGhost}
-                      cursorColor={colors.amber}
-                      selectionHandleColor={colors.amber}
-                      maxFontSizeMultiplier={1.3}
-                      keyboardType="number-pad"
-                      inputMode="numeric"
-                      maxLength={6}
                       returnKeyType="done"
                       onSubmitEditing={onPair}
                       onFocus={keyboardClearance.onFocus}
                       editable={!pairing}
                       accessibilityLabel="Six-digit pairing code"
                       testID="pin-input"
-                      style={[
-                        wellStyle,
-                        {
-                          minHeight: 66,
-                          paddingHorizontal: 14,
-                          fontFamily: fonts.led,
-                          color: colors.amber,
-                          fontSize: compact ? 24 : 27,
-                          letterSpacing: compact ? 6 : 9,
-                          textAlign: "center",
-                        },
-                      ]}
                     />
 
                     {error ? (

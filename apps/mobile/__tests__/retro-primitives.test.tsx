@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import { Faceplate, Groove } from "@/ui/faceplate";
+import { LedCodeInput } from "@/ui/led-code-input";
 import { isDsegText, LedReadout, LedText } from "@/ui/led-readout";
 import { LedWindow } from "@/ui/led-window";
 import { Sign } from "@/ui/sign";
@@ -193,4 +194,31 @@ test("LED window: a recessed well with no border", () => {
     paddingHorizontal: 14,
   });
   expect(style.borderWidth).toBeUndefined();
+});
+
+test("the LED code field shows ghost 8s and amber digits in a well", () => {
+  const r = create(<LedCodeInput length={8} value="4721" onChangeText={jest.fn()} testID="c" />);
+  const field = hostById(r, "c");
+  expect(field.props).toMatchObject({
+    placeholder: "88888888",
+    placeholderTextColor: "#1c1812",
+    cursorColor: "#e0a24b",
+    keyboardType: "number-pad",
+    inputMode: "numeric",
+    maxLength: 8,
+    maxFontSizeMultiplier: 1.3,
+    value: "4721",
+  });
+  expect(flat(field.props.style)).toMatchObject({
+    backgroundColor: "#070605",
+    fontFamily: "DSEG14ClassicMini-Regular",
+    color: "#e0a24b",
+    fontSize: 27,
+    letterSpacing: 9,
+    textAlign: "center",
+    minHeight: 66,
+  });
+  const compact = hostById(create(<LedCodeInput length={6} compact testID="c" />), "c");
+  expect(flat(compact.props.style)).toMatchObject({ fontSize: 24, letterSpacing: 6 });
+  expect(compact.props.placeholder).toBe("888888");
 });
