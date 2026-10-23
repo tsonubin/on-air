@@ -217,8 +217,13 @@ export function MixerHome({
   // estimated from the window until then.
   const [keysWidth, setKeysWidth] = useState(0);
   const keyCount = twoPane ? 3 : 4;
+  // The estimate leaves out the same side padding as the scroll view, rails included.
+  const padLeft = Math.max(insets.left, pad);
   const keysRow =
-    keysWidth || (twoPane ? (width - 4 * pad - 2) / 2 : Math.min(width, layout.maxWidth) - 2 * pad);
+    keysWidth ||
+    (twoPane
+      ? (width - 2) / 2 - padLeft - pad
+      : Math.min(width, layout.maxWidth) - padLeft - Math.max(insets.right, pad));
   const keyGrid = !keysFitInRow(keysRow, fontScale, keyCount);
   const keyStyle = { flexGrow: 1, flexBasis: keyGrid ? "48%" : 0 } as const;
   // The big LED follows the fader's draft, so it moves with the finger.
@@ -335,7 +340,10 @@ export function MixerHome({
 
               <Groove />
 
+              {/* Keyed by layout: React Native 0.88 doesn't re-lay out the wrap when the
+                  keys' flex basis changes in place, so a switch mounts a fresh row. */}
               <View
+                key={keyGrid ? "key-grid" : "key-row"}
                 testID="mixer-keys"
                 onLayout={(event) => setKeysWidth(event.nativeEvent.layout.width)}
                 style={{ flexDirection: "row", flexWrap: "wrap", gap: KEY_GAP }}
