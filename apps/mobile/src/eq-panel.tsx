@@ -5,6 +5,7 @@ import { colors, type } from "./theme";
 import { Fader } from "./ui/fader";
 import { LedReadout, LedText } from "./ui/led-readout";
 import { LedWindow } from "./ui/led-window";
+import { PanelKey } from "./ui/panel-key";
 
 /** The five bands, low to high: what each fader prints and what it says aloud. */
 export const bands = [
@@ -152,6 +153,47 @@ export function EqPanel({
       <Text style={[type.body, { fontSize: 13, lineHeight: 18, color: colors.secondaryLabel }]}>
         Drag up to boost, down to cut. 0 dB leaves the sound unchanged.
       </Text>
+    </View>
+  );
+}
+
+/**
+ * The equalizer as a pane beside the mixer, for windows wide enough to show
+ * both: a caption and its own Reset above the same five faders. Reset is off
+ * while the curve is flat or the desktop can't take changes.
+ */
+export function EqPane({
+  gains,
+  disabled,
+  onChangeBand,
+  onReset,
+}: {
+  gains: number[];
+  disabled: boolean;
+  onChangeBand: (index: number, value: number) => void;
+  onReset: () => void;
+}) {
+  const flat = gains.every((gain) => gain === 0);
+  return (
+    <View testID="eq-pane" style={{ flex: 1, gap: 14 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text
+          accessibilityRole="header"
+          maxFontSizeMultiplier={1.3}
+          style={[type.label, { color: colors.tertiaryLabel }]}
+        >
+          Equalizer
+        </Text>
+        <PanelKey
+          label="Reset"
+          accessibilityLabel="Reset equalizer"
+          disabled={flat || disabled}
+          onPress={onReset}
+          style={{ minWidth: 88 }}
+          testID="eq-pane-reset"
+        />
+      </View>
+      <EqPanel gains={gains} disabled={disabled} onChangeBand={onChangeBand} />
     </View>
   );
 }
