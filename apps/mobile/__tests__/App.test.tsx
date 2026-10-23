@@ -266,10 +266,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
 
   // Choose a source.
   await press("source-key");
-  await ReactTestRenderer.act(async () => {
-    await host("source-picker").props.onValueChange("PipeWire Sound Server");
-  });
-  await flush();
+  await press("input-PipeWire Sound Server");
   expect(api.activateInput).toHaveBeenCalledWith(BASE, "PipeWire Sound Server", TOKEN);
   expect(exists("source-sheet")).toBe(false);
 
