@@ -18,7 +18,8 @@ describe("sheetProps", () => {
     const source = sheetProps({ kind: "source", count: 1 });
     expect(source.snapPoints).toEqual([{ height: 280 }]);
     expect(source.showDragIndicator).toBe(true);
-    expect(source.containerColor).toBe("#1f1b16");
+    // iOS keeps the content above the home indicator; that strip continues the plate's lower edge.
+    expect(source.containerColor).toBe("#16130f");
     expect(source.contentPadding).toBe(0);
     expect(source.modifiers).toEqual([
       { $type: "environment", key: "colorScheme", value: "dark" },

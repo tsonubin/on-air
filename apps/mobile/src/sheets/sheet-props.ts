@@ -45,7 +45,8 @@ export function sheetProps(spec: SheetSpec): SheetProps {
     Platform.select<SheetProps>({
       ios: {
         showDragIndicator: true,
-        containerColor: colors.faceTop,
+        // iOS keeps the content above the home indicator; that strip continues the plate's lower edge.
+        containerColor: colors.faceBottom,
         contentPadding: 0,
         modifiers: [environment({ key: "colorScheme", value: "dark" }), tint(colors.amber)],
         snapPoints: iosSnapPoints(spec),

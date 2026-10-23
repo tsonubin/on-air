@@ -1,7 +1,6 @@
-import { BottomSheet } from "@expo/ui";
+import { BottomSheet, RNHostView } from "@expo/ui";
 import type { ReactNode } from "react";
-import { Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Platform, Text, View } from "react-native";
 import { colors, type } from "@/theme";
 import { Faceplate } from "@/ui/faceplate";
 import { PanelKey } from "@/ui/panel-key";
@@ -27,46 +26,46 @@ export function SheetPanel({
   testID: string;
   children: ReactNode;
 }) {
-  const insets = useSafeAreaInsets();
   return (
     <BottomSheet {...sheetProps(spec)} isPresented onDismiss={onClose} testID={testID}>
-      <Faceplate style={{ flex: 0, flexGrow: 1 }}>
-        <View
-          style={{
-            paddingHorizontal: 16,
-            paddingTop: 8,
-            paddingBottom: Math.max(insets.bottom, 16),
-            gap: 12,
-          }}
-        >
+      {/* iOS sheets rest at a fixed detent, so the plate takes the sheet's size; Android's
+          sheet sizes to its content, so the plate takes the sheet's width and its own height. */}
+      <RNHostView matchContents={Platform.OS === "ios" ? false : { vertical: true }}>
+        <Faceplate style={{ flex: 0, flexGrow: 1 }}>
+          {/* The native sheet already keeps its content clear of the home indicator. */}
           <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "space-between",
-              minHeight: 36,
-            }}
+            testID={`${testID}-body`}
+            style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 16, gap: 12 }}
           >
-            <Text
-              accessibilityRole="header"
-              maxFontSizeMultiplier={1.3}
-              testID={`${testID}-caption`}
-              style={[type.label, { color: colors.tertiaryLabel }]}
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                minHeight: 36,
+              }}
             >
-              {caption}
-            </Text>
-            {done ? (
-              <PanelKey
-                label="Done"
-                onPress={onClose}
-                testID={`${testID}-done`}
-                style={{ minHeight: 36, paddingHorizontal: 12 }}
-              />
-            ) : null}
+              <Text
+                accessibilityRole="header"
+                maxFontSizeMultiplier={1.3}
+                testID={`${testID}-caption`}
+                style={[type.label, { color: colors.tertiaryLabel }]}
+              >
+                {caption}
+              </Text>
+              {done ? (
+                <PanelKey
+                  label="Done"
+                  onPress={onClose}
+                  testID={`${testID}-done`}
+                  style={{ minHeight: 36, paddingHorizontal: 12 }}
+                />
+              ) : null}
+            </View>
+            {children}
           </View>
-          {children}
-        </View>
-      </Faceplate>
+        </Faceplate>
+      </RNHostView>
     </BottomSheet>
   );
 }

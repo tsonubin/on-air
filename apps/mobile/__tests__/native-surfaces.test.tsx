@@ -87,7 +87,7 @@ test("native header titles are uppercase captions; back buttons keep the plain t
 
 test("sheets are faceplate-backed and amber-tinted on iOS", () => {
   const props = sheetProps({ kind: "source", count: 1 });
-  expect(props.containerColor).toBe("#1f1b16");
+  expect(props.containerColor).toBe("#16130f");
   expect(props.modifiers).toEqual(expect.arrayContaining([{ $type: "tint", color: "#e0a24b" }]));
   expect(props.modifiers).not.toEqual(
     expect.arrayContaining([expect.objectContaining({ $type: "presentationBackground" })]),

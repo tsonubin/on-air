@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { Text } from "react-native";
+import { Platform, Text } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
 import type { DevicePairTarget } from "@/remote-session";
 import { DevicePairSheet } from "@/sheets/device-pair-sheet";
@@ -54,9 +54,11 @@ test("a sheet panel is a full-bleed faceplate with a caption and Done", () => {
   expect(sheet.props).toMatchObject({
     isPresented: true,
     contentPadding: 0,
-    containerColor: "#1f1b16",
+    containerColor: "#16130f",
     testID: "p",
   });
+  // The native sheet already keeps content clear of the home indicator; no second inset.
+  expect(flat(hostById(r, "p-body").props.style).paddingBottom).toBe(16);
   sheet.props.onDismiss(); // swipe-down / Android back
   expect(onClose).toHaveBeenCalledTimes(1);
   expect(hostById(r, "p-caption").props).toMatchObject({
@@ -68,6 +70,29 @@ test("a sheet panel is a full-bleed faceplate with a caption and Done", () => {
   expect(
     r.root.findAll((n) => n.props.testID === "faceplate-finish" && typeof n.type === "string"),
   ).toHaveLength(1);
+});
+
+test("the faceplate fills an iOS detent and grows to its content on Android", () => {
+  const host = () =>
+    create(
+      <SheetPanel
+        spec={{ kind: "source", count: 1 }}
+        caption="Source"
+        onClose={jest.fn()}
+        testID="p"
+      >
+        <Text>Body</Text>
+      </SheetPanel>,
+    ).root.find((n) => (n.type as unknown) === "ExpoRNHostView");
+  const original = Platform.OS;
+  try {
+    (Platform as { OS: string }).OS = "ios";
+    expect(host().props.matchContents).toBe(false);
+    (Platform as { OS: string }).OS = "android";
+    expect(host().props.matchContents).toEqual({ vertical: true });
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
 });
 
 test("the pair panel has no Done key", () => {
