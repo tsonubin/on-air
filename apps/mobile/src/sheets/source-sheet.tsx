@@ -7,7 +7,7 @@ export function SourceSheet({ onClose }: { onClose: () => void }) {
   const { inputs, activeInput, busyTarget, view, pickInput } = useRemoteSession();
   return (
     <BottomSheet
-      {...sheetProps({ kind: "source" })}
+      {...sheetProps({ kind: "source", count: inputs.length })}
       isPresented
       onDismiss={onClose}
       testID="source-sheet"

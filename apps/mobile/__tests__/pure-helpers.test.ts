@@ -13,18 +13,22 @@ describe("sheetProps", () => {
     (Platform as { OS: string }).OS = original;
   });
 
-  test("iOS gets compact detents and an explicit dark presentation", () => {
+  test("iOS gets compact detents and a full-bleed dark faceplate presentation", () => {
     (Platform as { OS: string }).OS = "ios";
-    const source = sheetProps({ kind: "source" });
+    const source = sheetProps({ kind: "source", count: 1 });
     expect(source.snapPoints).toEqual([{ height: 280 }]);
     expect(source.showDragIndicator).toBe(true);
+    expect(source.containerColor).toBe("#1f1b16");
+    expect(source.contentPadding).toBe(0);
     expect(source.modifiers).toEqual([
       { $type: "environment", key: "colorScheme", value: "dark" },
-      { $type: "presentationBackground", color: "#1a1814" },
       { $type: "tint", color: "#e0a24b" },
     ]);
-    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 316 }]);
+    expect(sheetProps({ kind: "source", count: 3 }).snapPoints).toEqual([{ height: 358 }]);
+    expect(sheetProps({ kind: "source", count: 6 }).snapPoints).toEqual(["full"]);
     expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 300 }]);
+    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 332 }]);
+    expect(sheetProps({ kind: "output", count: 4 }).snapPoints).toEqual([{ height: 464 }]);
     expect(sheetProps({ kind: "output", count: 6 }).snapPoints).toEqual(["full"]);
     expect(sheetProps({ kind: "device-pair", transport: "airplay" }).snapPoints).toEqual([
       { height: 360 },
@@ -34,17 +38,17 @@ describe("sheetProps", () => {
     ]);
   });
 
-  test("Android sheets sit on the faceplate with cream content", () => {
+  test("Android sheets are full-bleed on the faceplate", () => {
     (Platform as { OS: string }).OS = "android";
     for (const spec of [
-      { kind: "source" } as const,
+      { kind: "source", count: 2 } as const,
       { kind: "output", count: 9 } as const,
       { kind: "device-pair", transport: "airplay" } as const,
     ]) {
       expect(sheetProps(spec)).toEqual({
         showDragIndicator: true,
-        containerColor: "#1a1814",
-        contentColor: "#f3ead4",
+        containerColor: "#1f1b16",
+        contentPadding: 0,
       });
     }
   });
