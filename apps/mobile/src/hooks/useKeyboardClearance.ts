@@ -1,13 +1,13 @@
 import { type RefObject, useCallback, useEffect, useRef } from "react";
 import {
   Keyboard,
-  type KeyboardEvent,
+  type KeyboardMetrics,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
-  type ScrollView,
-  type TextInput,
-  type View,
+  type ScrollViewInstance,
+  type TextInputInstance,
+  type ViewInstance,
 } from "react-native";
 
 /** Room kept between the cleared view and the top of the keyboard. */
@@ -26,13 +26,13 @@ const CLEARANCE = 12;
  * Attach `scrollRef`, `onScroll` and `onLayout` to the ScrollView, `targetRef` and `onLayout` to
  * the view to keep clear, and `onFocus` to the field.
  */
-export function useKeyboardClearance(fieldRef: RefObject<TextInput | null>) {
-  const scrollRef = useRef<ScrollView>(null);
-  const targetRef = useRef<View>(null);
+export function useKeyboardClearance(fieldRef: RefObject<TextInputInstance | null>) {
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const targetRef = useRef<ViewInstance>(null);
   const scrollY = useRef(0);
 
   const clear = useCallback(
-    (keyboard: KeyboardEvent["endCoordinates"] | undefined) => {
+    (keyboard: KeyboardMetrics | null | undefined) => {
       // A frame with no height covers nothing; React Native's ScrollView reads it as no keyboard
       // too. The measurement and `screenY` share one space on both platforms: the window, which
       // edge-to-edge Android draws from the top of the screen.

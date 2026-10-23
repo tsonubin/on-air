@@ -9,6 +9,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  type TextInputInstance,
   useWindowDimensions,
   View,
 } from "react-native";
@@ -181,7 +182,7 @@ export function PairingHome({
   const compact = width < layout.compactBreakpoint;
   const wide = width >= layout.wideBreakpoint;
   const [manual, setManual] = useState(false);
-  const pinInputRef = useRef<TextInput>(null);
+  const pinInputRef = useRef<TextInputInstance>(null);
   // Lifts the whole code panel, Connect included, above the number pad (and its iOS "Done" bar).
   const keyboardClearance = useKeyboardClearance(pinInputRef);
   const selected = found.find((hit) => hit.host === host.trim()) ?? null;
