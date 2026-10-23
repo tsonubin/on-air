@@ -36,4 +36,8 @@ export const screenHeaderOptions = {
   headerTintColor: colors.amber,
   headerTitleStyle: { fontFamily: fonts.monoMedium, color: colors.label },
   headerShadowVisible: false,
+  // On iOS 26+ (SDK 58) the native bar is transparent Liquid Glass and screens draw
+  // under it; an opaque faceplate-colored bar keeps every screen's content below it.
+  headerTransparent: false,
+  headerStyle: { backgroundColor: colors.faceTop },
 };

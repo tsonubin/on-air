@@ -63,6 +63,9 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
     headerTintColor: "#e0a24b",
     headerTitleStyle: { fontFamily: "IBMPlexMono-Medium", color: "#f3ead4" },
     headerShadowVisible: false,
+    // iOS 26+ draws a transparent Liquid Glass bar that content runs under; ours is opaque.
+    headerTransparent: false,
+    headerStyle: { backgroundColor: "#1f1b16" },
   });
 });
 
