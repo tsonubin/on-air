@@ -4,7 +4,7 @@ import { Platform } from "react-native";
 import { formatDesktopTarget, parseDesktopTarget, targetBase } from "@/desktop-target";
 import { friendlyError } from "@/errors";
 import { digitsOnly, isForeground } from "@/remote-session";
-import { outputAction } from "@/sheets/output-sheet";
+import { outputAction, outputTone } from "@/sheets/output-sheet";
 import { sheetProps } from "@/sheets/sheet-props";
 
 describe("sheetProps", () => {
@@ -127,4 +127,14 @@ test("a speaker row reads its phase: starting connects, failed offers a retry", 
   expect(outputAction({ ...base, selected: true, phase: "starting" })).toBe("Connecting…");
   expect(outputAction({ ...base, selected: true, phase: "failed" })).toBe("Failed · Retry");
   expect(outputAction({ ...base, selected: false, phase: null })).toBe("Connect");
+});
+
+test("a speaker strip's tone follows the spec's table, first match wins", () => {
+  const off = { desktopOnly: false, working: false, selected: false, phase: null };
+  expect(outputTone({ ...off, desktopOnly: true, working: true })).toBe("unavailable");
+  expect(outputTone({ ...off, working: true })).toBe("connecting");
+  expect(outputTone({ ...off, selected: true, phase: "starting" })).toBe("connecting");
+  expect(outputTone({ ...off, selected: true, phase: "failed" })).toBe("failed");
+  expect(outputTone({ ...off, selected: true, phase: "live" })).toBe("live");
+  expect(outputTone(off)).toBe("idle");
 });

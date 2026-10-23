@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { Text } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
+import { OutputSheet } from "@/sheets/output-sheet";
 import { SheetPanel } from "@/sheets/sheet-panel";
 import { SourceSheet } from "@/sheets/source-sheet";
 
@@ -172,5 +173,134 @@ describe("source sheet", () => {
     expect(textOf(create(<SourceSheet onClose={jest.fn()} />))).toContain(
       "No capture devices are available.",
     );
+  });
+});
+
+describe("speaker sheet", () => {
+  const speaker = (transport: string, id: string, name: string, extra = {}) => ({
+    transport,
+    id,
+    name,
+    kind: "solo",
+    member_count: 1,
+    needs_pair: false,
+    paired: true,
+    ...extra,
+  });
+  const SONOS = speaker("sonos", "uuid:mock-sonos", "Mock Sonos");
+  const AIRPLAY = speaker("airplay", "ap-living", "Living Room AirPlay");
+  const BT = speaker("bluetooth", "bt-mock", "Mock Bluetooth Speaker");
+  const NEW_BT = speaker("bluetooth", "bt-new", "New Bluetooth Speaker", {
+    needs_pair: true,
+    paired: false,
+  });
+  const session = (overrides: Record<string, unknown> = {}) => ({
+    outputs: [SONOS, AIRPLAY, BT, NEW_BT],
+    activeOutput: {
+      transport: "sonos",
+      device_id: "uuid:mock-sonos",
+      device_name: "Mock Sonos",
+      state: "live",
+    },
+    airplayMode: "avroute-picker",
+    busyTarget: null,
+    view: { controlsEnabled: true },
+    activate: jest.fn(async () => true),
+    openBluetoothSettings: jest.fn(async () => {}),
+    ...overrides,
+  });
+  const sheet = (onClose = jest.fn(), onPairRequest = jest.fn()) =>
+    create(<OutputSheet onClose={onClose} onPairRequest={onPairRequest} />);
+  const strips = [
+    "sonos-uuid:mock-sonos",
+    "airplay-ap-living",
+    "bluetooth-bt-mock",
+    "bluetooth-bt-new",
+  ];
+
+  test("the playing speaker's strip is live and the LED window says so", () => {
+    mockSession = session();
+    const r = sheet();
+    expect(hostById(r, "output-sonos-uuid:mock-sonos-action").props.children).toBe("Connected");
+    expect(flat(hostById(r, "output-sonos-uuid:mock-sonos-lamp").props.style).backgroundColor).toBe(
+      "#ff3b2a",
+    );
+    expect(flat(hostById(r, "output-sonos-uuid:mock-sonos").props.style).backgroundColor).toBe(
+      "#3a221c",
+    );
+    expect(hostById(r, "speaker-led").props.children).toBe("Mock Sonos");
+    expect(hostById(r, "speaker-led-state").props.children).toBe("Live");
+  });
+
+  test("desktop-only AirPlay is unavailable, with a footnote saying where to pick it", () => {
+    mockSession = session();
+    const r = sheet();
+    const row = hostById(r, "output-airplay-ap-living");
+    expect(row.props.accessibilityValue).toEqual({ text: "Desktop only" });
+    expect(row.props.onPress).toBeUndefined();
+    expect(textOf(r)).toContain("AirPlay speakers are picked from the desktop.");
+  });
+
+  test("a starting speaker reads Connecting…; a failed one offers a retry", () => {
+    mockSession = session({
+      activeOutput: { ...(session().activeOutput as object), state: "starting" },
+    });
+    expect(hostById(sheet(), "speaker-led-state").props.children).toBe("Connecting…");
+    mockSession = session({
+      activeOutput: { ...(session().activeOutput as object), state: "failed" },
+    });
+    const row = hostById(sheet(), "output-sonos-uuid:mock-sonos");
+    expect(row.props.accessibilityValue).toEqual({ text: "Failed · Retry" });
+    expect(flat(row.props.style).backgroundColor).toBe("#3a1410");
+  });
+
+  test("an unpaired speaker asks to pair instead of connecting", async () => {
+    const onPairRequest = jest.fn();
+    mockSession = session();
+    await press(hostById(sheet(jest.fn(), onPairRequest), "output-bluetooth-bt-new"));
+    expect(onPairRequest).toHaveBeenCalledWith(NEW_BT);
+    expect(mockSession.activate).not.toHaveBeenCalled();
+  });
+
+  test("connecting a speaker closes the sheet on success", async () => {
+    const onClose = jest.fn();
+    mockSession = session();
+    await press(hostById(sheet(onClose), "output-bluetooth-bt-mock"));
+    expect(mockSession.activate).toHaveBeenCalledWith(BT);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("Add Bluetooth speaker opens the desktop's Bluetooth settings", async () => {
+    mockSession = session();
+    await press(hostById(sheet(), "add-bluetooth"));
+    expect(mockSession.openBluetoothSettings).toHaveBeenCalledTimes(1);
+  });
+
+  test("while a speaker connects, no strip takes a tap", () => {
+    mockSession = session({ busyTarget: "bluetooth:bt-mock" });
+    const r = sheet();
+    for (const id of strips) expect(hostById(r, `output-${id}`).props.onPress).toBeUndefined();
+  });
+
+  test("with controls off the strips and Add disable but Done still closes", async () => {
+    const onClose = jest.fn();
+    mockSession = session({ view: { controlsEnabled: false } });
+    const r = sheet(onClose);
+    for (const id of strips) expect(hostById(r, `output-${id}`).props.onPress).toBeUndefined();
+    expect(hostById(r, "add-bluetooth").props.onPress).toBeUndefined();
+    await press(hostById(r, "output-sheet-done"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("with no speakers yet the window reads Scanning", () => {
+    mockSession = session({ outputs: [], activeOutput: null });
+    const r = sheet();
+    expect(hostById(r, "speaker-led").props.children).toBe("Scanning");
+    expect(textOf(r)).toContain("Waiting for speakers on the LAN…");
+  });
+
+  test("the window keeps the active speaker even when it drops off the list", () => {
+    mockSession = session({ outputs: [BT, NEW_BT] });
+    expect(hostById(sheet(), "speaker-led").props.children).toBe("Mock Sonos");
   });
 });
