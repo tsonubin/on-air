@@ -40,4 +40,7 @@ export const screenHeaderOptions = {
   // under it; an opaque faceplate-colored bar keeps every screen's content below it.
   headerTransparent: false,
   headerStyle: { backgroundColor: colors.faceTop },
+  // On iPhone Duo the bar sits below the window's top edge; the screen behind it
+  // shows through that gap, so it takes the bar's color.
+  contentStyle: { backgroundColor: colors.faceTop },
 };

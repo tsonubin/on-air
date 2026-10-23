@@ -66,6 +66,8 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
     // iOS 26+ draws a transparent Liquid Glass bar that content runs under; ours is opaque.
     headerTransparent: false,
     headerStyle: { backgroundColor: "#1f1b16" },
+    // On iPhone Duo the bar sits below the window's top edge; the gap shows the bar's color.
+    contentStyle: { backgroundColor: "#1f1b16" },
   });
 });
 
