@@ -27,7 +27,8 @@ function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
           width: "100%",
           maxWidth: layout.maxWidth,
           alignSelf: "center",
-          paddingHorizontal: 20,
+          paddingLeft: Math.max(insets.left, 20),
+          paddingRight: Math.max(insets.right, 20),
           flexDirection: "row",
           alignItems: "center",
         }}
@@ -235,7 +236,9 @@ export function MixerHome({
           contentInsetAdjustmentBehavior="automatic"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{
-            paddingHorizontal: pad,
+            // Clear of a side rail or sensor housing; in two panes the right edge is the fold.
+            paddingLeft: Math.max(insets.left, pad),
+            paddingRight: twoPane ? pad : Math.max(insets.right, pad),
             paddingTop: shortWide ? 4 : 8,
             paddingBottom: Math.max(insets.bottom, 18) + 12,
             width: "100%",
@@ -396,7 +399,8 @@ export function MixerHome({
               showsVerticalScrollIndicator={false}
               contentContainerStyle={{
                 flexGrow: 1,
-                paddingHorizontal: pad,
+                paddingLeft: pad,
+                paddingRight: Math.max(insets.right, pad),
                 paddingTop: 8,
                 paddingBottom: Math.max(insets.bottom, 18) + 12,
               }}

@@ -214,7 +214,9 @@ export function PairingHome({
           contentContainerStyle={{
             minHeight: "100%",
             paddingTop: insets.top + (wide ? 24 : 16),
-            paddingHorizontal: compact ? 16 : 20,
+            // Clear of a side rail or sensor housing (iPhone Duo, landscape).
+            paddingLeft: Math.max(insets.left, compact ? 16 : 20),
+            paddingRight: Math.max(insets.right, compact ? 16 : 20),
             paddingBottom: Math.max(insets.bottom, 20) + 24,
             width: "100%",
             maxWidth: layout.maxWidth,

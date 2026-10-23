@@ -4,6 +4,7 @@ import { FakeSocket } from "@on-air/control-client/testing";
 import * as expoRouter from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Keyboard, Platform, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ReactTestRenderer, {
   type ReactTestInstance,
   type TestRendererOptions,
@@ -222,6 +223,7 @@ beforeEach(() => {
     scale: 3,
     fontScale: 1,
   });
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 47, right: 0, bottom: 34, left: 0 });
   mockDesktop();
 });
 
@@ -950,6 +952,39 @@ test("the three-key row wraps at the largest text in a narrow pane", async () =>
   expect(flat(host("source-key").props.style)).toMatchObject({ flexBasis: "48%" });
   expect(keysFitInRow(290, 1, 3)).toBe(true);
   expect(keysFitInRow(200, 1, 3)).toBe(false);
+});
+
+/** The content style of the scroll view that holds a host element. */
+function scrollContentOf(id: string): Record<string, unknown> {
+  let node = host(id).parent;
+  while (node && node.props.contentContainerStyle === undefined) node = node.parent;
+  return flat(node?.props.contentContainerStyle);
+}
+
+test("the mixer and its EQ pane keep clear of a side rail", async () => {
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 59, bottom: 21, left: 59 });
+  await renderApp();
+  await pairWith();
+  expect(scrollContentOf("mixer-phone-layout")).toMatchObject({
+    paddingLeft: 59,
+    paddingRight: 59,
+  });
+  setWindow(951, 669); // unfolded, sideways: the rail sits on a side
+  expect(flat(host("eq-pane-scroll").props.contentContainerStyle)).toMatchObject({
+    paddingRight: 59,
+  });
+  expect(scrollContentOf("mixer-pane-layout")).toMatchObject({
+    paddingLeft: 59,
+  });
+});
+
+test("pairing keeps clear of a side rail", async () => {
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 59, bottom: 21, left: 59 });
+  await renderApp();
+  expect(flat(host("pairing-scroll").props.contentContainerStyle)).toMatchObject({
+    paddingLeft: 59,
+    paddingRight: 59,
+  });
 });
 
 test("unfolding while the EQ screen is open keeps it; Back returns to the two panes", async () => {
