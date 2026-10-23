@@ -106,8 +106,8 @@ jobs:
           check apps/desktop/src-tauri/Cargo.toml "$(cargo_version apps/desktop/src-tauri/Cargo.toml)"
           check packages/core/Cargo.toml "$(cargo_version packages/core/Cargo.toml)"
           check apps/tui/Cargo.toml "$(cargo_version apps/tui/Cargo.toml)"
-          check apps/mobile/package.json "$(node -p "require('./apps/mobile/package.json').version")"
-          check apps/mobile/app.json "$(node -p "require('./apps/mobile/app.json').expo.version")"
+          # The phone remote ships through TestFlight and keeps its own version;
+          # e2e/mobile/native-project.test.mjs checks its manifests agree.
           [ "$mismatch" = 0 ] || exit 1
           if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
             echo "Tag ${GITHUB_REF_NAME} does not match app version v${version}" >&2
