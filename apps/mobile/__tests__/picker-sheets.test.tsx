@@ -1,6 +1,8 @@
 import type { ReactElement } from "react";
 import { Text } from "react-native";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
+import type { DevicePairTarget } from "@/remote-session";
+import { DevicePairSheet } from "@/sheets/device-pair-sheet";
 import { OutputSheet } from "@/sheets/output-sheet";
 import { SheetPanel } from "@/sheets/sheet-panel";
 import { SourceSheet } from "@/sheets/source-sheet";
@@ -302,5 +304,70 @@ describe("speaker sheet", () => {
   test("the window keeps the active speaker even when it drops off the list", () => {
     mockSession = session({ outputs: [BT, NEW_BT] });
     expect(hostById(sheet(), "speaker-led").props.children).toBe("Mock Sonos");
+  });
+});
+
+describe("pair speaker sheet", () => {
+  const AIRPLAY: DevicePairTarget = { transport: "airplay", id: "ap", name: "Living Room AirPlay" };
+  const BLUETOOTH: DevicePairTarget = {
+    transport: "bluetooth",
+    id: "bt",
+    name: "New Bluetooth Speaker",
+  };
+  const session = (overrides: Record<string, unknown> = {}) => ({
+    devicePairing: false,
+    pairDevice: jest.fn(async () => true),
+    ...overrides,
+  });
+
+  test("AirPlay asks for the speaker's code in an LED field", () => {
+    mockSession = session();
+    const r = create(<DevicePairSheet target={AIRPLAY} onClose={jest.fn()} />);
+    expect(hostById(r, "pair-sheet-caption").props.children).toBe("Pair speaker");
+    expect(textOf(r)).toContain("Living Room AirPlay");
+    expect(textOf(r)).toContain("Enter the code the speaker shows. No code? Leave it blank.");
+    expect(hostById(r, "device-pin-input").props.maxLength).toBe(8);
+    expect(r.root.findAll((n) => n.props.testID === "pair-sheet-done")).toHaveLength(0);
+  });
+
+  test("the code keeps digits only, up to eight, and pairs with them", async () => {
+    const onClose = jest.fn();
+    mockSession = session();
+    const r = create(<DevicePairSheet target={AIRPLAY} onClose={onClose} />);
+    ReactTestRenderer.act(() => hostById(r, "device-pin-input").props.onChangeText("12a34b5678x9"));
+    expect(hostById(r, "device-pin-input").props.value).toBe("12345678");
+    await press(hostById(r, "device-pair-submit"));
+    expect(mockSession.pairDevice).toHaveBeenCalledWith(AIRPLAY, "12345678");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("Cancel closes without pairing", async () => {
+    const onClose = jest.fn();
+    mockSession = session();
+    await press(
+      hostById(
+        create(<DevicePairSheet target={AIRPLAY} onClose={onClose} />),
+        "device-pair-cancel",
+      ),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(mockSession.pairDevice).not.toHaveBeenCalled();
+  });
+
+  test("while pairing, the key reads Pairing… and neither key takes a tap", () => {
+    mockSession = session({ devicePairing: true });
+    const r = create(<DevicePairSheet target={AIRPLAY} onClose={jest.fn()} />);
+    expect(hostById(r, "device-pair-submit").props.accessibilityLabel).toBe("Pairing…");
+    expect(hostById(r, "device-pair-submit").props.onPress).toBeUndefined();
+    expect(hostById(r, "device-pair-cancel").props.onPress).toBeUndefined();
+  });
+
+  test("Bluetooth confirms on the speaker, with no code field", () => {
+    mockSession = session();
+    const r = create(<DevicePairSheet target={BLUETOOTH} onClose={jest.fn()} />);
+    expect(r.root.findAll((n) => n.props.testID === "device-pin-input")).toHaveLength(0);
+    expect(textOf(r)).toContain(
+      "Confirm pairing on the speaker or in the computer’s Bluetooth settings, then continue.",
+    );
   });
 });

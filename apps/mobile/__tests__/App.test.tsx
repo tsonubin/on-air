@@ -777,8 +777,11 @@ test("unpaired AirPlay asks for the speaker code, then pairs and connects", asyn
   expect(exists("output-sheet")).toBe(false);
   expect(exists("pair-sheet")).toBe(true);
   expect(api.activateOutput).not.toHaveBeenCalled();
-  // Red is only for live state; the speaker-code field sits in the faceplate palette.
-  expect(flat(host("device-pin-input").props.style).borderColor).toBe("#5c4a32");
+  // Red is only for live state; the speaker code is amber digits in an LED well.
+  expect(flat(host("device-pin-input").props.style)).toMatchObject({
+    color: "#e0a24b",
+    backgroundColor: "#070605",
+  });
   ReactTestRenderer.act(() => host("device-pin-input").props.onChangeText("11x11"));
   await press("device-pair-submit");
   expect(api.pairAirplay).toHaveBeenCalledWith(BASE, "ap-locked", "1111", TOKEN);
