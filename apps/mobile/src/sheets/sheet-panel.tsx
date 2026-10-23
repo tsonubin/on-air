@@ -1,6 +1,6 @@
 import { BottomSheet, RNHostView } from "@expo/ui";
 import type { ReactNode } from "react";
-import { Platform, Text, View } from "react-native";
+import { Platform, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, type } from "@/theme";
 import { Faceplate } from "@/ui/faceplate";
@@ -28,12 +28,22 @@ export function SheetPanel({
   children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const ios = Platform.OS === "ios";
   return (
     <BottomSheet {...sheetProps(spec)} isPresented onDismiss={onClose} testID={testID}>
-      {/* iOS sheets rest at a fixed detent, so the plate takes the sheet's size; Android's
-          sheet sizes to its content, so the plate takes the sheet's width and its own height. */}
-      <RNHostView matchContents={Platform.OS === "ios" ? false : { vertical: true }}>
-        <Faceplate style={{ flex: 0, flexGrow: 1 }}>
+      {/* iOS sheets rest at a fixed detent, so the plate takes the sheet's size. Android's sheet
+          sizes to its content, so the plate takes the sheet's width and its own height, capped
+          below the system bars and the 56 pt drag-handle zone so a long list scrolls. */}
+      <RNHostView matchContents={ios ? false : { vertical: true }}>
+        <Faceplate
+          testID={`${testID}-plate`}
+          style={{
+            flex: 0,
+            flexGrow: 1,
+            maxHeight: ios ? undefined : height - insets.top - insets.bottom - 56,
+          }}
+        >
           {/* The native sheet keeps its content clear of the home indicator; the plate runs
               under a side rail, so the content pads itself clear of one. */}
           <View

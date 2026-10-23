@@ -107,6 +107,36 @@ test("the faceplate fills an iOS detent and grows to its content on Android", ()
   }
 });
 
+test("on Android the plate never outgrows the screen, so a long list scrolls", () => {
+  const plate = () =>
+    flat(
+      hostById(
+        create(
+          <SheetPanel
+            spec={{ kind: "output", count: 9 }}
+            caption="Speaker"
+            onClose={jest.fn()}
+            testID="p"
+          >
+            <Text>Body</Text>
+          </SheetPanel>,
+        ),
+        "p-plate",
+      ).props.style,
+    );
+  const original = Platform.OS;
+  try {
+    // 844 pt window, less the 47 / 34 pt system bars and the sheet's 56 pt drag-handle zone.
+    (Platform as { OS: string }).OS = "android";
+    expect(plate().maxHeight).toBe(707);
+    // iOS sheets rest at fixed detents that already bound the plate.
+    (Platform as { OS: string }).OS = "ios";
+    expect(plate().maxHeight).toBeUndefined();
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
+});
+
 test("beside a side rail the plate runs under it and the content keeps clear", () => {
   jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 84, bottom: 34, left: 0 });
   try {
