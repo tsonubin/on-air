@@ -65,10 +65,12 @@ function MixerScreen() {
       {Platform.OS === "ios" ? (
         // More options lives in the native toolbar, which the folded iPhone Duo moves into its
         // side rail. The header is clear (no title, no fill) so the plate and the sign show through.
+        // The toolbar shows the header only while it is mounted; these options outlive the mixer
+        // (setOptions is never undone), so they must not show it themselves, or the pairing screen
+        // would keep an empty bar after Forget or an expired pairing.
         <>
           <Stack.Screen
             options={{
-              headerShown: true,
               headerTransparent: true,
               headerTitle: "",
               headerStyle: { backgroundColor: "transparent" },

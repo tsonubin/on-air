@@ -210,6 +210,12 @@ async function openMore() {
   await flush();
 }
 
+/** The header options the native stack would show for the current route. */
+const headerOptions = (): Record<string, unknown> =>
+  (tree as ReactTestRenderer.ReactTestRenderer).root
+    .find((n) => (n.type as unknown) === "NativeHeader")
+    .props.headerOptions();
+
 /** Every "More options" toolbar button on screen. */
 const moreToolbarButtons = () =>
   (tree as ReactTestRenderer.ReactTestRenderer).root.findAll(
@@ -1284,11 +1290,7 @@ test("iOS puts More options in the mixer's toolbar, where the folded Duo rails i
     children: "More options",
   });
   // A transparent header with no title, so the plate and the ONAIR sign show through it.
-  const options = (tree as ReactTestRenderer.ReactTestRenderer).root
-    .findAll((n) => (n.type as unknown) === "NativeScreenOptions")
-    .map((n) => n.props.options)
-    .find((o) => o.headerShown === true);
-  expect(options).toMatchObject({
+  expect(headerOptions()).toMatchObject({
     headerShown: true,
     headerTransparent: true,
     headerTitle: "",
@@ -1296,6 +1298,30 @@ test("iOS puts More options in the mixer's toolbar, where the folded Duo rails i
   });
   await openMore();
   expect(exists("connection-screen")).toBe(true);
+});
+
+test("forgetting the desktop takes the mixer's header with it", async () => {
+  await renderApp();
+  await pairWith();
+  await openMore();
+  await press("disconnect-menu-button");
+  expect(exists("pin-input")).toBe(true);
+  expect(headerOptions().headerShown).toBe(false);
+  expect(moreToolbarButtons()).toHaveLength(0);
+});
+
+test("an expired pairing leaves no mixer header over the pairing screen", async () => {
+  await renderApp();
+  await pairWith();
+  api.fetchStatus.mockRejectedValueOnce(new Error("Timeout"));
+  api.listInputs.mockRejectedValueOnce(
+    new client.HttpError("/api/inputs", 401, '{"error":"","code":"not_paired"}'),
+  );
+  await openMore();
+  await pressRefresh();
+  expect(exists("pin-input")).toBe(true);
+  expect(headerOptions().headerShown).toBe(false);
+  expect(moreToolbarButtons()).toHaveLength(0);
 });
 
 test("Android keeps the in-content More key", async () => {
