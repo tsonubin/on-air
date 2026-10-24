@@ -136,6 +136,22 @@
 - [ ] **Step 4: Run the full suite.** Expected: PASS.
 - [ ] **Step 5: Commit** `fix(mobile): More options moves to the iOS toolbar`.
 
+### Revision (2026-10-25): Tasks 4–6 replaced
+
+The Task 1 spike showed a form-sheet route's Done stays in a horizontal bar on the folded Duo. The owner chose the spec's fallback, so Tasks 4–6 below are not run. In their place:
+
+**Task 4′: iOS sheets drop the in-content Done.**
+- File: `apps/mobile/src/sheets/sheet-panel.tsx`.
+- Tests: `apps/mobile/__tests__/picker-sheets.test.tsx`, plus `App.test.tsx` for any test that presses `source-sheet-done` or `output-sheet-done`.
+- The change: `SheetPanel` renders its Done key only on Android. The caption row stays on both platforms.
+- Failing tests first:
+  - iOS: `p-done` doesn't exist, and `p-caption` does.
+  - Android: `p-done` exists and calls `onClose`.
+  - The sheet's `onDismiss` still calls `onClose`, since swipe-down is now iOS's only close.
+- Commit: `fix(mobile): iOS picker sheets close by swipe, with nothing beside the Duo rail`.
+
+Tasks 7–8 run as written, without the route checks.
+
 ### Task 4: Sheet routes, `SheetPanel` without `BottomSheet`, and the Source route
 
 **Files:**

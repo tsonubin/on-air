@@ -50,6 +50,11 @@ From "Preparing your app for iPhone Duo" (Apple developer documentation):
 
 ## Decisions
 
+- **Revised 2026-10-25, after the folded-Duo spike:**
+  - A mixer toolbar button moves into the rail.
+  - A react-native-screens form sheet's bar stays horizontal: its Done sits across the top of the sheet, not in the rail.
+  - The owner chose the fallback. The pickers keep their Expo UI faceplate sheets from PR #35 and drop the in-content Done on iOS; swiping down or tapping outside closes them. Android keeps its Done.
+  - "Pickers as form-sheet routes" below is superseded. Reset and More options stand as designed.
 - **The owner chose, in conversation:**
   - System bars everywhere (over "system bars, keep sheets" and "only fix
     Reset").
@@ -85,7 +90,9 @@ From "Preparing your app for iPhone Duo" (Apple developer documentation):
   iPad) it stays in the horizontal bar over the mixer pane.
 - Android keeps the in-content key.
 
-### Pickers as form-sheet routes
+### Pickers as form-sheet routes (superseded, see Decisions)
+
+What ships instead: `SheetPanel` keeps its caption on both platforms, and renders its Done key on Android only.
 
 - **Routes:** `app/source.tsx`, `app/speaker.tsx` and `app/pair-speaker.tsx`
   (params `transport`, `id`, `name`), inside the paired-only
