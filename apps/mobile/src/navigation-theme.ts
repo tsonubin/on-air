@@ -19,13 +19,15 @@ export const navigationTheme = {
 
 /**
  * A screen's header shows its title as an uppercase caption. Every screen is
- * pushed straight from the Mixer, whose plain `title` iOS uses as the back label.
+ * pushed straight from the Mixer, so its back button says "Mixer". The Mixer's
+ * own header has no title (on iOS it only holds the toolbar), so iOS can't
+ * borrow one for the back label.
  */
 export function titledScreen(title: string) {
-  return { title, headerTitle: title.toUpperCase() };
+  return { title, headerTitle: title.toUpperCase(), headerBackTitle: "Mixer" };
 }
 
-/** The pushed screens, in stack order. Mixer (index) has no header. */
+/** The pushed screens, in stack order. Mixer (index) shows a header only for its iOS toolbar. */
 export const stackScreens = [
   { name: "equalizer", options: titledScreen("Equalizer") },
   { name: "audio-format", options: titledScreen("Audio format") },

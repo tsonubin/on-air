@@ -71,17 +71,18 @@ test("navigation theme uses the faceplate palette with amber controls", () => {
   });
 });
 
-test("native header titles are uppercase captions; back buttons keep the plain title", () => {
+test("native header titles are uppercase captions; back buttons say Mixer", () => {
   expect(titledScreen("Audio format")).toEqual({
     title: "Audio format",
     headerTitle: "AUDIO FORMAT",
+    headerBackTitle: "Mixer",
   });
-  // Every screen is pushed straight from the Mixer, whose plain title becomes
-  // the back label; the Sound menu and its "Sound" back labels are gone.
+  // Every screen is pushed straight from the Mixer. The Mixer's own header has no title
+  // (it only holds the iOS toolbar), so each screen names its back button explicitly.
   const byName = Object.fromEntries(stackScreens.map((s) => [s.name, s.options]));
   expect(Object.keys(byName)).toEqual(["equalizer", "audio-format", "connection"]);
   for (const options of Object.values(byName)) {
-    expect(options).not.toHaveProperty("headerBackTitle");
+    expect(options).toMatchObject({ headerBackTitle: "Mixer" });
   }
 });
 
