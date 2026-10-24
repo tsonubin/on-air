@@ -5,7 +5,7 @@ The desktop installer drives external tools (cargo, pnpm, makepkg, sudo,
 flatpak, ...). This suite runs it with PATH set to a private bin directory:
 real coreutils are symlinked in, everything that would build, authenticate,
 or reach the network is a mock that records its invocation as JSONL. A
-throwaway fixture tree stands in for the checkout (symlinks to the real
+throwaway fixture tree stands in for the checkout (copies of the real
 inputs the installer reads) so every write lands in the sandbox and can be
 asserted on failure.
 
@@ -120,8 +120,8 @@ REAL_TOOLS = (
     "mktemp", "python3",
 )
 
-# Inputs packaging/install.sh reads from the checkout; symlinked into the
-# fixture so a missing real input still fails the suite.
+# Inputs packaging/install.sh reads from the checkout; copied into the
+# fixture so installer writes cannot escape into the real checkout.
 FIXTURE_INPUTS = (
     "packaging/install.sh",
     "LICENSE",
@@ -242,7 +242,10 @@ class DesktopInstallerTest(unittest.TestCase):
             self.assertTrue(source.exists(), f"missing installer input {rel}")
             dest = self.root / rel
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.symlink_to(source)
+            if source.is_dir():
+                shutil.copytree(source, dest)
+            else:
+                shutil.copy2(source, dest)
 
     def make_bin(self, mocks):
         bin_dir = self.work / f"bin-{self.bin_runs}"
@@ -375,11 +378,11 @@ class DesktopInstallerTest(unittest.TestCase):
         self.assertNoInstallation(run)
         self.assertNothingWritten(run)
 
-    def test_missing_pnpm_and_npm_stop_before_building(self):
-        mocks = tuple(m for m in DEFAULT_MOCKS if m not in ("pnpm", "npm"))
+    def test_missing_pnpm_and_corepack_stop_before_building(self):
+        mocks = tuple(m for m in DEFAULT_MOCKS if m not in ("pnpm", "corepack"))
         run = self.run_installer(("user",), mocks=mocks)
         self.assertNotEqual(run.result.returncode, 0)
-        self.assertIn("pnpm or npm is required", run.result.stderr)
+        self.assertIn("pnpm or corepack is required", run.result.stderr)
         self.assertNoInstallation(run)
         self.assertNothingWritten(run)
 
