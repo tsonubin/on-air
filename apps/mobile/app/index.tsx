@@ -2,8 +2,9 @@ import { FieldGroup } from "@expo/ui";
 import type { OutputInfo } from "@on-air/api-types";
 import { outputPhase } from "@on-air/api-types";
 import { router } from "expo-router";
+import { Stack } from "expo-router/stack";
 import { useState } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 import { EqPane } from "@/eq-panel";
 import { MixerHome } from "@/mixer-home";
 import { PairingHome } from "@/pairing-home";
@@ -58,8 +59,32 @@ function MixerScreen() {
     setPairTarget({ transport: output.transport, id: output.id, name: output.name });
   };
 
+  const openMore = () => router.push("/connection");
   return (
     <>
+      {Platform.OS === "ios" ? (
+        // More options lives in the native toolbar, which the folded iPhone Duo moves into its
+        // side rail. The header is clear (no title, no fill) so the plate and the sign show through.
+        <>
+          <Stack.Screen
+            options={{
+              headerShown: true,
+              headerTransparent: true,
+              headerTitle: "",
+              headerStyle: { backgroundColor: "transparent" },
+            }}
+          />
+          <Stack.Toolbar placement="right">
+            <Stack.Toolbar.Button
+              icon="ellipsis"
+              accessibilityLabel="More options"
+              onPress={openMore}
+            >
+              More options
+            </Stack.Toolbar.Button>
+          </Stack.Toolbar>
+        </>
+      ) : null}
       <MixerHome
         activeInput={remote.activeInputLabel}
         activeOutput={remote.activeOutput?.device_name ?? ""}
@@ -81,7 +106,7 @@ function MixerScreen() {
         eqFlat={remote.gains.every((g) => g === 0)}
         onOpenEqualizer={() => router.push("/equalizer")}
         onOpenFormat={() => router.push("/audio-format")}
-        onOpenMore={() => router.push("/connection")}
+        onOpenMore={Platform.OS === "ios" ? undefined : openMore}
         onVolumeChange={remote.applyVolume}
         onCdPlayPause={() => void remote.controlCd(cd.playing ? "pause" : "play")}
         onCdPrev={() => void remote.controlCd("prev")}

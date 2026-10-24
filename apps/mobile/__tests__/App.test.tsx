@@ -201,6 +201,23 @@ function toolbarButton(label: string): ReactTestInstance {
   );
 }
 
+/** Taps the mixer's "More options" toolbar button (iOS), which opens the Connection screen. */
+async function openMore() {
+  const button = toolbarButton("More options");
+  await ReactTestRenderer.act(async () => {
+    await button.props.onPress();
+  });
+  await flush();
+}
+
+/** Every "More options" toolbar button on screen. */
+const moreToolbarButtons = () =>
+  (tree as ReactTestRenderer.ReactTestRenderer).root.findAll(
+    (node) =>
+      (node.type as unknown) === "NativeToolbarButton" &&
+      node.props.accessibilityLabel === "More options",
+  );
+
 /** Taps the Connection screen's top-right refresh button. */
 async function pressRefresh() {
   const button = toolbarButton("Refresh connection");
@@ -329,7 +346,7 @@ test("happy path: discover, pair, stream, adjust, and forget the desktop", async
   // One back reaches the mixer; Connection shows the paired host, and Forget returns to pairing.
   await press("native-back");
   expect(exists("mixer-screen")).toBe(true);
-  await press("more-button");
+  await openMore();
   expect(host("paired-host").props.children).toBe(STUDIO.host);
   expect(text()).toContain("Connected to desktop");
   await press("disconnect-menu-button");
@@ -406,7 +423,7 @@ test("a speaker that is still starting is not shown as live; a failed one can be
     device_name: "Mock Sonos",
     state: "failed",
   });
-  await press("more-button");
+  await openMore();
   await pressRefresh();
   await press("native-back");
   expect(announced()).toBe("Status: Speaker failed");
@@ -429,7 +446,7 @@ test("restores a saved pairing, including a non-default port, without discovery"
   expect(api.verifyPin).not.toHaveBeenCalled();
   expect(api.discoverOnAir).not.toHaveBeenCalled();
   expect(api.listInputs).toHaveBeenCalledWith("http://192.168.5.14:48000", "saved-token");
-  await press("more-button");
+  await openMore();
   expect(host("paired-host").props.children).toBe("192.168.5.14:48000");
 });
 
@@ -644,7 +661,7 @@ test("an expired pairing returns to pairing with the desktop still selected", as
   api.listInputs.mockRejectedValueOnce(
     new client.HttpError("/api/inputs", 401, '{"error":"","code":"not_paired"}'),
   );
-  await press("more-button");
+  await openMore();
   await pressRefresh();
   expect(text()).toContain("Pair your Mac");
   expect(text()).toContain("Pairing expired");
@@ -661,7 +678,7 @@ test("a paused desktop keeps its pairing and disables sound settings", async () 
       new client.HttpError("/api/x", 503, '{"error":"","code":"service_paused"}'),
     );
   }
-  await press("more-button");
+  await openMore();
   await pressRefresh();
   expect(text()).toContain("Connected to desktop");
   expect(text()).toContain("desktop service is paused");
@@ -955,7 +972,7 @@ test("a paused desktop disables the EQ pane", async () => {
       new client.HttpError("/api/x", 503, '{"error":"","code":"service_paused"}'),
     );
   }
-  await press("more-button");
+  await openMore();
   await pressRefresh();
   await press("native-back");
   setWindow(669, 951);
@@ -1097,7 +1114,7 @@ test("live state makes the lamp glow; ready does not", async () => {
 test("connection: refresh is a top-right toolbar button, disabled while it runs", async () => {
   await renderApp();
   await pairWith();
-  await press("more-button");
+  await openMore();
   const refresh = toolbarButton("Refresh connection");
   expect(refresh.props.icon).toBe("arrow.clockwise");
   let toolbar = refresh.parent;
@@ -1187,7 +1204,7 @@ test("volume shows on an LED readout that dims when the desktop is paused", asyn
       new client.HttpError("/api/x", 503, '{"error":"","code":"service_paused"}'),
     );
   }
-  await press("more-button");
+  await openMore();
   await pressRefresh();
   await press("native-back");
   expect(announced()).toBe("Desktop service is paused");
@@ -1256,4 +1273,47 @@ test("pairing: the Connect key stays lit with a visible spinner while the code i
   expect(flat(key.props.style)).toMatchObject({ backgroundColor: "#e0a24b" });
   const spinner = key.find((n) => (n.type as unknown) === "ActivityIndicator");
   expect(spinner.props.color).toBe("#141210");
+});
+
+test("iOS puts More options in the mixer's toolbar, where the folded Duo rails it", async () => {
+  await renderApp();
+  await pairWith();
+  expect(exists("more-button")).toBe(false);
+  expect(toolbarButton("More options").props).toMatchObject({
+    icon: "ellipsis",
+    children: "More options",
+  });
+  // A transparent header with no title, so the plate and the ONAIR sign show through it.
+  const options = (tree as ReactTestRenderer.ReactTestRenderer).root
+    .findAll((n) => (n.type as unknown) === "NativeScreenOptions")
+    .map((n) => n.props.options)
+    .find((o) => o.headerShown === true);
+  expect(options).toMatchObject({
+    headerShown: true,
+    headerTransparent: true,
+    headerTitle: "",
+    headerStyle: { backgroundColor: "transparent" },
+  });
+  await openMore();
+  expect(exists("connection-screen")).toBe(true);
+});
+
+test("Android keeps the in-content More key", async () => {
+  const original = Platform.OS;
+  (Platform as { OS: string }).OS = "android";
+  try {
+    await renderApp();
+    await pairWith();
+    expect(moreToolbarButtons()).toHaveLength(0);
+    await press("more-button");
+    expect(exists("connection-screen")).toBe(true);
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
+});
+
+test("More options appears only on the paired mixer", async () => {
+  await renderApp();
+  expect(exists("pin-input")).toBe(true); // the pairing screen
+  expect(moreToolbarButtons()).toHaveLength(0);
 });
