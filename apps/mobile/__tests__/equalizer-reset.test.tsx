@@ -82,7 +82,12 @@ test("iOS keeps Reset in the native toolbar", () => {
   const view = render(<EqualizerScreen />);
   expect(view.queryByTestId("eq-reset")).toBeNull();
   const [button] = hostsOf(view, "NativeToolbarButton");
-  expect(button.props.children).toBe("Reset");
+  // An icon as well as a title: the folded iPhone Duo rails only bar items that have one.
+  expect(button.props).toMatchObject({
+    icon: "arrow.counterclockwise",
+    accessibilityLabel: "Reset equalizer",
+    children: "Reset",
+  });
   expect(button.props.disabled).toBe(false);
   button.props.onPress();
   expect(mockSession.applyEq).toHaveBeenCalledWith([0, 0, 0, 0, 0]);

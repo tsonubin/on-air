@@ -66,8 +66,14 @@ export default function EqualizerScreen() {
           options={{ headerRight: () => <HeaderReset disabled={resetDisabled} onPress={reset} /> }}
         />
       ) : (
+        // An icon as well as a title: the folded iPhone Duo moves only bar items with one into its rail.
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button disabled={resetDisabled} onPress={reset}>
+          <Stack.Toolbar.Button
+            icon="arrow.counterclockwise"
+            accessibilityLabel="Reset equalizer"
+            disabled={resetDisabled}
+            onPress={reset}
+          >
             Reset
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
