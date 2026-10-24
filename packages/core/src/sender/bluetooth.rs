@@ -314,7 +314,10 @@ impl AudioSender for BluetoothSender {
         // Apply retained volume before subscribing; rollback cannot emit a burst
         // at the default volume while the caller restores settings later.
         self.set_volume(config.volume).await?;
-        let live = self.live.as_mut().unwrap();
+        let live = self
+            .live
+            .as_mut()
+            .expect("live playback was just set above");
         let mut rx = self.audio_tx.subscribe();
         let (writer_tx, writer_rx) = sync_channel::<Bytes>(8);
         let sink = live.opened.sink.clone();

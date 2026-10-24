@@ -19,6 +19,7 @@ pub mod net;
 pub mod pairing;
 pub mod patchbay;
 pub mod pipeline;
+pub(crate) mod platform;
 pub mod sender;
 pub mod session;
 pub mod settings;

@@ -122,3 +122,16 @@ fn same_rate_streaming_stereo_is_lossless() {
         vec![0.1, -0.1, 0.2, -0.2]
     );
 }
+
+/// An input rate of zero has no defined conversion: the ratio is infinite
+/// and the interpolator rejects it by panicking, which would take the
+/// processing thread with it. Passing the samples through unchanged is
+/// wrong but survivable; a dead audio thread is not.
+#[test]
+fn a_zero_input_rate_passes_through_instead_of_panicking() {
+    let mut r = StreamingResampler::new(0, 48_000, 2);
+    assert_eq!(
+        r.process(&[0.1, -0.1, 0.2, -0.2]),
+        vec![0.1, -0.1, 0.2, -0.2]
+    );
+}

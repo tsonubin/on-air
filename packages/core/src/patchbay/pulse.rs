@@ -140,7 +140,7 @@ impl Pulse {
     }
 
     async fn run(&self, args: &[String]) -> Result<String, String> {
-        if !cfg!(target_os = "linux") {
+        if !crate::platform::PATCHBAY {
             return Err("The patchbay requires Linux with pipewire-pulse or PulseAudio.".into());
         }
         let mut command = tokio::process::Command::new("pactl");

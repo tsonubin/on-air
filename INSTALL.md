@@ -1,7 +1,8 @@
 # Install on-air
 
-on-air captures audio on your computer and sends it to **one** wireless
-output at a time: AirPlay, Bluetooth, or Sonos. On Linux the core runs as a
+on-air captures audio on your computer and sends it to wireless
+outputs: AirPlay, Bluetooth, or Sonos — one per session, or several at once
+inside a sync group. On Linux the core runs as a
 user service controlled by the `on-air` terminal UI; on macOS and Windows
 the desktop app runs in the tray. Both start at login and are controllable
 from the phone remote on the same LAN. The phone finds the desktop by
@@ -163,10 +164,10 @@ The full asset list and how the recipes pick their checksums up is in
 
 ## Build from source
 
-Needs Rust stable, Node 22, pnpm 9 (`corepack enable` reads the pinned
-version from `package.json`), and on Linux: `libwebkit2gtk-4.1-dev`,
-`libgtk-3-dev`, `libappindicator3-dev`, `librsvg2-dev`, `libasound2-dev`,
-`pkg-config`, `libssl-dev`.
+Needs Rust 1.99.1 (the pinned toolchain includes clippy and rustfmt), Node 22,
+pnpm 9 (`corepack enable` reads the pinned version from `package.json`), and on
+Linux: `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libappindicator3-dev`,
+`librsvg2-dev`, `libasound2-dev`, `pkg-config`, `libssl-dev`.
 
 ```bash
 pnpm install

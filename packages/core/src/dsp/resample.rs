@@ -83,7 +83,13 @@ pub struct StreamingResampler {
 
 impl StreamingResampler {
     pub fn new(input_rate_hz: u32, output_rate_hz: u32, channels: usize) -> Self {
-        let inner = if input_rate_hz == output_rate_hz {
+        // A zero input rate is not a rate we can convert at: the ratio is
+        // infinite and `Async` rejects it with a panic that would take the
+        // processing thread down. Nothing downstream can fix that either,
+        // so pass the samples through unchanged -- imperfect audio beats a
+        // dead audio thread -- and leave the caller's own validation to
+        // decide whether a zero rate was acceptable in the first place.
+        let inner = if input_rate_hz == 0 || input_rate_hz == output_rate_hz {
             None
         } else {
             Some(PcmResampler::new(input_rate_hz, output_rate_hz, channels))

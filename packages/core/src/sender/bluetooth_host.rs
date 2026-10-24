@@ -108,8 +108,30 @@ mod platform {
     use std::process::Command;
     use std::time::{Duration, Instant};
 
-    fn bluetoothctl(args: &[&str]) -> String {
-        Command::new("bluetoothctl")
+    /// Total wall-clock budget for the `bluetoothctl` calls in one `list()`.
+    /// The listing makes several of them and each is separately bounded, so a
+    /// wedged bus would otherwise cost a full timeout *per device* — 2 + 2N
+    /// calls for N paired devices, serially, on the request path behind
+    /// `GET /api/outputs`. One budget makes that part of the cost independent
+    /// of how many speakers the user owns. `pulse_a2dp_sinks`, which runs
+    /// first, is bounded separately at 2 s, so the listing's true worst case
+    /// is this budget plus that.
+    const LISTING_BUDGET: Duration = Duration::from_secs(3);
+
+    /// One `bluetoothctl` query, allowed at most the time left before
+    /// `deadline`. Returns empty rather than spending past it: a listing that
+    /// runs out of time returns what it has, and the next poll refines it.
+    fn bluetoothctl(args: &[&str], deadline: Instant) -> String {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return String::new();
+        }
+        // `timeout` accepts fractional seconds, so pass what is actually left
+        // (to the millisecond, never 0, which would disable the timeout).
+        let millis = remaining.as_millis().max(1);
+        Command::new("timeout")
+            .arg(format!("{}.{:03}", millis / 1000, millis % 1000))
+            .arg("bluetoothctl")
             .args(args)
             .output()
             .ok()
@@ -120,8 +142,12 @@ mod platform {
 
     pub fn list() -> Vec<BluetoothDevice> {
         let mut devices = pulse_a2dp_sinks();
-        for (addr, name) in parse_bluetoothctl_devices(&bluetoothctl(&["devices", "Paired"])) {
-            let info = parse_bluetoothctl_info(&bluetoothctl(&["info", &addr]));
+        // Start the budget after Pulse discovery, which has its own timeout.
+        let deadline = Instant::now() + LISTING_BUDGET;
+        for (addr, name) in
+            parse_bluetoothctl_devices(&bluetoothctl(&["devices", "Paired"], deadline))
+        {
+            let info = parse_bluetoothctl_info(&bluetoothctl(&["info", &addr], deadline));
             if !info.audio_sink && info.paired {
                 // Some adapters omit UUID text until connected; keep paired devices
                 // that already have a Pulse sink, skip obvious non-audio otherwise.
@@ -137,11 +163,11 @@ mod platform {
                 audio_endpoint: None,
             });
         }
-        for (addr, name) in parse_bluetoothctl_devices(&bluetoothctl(&["devices"])) {
+        for (addr, name) in parse_bluetoothctl_devices(&bluetoothctl(&["devices"], deadline)) {
             if devices.iter().any(|device| device.id == addr) {
                 continue;
             }
-            let info = parse_bluetoothctl_info(&bluetoothctl(&["info", &addr]));
+            let info = parse_bluetoothctl_info(&bluetoothctl(&["info", &addr], deadline));
             if !info.audio_sink && info.paired {
                 continue;
             }

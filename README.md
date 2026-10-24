@@ -6,19 +6,20 @@
 Stream your computer's audio to AirPlay, Bluetooth or Sonos speakers.
 On Omarchy 4, a compact native Quickshell patchbay mixes inputs and routes
 audio to groups of local and network outputs. The terminal, tray app and
-phone remote retain their single-output controls. Everything stays on your
-LAN: there is no account and no cloud.
+phone remote use the same individual-output controls; the Linux patchbay adds
+group routing. Everything stays on your LAN: there is no account and no cloud.
 
 - **Sources:** System audio (what the computer plays), microphones and USB
   audio interfaces, or an audio CD. On Linux the list comes from PipeWire, so
   ALSA aliases and on-air's own buses never show up.
 - **Omarchy panel:** native Qt Quick/QML, system device defaults, input
   mixes, output groups and hanging patch cables. See [the panel guide](apps/quickshell/README.md).
-- **Single-output clients:** Sonos (direct UPnP), AirPlay (OwnTone or pyatv on Linux and
-  Windows, the system route picker on macOS), Bluetooth A2DP, and on Linux
-  this computer's own speakers or headphone jack. Switching outputs tears the
-  previous one down first. System audio cannot play on this computer, since
-  that would loop it back into itself.
+- **Outputs:** Individual Sonos (direct UPnP), AirPlay (OwnTone or pyatv on Linux
+  and Windows, the system route picker on macOS), Bluetooth A2DP, and on Linux
+  this computer's own speakers or headphone jack. Switching an individual output
+  tears the previous one down first; patchbay groups can route several outputs.
+  System audio cannot play on this computer, since that would loop it back into
+  itself.
 - **Mixer:** volume, a five-band EQ, input and output sample rates, a level
   meter, CD transport.
 - **Remote:** the phone app finds the desktop on the LAN, pairs with a PIN
@@ -63,6 +64,8 @@ on-air monitor on|off|toggle        # audio capture and streaming; the service k
 on-air service start|stop|restart   # the on-air-core systemd user service
 on-air status [--json]              # what is running and where
 on-air bar                          # one Waybar-style JSON line for a bar module
+on-air audio check [--json]         # benchmark audio and recommend a buffer
+on-air firewall [allow]             # show firewall help or authorize repair
 ```
 
 On macOS and Windows the tray app does the same: closing the window hides
@@ -78,7 +81,7 @@ desktop shows.
 
 The core is one Rust process. Its original exclusive session captures audio, runs it through EQ and a
 rate bridge, publishes PCM on an in-process bus, and owns exactly one
-*sender* at a time. Sonos and AirPlay senders point the speaker at a WAV
+*sender* per session. Sonos and AirPlay senders point the speaker at a WAV
 stream the core serves under a per-activation nonce; the Bluetooth sender
 writes to the OS audio sink. A small HTTP and WebSocket control plane on
 port 47990 is the only way in: the terminal UI, the tray window and the
@@ -114,7 +117,9 @@ docs                 the Omarchy guide, a domain glossary, design records
 
 The domain vocabulary (exclusive output, rate bridge, stereo pair, error
 envelope) is in [docs/glossary.md](docs/glossary.md); the design records
-behind each milestone are in [docs/design](docs/design).
+behind each milestone are in [docs/design](docs/design), and how the
+terminal UI, tray app and phone remote sit across Linux, macOS and Windows is
+sketched in [docs/DESIGN-cross-platform.md](docs/DESIGN-cross-platform.md).
 
 ## Develop
 
