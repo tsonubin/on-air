@@ -37,14 +37,21 @@ LAN: there is no account and no cloud.
 
 ## Install
 
-On Omarchy or Arch, from a clone (needs Rust and `base-devel`):
+On Omarchy or Arch:
 
 ```bash
-git clone https://github.com/tsonubin/on-air.git && cd on-air
-packaging/omarchy/install.sh   # builds, installs, enables the service, prints the Omarchy snippets
-sh packaging/omarchy/install-plugin.sh --enable  # optional native Omarchy 4 panel
+curl -fsSL https://raw.githubusercontent.com/tsonubin/on-air/main/packaging/omarchy/install.sh | sh
 on-air                         # the terminal UI
 ```
+
+It installs the latest release's prebuilt binaries as a pacman package
+(nothing compiles), starts the `on-air-core` service and prints the
+Omarchy snippets. Run it again to update. From a clone (needs Rust and
+`base-devel`), `packaging/omarchy/install.sh --checkout` builds your
+working tree instead, and `sh packaging/omarchy/install-plugin.sh
+--enable` adds the optional native Omarchy 4 panel. Prebuilt installs
+need a release with the terminal UI binaries (v0.2.0 or newer; v0.1.0
+predates them); until one is published, use `--checkout` from a clone.
 
 Every other path, including Homebrew, winget, APT, RPM, Flatpak, Nix and
 building from source, is in [INSTALL.md](INSTALL.md).

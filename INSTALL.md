@@ -22,24 +22,34 @@ from a clone.
 ## Omarchy / Arch (recommended on Linux)
 
 The core runs as a systemd user service and the `on-air` terminal UI
-controls it: no WebKit, no GPU toolkit, themed by your terminal. From a
-clone (needs Rust and `base-devel`):
+controls it: no WebKit, no GPU toolkit, themed by your terminal.
 
 ```bash
-git clone https://github.com/tsonubin/on-air.git && cd on-air
-packaging/omarchy/install.sh      # makepkg, sudo pacman -U, enable the service, print the snippets
+curl -fsSL https://raw.githubusercontent.com/tsonubin/on-air/main/packaging/omarchy/install.sh | sh
 on-air                            # the terminal UI; `on-air --help` for the subcommands
 ```
 
-It builds your working tree, uncommitted edits included. Rebuilds are
-incremental (compiled output lives in `target/omarchy/`); pass `--clean` to
-rebuild everything. The launcher entry, the `Super+Shift+Alt+O` hotkey, the
-menu rows, the bar module and the sleep notes are in
+The installer builds the `on-air-bin` pacman package from the latest
+release's prebuilt binaries (checked against its `SHA256SUMS`; nothing
+compiles), installs it with `sudo pacman -U`, starts the `on-air-core`
+user service and prints the Omarchy snippets. Run it again to update.
+Prebuilt installs need a release with the terminal UI binaries and the
+recipes (v0.2.0 or newer; v0.1.0 predates them).
+
+From a clone (needs Rust and `base-devel`), `packaging/omarchy/install.sh`
+takes the same options plus `--checkout`, which builds your working tree,
+uncommitted edits included. Rebuilds are incremental (compiled output
+lives in `target/omarchy/`); pass `--clean` to rebuild everything.
+`--source` builds the release from source instead and `--version X.Y.Z`
+picks a specific release. The launcher entry, the `Super+Shift+Alt+O`
+hotkey, the menu rows, the bar module and the sleep notes are in
 [docs/omarchy.md](docs/omarchy.md).
 
 The AUR recipes under `packaging/aur/` (`on-air` from source, `on-air-bin`
 prebuilt, `on-air-desktop-bin` for the GUI) are not published to the AUR
-yet. From the tree: `cd packaging/aur/<package> && makepkg -si`.
+yet. From the tree: `cd packaging/aur/<package> && makepkg -si` (the
+`-bin` recipes need `packaging/update-checksums.sh` to fill their binary
+checksums first).
 
 ## Desktop app on Linux
 
@@ -219,7 +229,7 @@ unsigned until a production keystore is configured.
 
 | Manager | Files | User command |
 | --- | --- | --- |
-| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/on-air` | `packaging/omarchy/install.sh` |
+| Omarchy / Arch | `packaging/omarchy/`, `packaging/aur/{on-air,on-air-bin}` | `curl -fsSL …/packaging/omarchy/install.sh \| sh` |
 | Desktop on Linux | `packaging/install.sh`, `packaging/flatpak/` | `packaging/install.sh [yay\|flatpak\|user]` |
 | Homebrew | `Casks/on-air.rb`, `Formula/on-air-core.rb` | `brew install --cask on-air` |
 | Nix | `flake.nix`, `packaging/nix/` | `nix run .#on-air-core` |

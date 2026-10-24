@@ -1,0 +1,7 @@
+# Keep makepkg output (sources, src/, pkg/, built packages) out of the AUR repo.
+*
+!.gitignore
+!.SRCINFO
+!LICENSE
+!PKGBUILD
+!on-air.install

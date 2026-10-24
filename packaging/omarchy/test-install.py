@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Exercise the installer without compiling or installing system packages."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
 
 
 INSTALLER = Path(__file__).resolve().with_name("install.sh")
+REPO = INSTALLER.parent.parent.parent
 MOCK = r'''#!/usr/bin/env python3
 import json
 import os
@@ -42,7 +45,7 @@ elif command == "sudo":
 
 
 class InstallerTest(unittest.TestCase):
-    def run_installer(self, **extra_env):
+    def run_installer(self, args=(), **extra_env):
         temporary = tempfile.TemporaryDirectory(prefix="on-air-install-test-")
         self.addCleanup(temporary.cleanup)
         work = Path(temporary.name)
@@ -58,7 +61,7 @@ class InstallerTest(unittest.TestCase):
         package = work / "package output" / "on-air-0.2.0-1-x86_64.pkg.tar.zst"
         package.parent.mkdir()
         result = subprocess.run(
-            ["sh", str(INSTALLER)],
+            ["sh", str(INSTALLER), *args],
             env={
                 **os.environ,
                 "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -75,20 +78,44 @@ class InstallerTest(unittest.TestCase):
         return result, calls, package
 
     def test_install_preserves_sudo_authentication(self):
-        result, calls, package = self.run_installer()
+        result, calls, package = self.run_installer(["--checkout"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(["sudo", "pacman", "-U", "--", str(package)], calls)
-        self.assertIn(["systemctl", "--user", "enable", "--now", "on-air-core"], calls)
+        self.assertIn(["systemctl", "--user", "enable", "on-air-core"], calls)
+        self.assertIn(["systemctl", "--user", "restart", "on-air-core"], calls)
+
+    def test_prebuilt_release_installs_without_compiling(self):
+        temporary = tempfile.TemporaryDirectory(prefix="on-air-release-test-")
+        self.addCleanup(temporary.cleanup)
+        fake = Path(temporary.name)
+        raw = fake / "raw" / "v9.0.0" / "packaging" / "aur"
+        raw.mkdir(parents=True)
+        shutil.copytree(REPO / "packaging/aur/on-air-bin", raw / "on-air-bin")
+        shutil.copytree(REPO / "packaging/aur/on-air", raw / "on-air")
+        downloads = fake / "releases" / "download" / "v9.0.0"
+        downloads.mkdir(parents=True)
+        names = ("on-air-core-serve-linux-x86_64", "on-air-tui-linux-x86_64",
+                 "on-air-core-serve-linux-aarch64", "on-air-tui-linux-aarch64")
+        lines = [f"{hashlib.sha256(n.encode()).hexdigest()}  {n}" for n in names]
+        (downloads / "SHA256SUMS").write_text("\n".join(lines) + "\n")
+        result, calls, package = self.run_installer(
+            ["--version", "9.0.0"],
+            ON_AIR_RAW_URL=f"file://{fake / 'raw'}",
+            ON_AIR_RELEASE_URL=f"file://{fake / 'releases'}",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(["sudo", "pacman", "-U", "--", str(package)], calls)
+        self.assertFalse(any(call[0] in ("cargo", "git") for call in calls))
 
     def test_authentication_failure_keeps_package_and_stops_before_service(self):
-        result, calls, package = self.run_installer(INSTALL_TEST_AUTH_FAIL="1")
+        result, calls, package = self.run_installer(["--checkout"], INSTALL_TEST_AUTH_FAIL="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue(package.is_file())
         self.assertIn(str(package), result.stderr)
         self.assertFalse(any(call[0] == "systemctl" for call in calls))
 
     def test_build_failure_does_not_attempt_installation(self):
-        result, calls, _ = self.run_installer(INSTALL_TEST_BUILD_FAIL="1")
+        result, calls, _ = self.run_installer(["--checkout"], INSTALL_TEST_BUILD_FAIL="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any(call[0] in ("sudo", "systemctl") for call in calls))
 

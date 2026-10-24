@@ -7,7 +7,7 @@ directly.
 
 | Path | What it is |
 | --- | --- |
-| `omarchy/` | The Linux package's files: systemd user unit, launcher entry, icon, Omarchy snippets, the `install.sh` that builds a clone with `makepkg`, and `test.sh`, which CI runs. |
+| `omarchy/` | The Linux package's files: systemd user unit, launcher entry, icon, Omarchy snippets, the one-line `install.sh` (the latest release's prebuilt binaries, or `--checkout` to build a clone with `makepkg`), and `test.sh`, which CI runs. |
 | `aur/on-air`, `aur/on-air-bin`, `aur/on-air-desktop-bin` | AUR recipes: core + TUI from source, the same prebuilt, and the GUI from the release `.deb`. `srcinfo.sh` regenerates `.SRCINFO` without `makepkg`. Not published yet. |
 | `install.sh`, `flatpak/` | The desktop app on Linux from a clone: a pacman package, a per-user Flatpak (`com.shay.on-air`), or `~/.local`. |
 | `debian/`, `apt/` | A native `on-air-core` Debian package and a helper that installs the release `.deb`. |
@@ -83,14 +83,41 @@ URL, the AUR sources, the winget installer URLs and
 `brew tap tsonubin/on-air https://github.com/tsonubin/on-air.git`. A
 dedicated `homebrew-on-air` repo is optional later.
 
-**AUR.** With an AUR account and its SSH key:
+**AUR.** Each directory is the whole AUR repository for its package,
+following the
+[AUR submission guidelines](https://wiki.archlinux.org/title/AUR_submission_guidelines):
+`PKGBUILD`, `.SRCINFO`, the `.install` message where there is one, a 0BSD
+`LICENSE` for the recipe itself (the software stays MIT), and a
+`.gitignore` that keeps makepkg's downloads and build output out of the
+commit. Publish `on-air-bin` and `on-air-desktop-bin` only after
+`packaging/update-checksums.sh` has filled their binary checksums.
+
+One time, on an aur.archlinux.org account: make a key with
+`ssh-keygen -f ~/.ssh/aur`, paste `~/.ssh/aur.pub` into *My Account → SSH
+Public Key*, and add to `~/.ssh/config`:
+
+```text
+Host aur.archlinux.org
+  IdentityFile ~/.ssh/aur
+  User aur
+```
+
+Then, per package, from this checkout on Arch (the AUR only accepts the
+`master` branch; commits carry your git name and email):
 
 ```bash
-git clone ssh://aur@aur.archlinux.org/on-air-bin.git aur-on-air-bin
-cp packaging/aur/on-air-bin/{PKGBUILD,.SRCINFO,on-air.install} aur-on-air-bin/
-cd aur-on-air-bin && makepkg --printsrcinfo > .SRCINFO
-git add -A && git commit -m "on-air-bin 0.2.0" && git push
+git -c init.defaultBranch=master clone ssh://aur@aur.archlinux.org/on-air-bin.git aur-on-air-bin
+cp -rL packaging/aur/on-air-bin/. aur-on-air-bin/   # -L: on-air.install is a link
+cd aur-on-air-bin
+makepkg --printsrcinfo | diff - .SRCINFO   # no output: the repo copy is current
+makepkg -si                                # build and install it once before publishing
+git add -A && git status --short           # only the recipe files, nothing makepkg downloaded
+git commit -m "Initial upload: on-air-bin 0.2.0" && git push
 ```
+
+For a new release, bump `pkgver` (back to `pkgrel=1`), refresh the
+checksums and `.SRCINFO`, and push the same way. `packaging/aur/srcinfo.sh
+<dir>` writes the `.SRCINFO` where `makepkg` is missing.
 
 Submitting `packaging/aur/on-air` to `omacom-io/omarchy-pkgs` (so
 `omarchy pkg add on-air` works) is a copy of that directory.
