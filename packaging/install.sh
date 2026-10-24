@@ -160,12 +160,18 @@ EOF
 install_as_root() {
   local pkgfile="$1"
   if sudo -n true 2>/dev/null; then
+    # Carry the installer's exit status out. This function is called in a
+    # condition (`if ! install_as_root ...`), where `set -e` is disabled, so
+    # a failing `pacman -U` would otherwise fall through to a bare success
+    # and the caller would print "Installed on-air-desktop" and exit 0 on a
+    # failed install.
+    local status=0
     if command -v yay >/dev/null 2>&1; then
-      yay -U --noconfirm "$pkgfile"
+      yay -U --noconfirm "$pkgfile" || status=$?
     else
-      sudo pacman -U --noconfirm "$pkgfile"
+      sudo pacman -U --noconfirm "$pkgfile" || status=$?
     fi
-    return 0
+    return "$status"
   fi
   # pkexec only works when a graphical polkit agent is running. Without one it waits forever.
   if command -v pkexec >/dev/null 2>&1 && pgrep -f 'polkit-gnome-authentication-agent|hyprpolkitagent|xfce-polkit|mate-polkit|lxqt-policykit-agent|polkit-kde-authentication' >/dev/null 2>&1; then
