@@ -2,7 +2,7 @@
   "expo": {
     "name": "on-air remote",
     "slug": "on-air-remote",
-    "version": "0.2.0",
+    "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": "onair",
@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.onair.remote",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "icon": "./assets/AppIcon.icon",
       "config": {
         "usesNonExemptEncryption": false

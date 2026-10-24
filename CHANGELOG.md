@@ -7,6 +7,8 @@ Notable changes to on-air. The format follows
 
 ### Added
 
+- Phone remote 1.0: iPhone Duo support (mixer and EQ side by side when
+  unfolded) on Expo SDK 58.
 - Stereo: capture, the Audio CD, the EQ and every speaker stream keep left
   and right apart, so Sonos and HomePod stereo pairs play true stereo. A
   radio stream now uses about 1.5 Mbit/s at 48 kHz.

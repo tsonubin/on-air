@@ -65,7 +65,12 @@ and say what changed for a user or a contributor, not how.
 
 ## Releases
 
-Bump the version in every manifest together (the release workflow refuses a
-tag whose version disagrees with them), add a `CHANGELOG.md` entry, tag
-`vX.Y.Z` and push the tag. `packaging/README.md` covers what happens after
-the release is published.
+Bump the version in every desktop, core and terminal UI manifest together
+(the release workflow refuses a tag whose version disagrees with them), add a
+`CHANGELOG.md` entry, tag `vX.Y.Z` and push the tag. `packaging/README.md`
+covers what happens after the release is published.
+
+The phone remote (`apps/mobile`) keeps its own version and ships through
+TestFlight. Bump it in `app.json`, `package.json`, the two `MARKETING_VERSION`
+entries in the Xcode project and Android's `versionName`;
+`e2e/mobile/native-project.test.mjs` checks that they agree.

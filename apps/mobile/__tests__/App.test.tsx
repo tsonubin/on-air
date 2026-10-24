@@ -763,6 +763,36 @@ test("keys measure their row: a narrow column wraps even at the default text siz
   expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
 });
 
+test("before the row is measured, the keys' width estimate leaves out a side rail", async () => {
+  // Found on the folded iPhone Duo: the estimate ignored the 84 pt rail, so the
+  // first frame put four keys in one row at the largest text size.
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 84, bottom: 34, left: 0 });
+  jest
+    .mocked(useWindowDimensions)
+    .mockReturnValue({ width: 466, height: 678, scale: 3, fontScale: 3.571 });
+  await renderApp();
+  await pairWith();
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+});
+
+test("switching between one row and the grid mounts a fresh key row", async () => {
+  // React Native 0.88 doesn't re-lay out a wrapping row when its keys' flex
+  // basis changes in place (seen on the iPhone Duo when the text size changed).
+  await renderApp();
+  await pairWith();
+  setWindow(390, 844, 1);
+  const row = host("mixer-keys");
+  setWindow(390, 844, 1.1);
+  expect(host("mixer-keys")).toBe(row);
+  setWindow(390, 844, 1.6);
+  const grid = host("mixer-keys");
+  expect(grid).not.toBe(row);
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+  setWindow(390, 844, 1);
+  expect(host("mixer-keys")).not.toBe(grid);
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: 0 });
+});
+
 test("keys share one row at the default text size", async () => {
   await renderApp();
   await pairWith();
