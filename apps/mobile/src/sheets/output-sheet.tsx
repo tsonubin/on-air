@@ -1,9 +1,15 @@
-import { BottomSheet, Button, Column, Row, Spacer, Text } from "@expo/ui";
 import type { OutputInfo, OutputPhase } from "@on-air/api-types";
 import { outputPhase, TRANSPORT_LABELS } from "@on-air/api-types";
+import { ScrollView, Text, View } from "react-native";
 import { useRemoteSession } from "@/remote-session";
-import { theme } from "@/theme";
-import { sheetProps } from "./sheet-props";
+import { colors, type } from "@/theme";
+import { ChannelStrip, type StripTone } from "@/ui/channel-strip";
+import { Groove } from "@/ui/faceplate";
+import { Lamp, type LampState } from "@/ui/lamp";
+import { LedText } from "@/ui/led-readout";
+import { LedWindow } from "@/ui/led-window";
+import { PanelKey } from "@/ui/panel-key";
+import { SheetPanel } from "./sheet-panel";
 
 /** The trailing word on a speaker row. */
 export function outputAction({
@@ -30,6 +36,34 @@ export function outputAction({
   return "Connect";
 }
 
+/** How a speaker row looks: the first matching condition wins. */
+export function outputTone({
+  desktopOnly,
+  working,
+  selected,
+  phase,
+}: {
+  desktopOnly: boolean;
+  working: boolean;
+  selected: boolean;
+  phase: OutputPhase | null;
+}): StripTone {
+  if (desktopOnly) return "unavailable";
+  if (working || (selected && phase === "starting")) return "connecting";
+  if (selected && phase === "failed") return "failed";
+  if (selected && phase === "live") return "live";
+  return "idle";
+}
+
+/** The LED window's lamp, state word and spoken suffix for the active speaker's phase. */
+const phaseLook: Record<OutputPhase, { lamp: LampState; word: string; ink: string }> = {
+  live: { lamp: "live", word: "Live", ink: colors.accent },
+  starting: { lamp: "amber", word: "Connecting…", ink: colors.amber },
+  failed: { lamp: "error", word: "Failed", ink: colors.onError },
+};
+
+const footnote = [type.body, { fontSize: 12, lineHeight: 16, color: colors.tertiaryLabel }];
+
 export function OutputSheet({
   onClose,
   onPairRequest,
@@ -49,30 +83,51 @@ export function OutputSheet({
     if (await activate(output)) onClose();
   };
 
+  const look = activeOutput ? phaseLook[outputPhase(activeOutput)] : null;
+  const scanning = outputs.length === 0 && !activeOutput;
+  const shown = activeOutput?.device_name ?? (scanning ? "Scanning" : "No speaker");
+  const spoken = activeOutput
+    ? `Speaker ${activeOutput.device_name}, ${look?.word.replace("…", "").toLowerCase()}`
+    : scanning
+      ? "Scanning for speakers"
+      : "No speaker chosen";
+
   return (
-    <BottomSheet
-      {...sheetProps({ kind: "output", count: outputs.length })}
-      isPresented
-      onDismiss={onClose}
+    <SheetPanel
+      spec={{ kind: "output", count: outputs.length }}
+      caption="Speaker"
+      onClose={onClose}
       testID="output-sheet"
     >
-      <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
-        <Row alignment="center" spacing={theme.spacing.sm}>
-          <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>Choose speaker</Text>
-          <Spacer />
-          <Button label="Done" variant="text" onPress={onClose} />
-        </Row>
-        {outputs.length === 0 && <Text>Waiting for speakers on the LAN…</Text>}
-        {airplayMode === "avroute-picker" && (
-          <Text>AirPlay selection is available from the desktop picker on macOS.</Text>
-        )}
-        <Button
-          label="Add Bluetooth speaker"
-          variant="outlined"
-          disabled={!view.controlsEnabled}
-          onPress={() => void openBluetoothSettings()}
-          testID="add-bluetooth"
-        />
+      <LedWindow
+        accessible
+        accessibilityRole="text"
+        accessibilityLabel={spoken}
+        style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+      >
+        <Lamp state={look?.lamp ?? "off"} />
+        <View style={{ flex: 1 }}>
+          <LedText size={18} dim={!activeOutput} testID="speaker-led">
+            {shown}
+          </LedText>
+        </View>
+        {look ? (
+          <Text
+            maxFontSizeMultiplier={1.3}
+            testID="speaker-led-state"
+            style={[type.label, { color: look.ink }]}
+          >
+            {look.word}
+          </Text>
+        ) : null}
+      </LedWindow>
+      <Groove />
+      {/* Everything under the window scrolls, so larger text never pushes it out of the sheet. */}
+      <ScrollView
+        testID="output-sheet-scroll"
+        style={{ flexShrink: 1 }}
+        contentContainerStyle={{ gap: 8 }}
+      >
         {outputs.map((output) => {
           const selected =
             activeOutput?.transport === output.transport && activeOutput.device_id === output.id;
@@ -81,25 +136,37 @@ export function OutputSheet({
           const working = busyTarget === `${output.transport}:${output.id}`;
           const stereoPair = output.member_count >= 2 || output.kind === "pair";
           return (
-            <Button
+            <ChannelStrip
               key={`${output.transport}-${output.id}`}
-              variant={selected && phase === "live" ? "filled" : "outlined"}
+              name={output.name}
+              caption={`${stereoPair ? "Stereo pair · " : ""}${TRANSPORT_LABELS[output.transport]}`}
+              action={outputAction({ desktopOnly, working, selected, phase, output })}
+              tone={outputTone({ desktopOnly, working, selected, phase })}
               disabled={!view.controlsEnabled || busyTarget !== null || desktopOnly}
               onPress={() => void choose(output)}
               testID={`output-${output.transport}-${output.id}`}
-            >
-              <Row alignment="center" spacing={theme.spacing.sm}>
-                <Column spacing={theme.spacing.xs}>
-                  <Text textStyle={{ fontWeight: "600" }}>{output.name}</Text>
-                  <Text>{`${stereoPair ? "Stereo pair · " : ""}${TRANSPORT_LABELS[output.transport]}`}</Text>
-                </Column>
-                <Spacer />
-                <Text>{outputAction({ desktopOnly, working, selected, phase, output })}</Text>
-              </Row>
-            </Button>
+            />
           );
         })}
-      </Column>
-    </BottomSheet>
+        <PanelKey
+          label="+ Add Bluetooth speaker"
+          accessibilityLabel="Add Bluetooth speaker"
+          disabled={!view.controlsEnabled}
+          onPress={() => void openBluetoothSettings()}
+          testID="add-bluetooth"
+          style={{ minHeight: 44 }}
+        />
+        {outputs.length === 0 ? (
+          <Text maxFontSizeMultiplier={1.3} style={footnote}>
+            Waiting for speakers on the LAN…
+          </Text>
+        ) : null}
+        {airplayMode === "avroute-picker" ? (
+          <Text maxFontSizeMultiplier={1.3} style={footnote}>
+            AirPlay speakers are picked from the desktop.
+          </Text>
+        ) : null}
+      </ScrollView>
+    </SheetPanel>
   );
 }

@@ -4,7 +4,7 @@ import { Platform } from "react-native";
 import { formatDesktopTarget, parseDesktopTarget, targetBase } from "@/desktop-target";
 import { friendlyError } from "@/errors";
 import { digitsOnly, isForeground } from "@/remote-session";
-import { outputAction } from "@/sheets/output-sheet";
+import { outputAction, outputTone } from "@/sheets/output-sheet";
 import { sheetProps } from "@/sheets/sheet-props";
 
 describe("sheetProps", () => {
@@ -13,18 +13,25 @@ describe("sheetProps", () => {
     (Platform as { OS: string }).OS = original;
   });
 
-  test("iOS gets compact detents and an explicit dark presentation", () => {
+  test("iOS gets compact detents and a full-bleed dark faceplate presentation", () => {
     (Platform as { OS: string }).OS = "ios";
-    const source = sheetProps({ kind: "source" });
+    const source = sheetProps({ kind: "source", count: 1 });
     expect(source.snapPoints).toEqual([{ height: 280 }]);
     expect(source.showDragIndicator).toBe(true);
+    // iOS keeps the content above the home indicator; that strip continues the plate's lower edge.
+    expect(source.containerColor).toBe("#16130f");
+    expect(source.contentPadding).toBe(0);
     expect(source.modifiers).toEqual([
       { $type: "environment", key: "colorScheme", value: "dark" },
-      { $type: "presentationBackground", color: "#1a1814" },
       { $type: "tint", color: "#e0a24b" },
+      // The plate runs under a side rail (iPhone Duo, landscape); the panel pads its content clear.
+      { $type: "ignoreSafeArea", regions: "container", edges: "horizontal" },
     ]);
-    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 316 }]);
+    expect(sheetProps({ kind: "source", count: 3 }).snapPoints).toEqual([{ height: 358 }]);
+    expect(sheetProps({ kind: "source", count: 6 }).snapPoints).toEqual(["full"]);
     expect(sheetProps({ kind: "output", count: 0 }).snapPoints).toEqual([{ height: 300 }]);
+    expect(sheetProps({ kind: "output", count: 2 }).snapPoints).toEqual([{ height: 332 }]);
+    expect(sheetProps({ kind: "output", count: 4 }).snapPoints).toEqual([{ height: 464 }]);
     expect(sheetProps({ kind: "output", count: 6 }).snapPoints).toEqual(["full"]);
     expect(sheetProps({ kind: "device-pair", transport: "airplay" }).snapPoints).toEqual([
       { height: 360 },
@@ -34,17 +41,17 @@ describe("sheetProps", () => {
     ]);
   });
 
-  test("Android sheets sit on the faceplate with cream content", () => {
+  test("Android sheets are full-bleed on the faceplate", () => {
     (Platform as { OS: string }).OS = "android";
     for (const spec of [
-      { kind: "source" } as const,
+      { kind: "source", count: 2 } as const,
       { kind: "output", count: 9 } as const,
       { kind: "device-pair", transport: "airplay" } as const,
     ]) {
       expect(sheetProps(spec)).toEqual({
         showDragIndicator: true,
-        containerColor: "#1a1814",
-        contentColor: "#f3ead4",
+        containerColor: "#1f1b16",
+        contentPadding: 0,
       });
     }
   });
@@ -123,4 +130,14 @@ test("a speaker row reads its phase: starting connects, failed offers a retry", 
   expect(outputAction({ ...base, selected: true, phase: "starting" })).toBe("Connecting…");
   expect(outputAction({ ...base, selected: true, phase: "failed" })).toBe("Failed · Retry");
   expect(outputAction({ ...base, selected: false, phase: null })).toBe("Connect");
+});
+
+test("a speaker strip's tone follows the spec's table, first match wins", () => {
+  const off = { desktopOnly: false, working: false, selected: false, phase: null };
+  expect(outputTone({ ...off, desktopOnly: true, working: true })).toBe("unavailable");
+  expect(outputTone({ ...off, working: true })).toBe("connecting");
+  expect(outputTone({ ...off, selected: true, phase: "starting" })).toBe("connecting");
+  expect(outputTone({ ...off, selected: true, phase: "failed" })).toBe("failed");
+  expect(outputTone({ ...off, selected: true, phase: "live" })).toBe("live");
+  expect(outputTone(off)).toBe("idle");
 });

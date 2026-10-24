@@ -1,6 +1,7 @@
 import { Text, View } from "react-native";
 import type { Readout } from "./readouts";
 import { colors, type } from "./theme";
+import { Lamp } from "./ui/lamp";
 import { LedText } from "./ui/led-readout";
 import { LedWindow } from "./ui/led-window";
 import type { HomeStatus } from "./ui-state";
@@ -60,19 +61,7 @@ export function LedDisplay({
         </LedText>
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <View
-          testID="live-lamp"
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: status.live ? colors.accent : colors.liveDim,
-            shadowColor: colors.accent,
-            shadowOffset: { width: 0, height: 0 },
-            shadowRadius: 6,
-            shadowOpacity: status.live ? 0.6 : 0,
-          }}
-        />
+        <Lamp state={status.live ? "live" : "off"} size={8} testID="live-lamp" />
         <LedText size={14} testID="led-status">
           {status.word}
         </LedText>

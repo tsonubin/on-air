@@ -1,23 +1,20 @@
-import {
-  BottomSheet,
-  Button,
-  Column,
-  Row,
-  Spacer,
-  Text,
-  TextInput,
-  useNativeState,
-} from "@expo/ui";
-import { useRef } from "react";
+import { useState } from "react";
+import { Text, View } from "react-native";
 import {
   DEVICE_PIN_LENGTH,
   type DevicePairTarget,
   digitsOnly,
   useRemoteSession,
 } from "@/remote-session";
-import { colors, radius, theme } from "@/theme";
-import { sheetProps } from "./sheet-props";
+import { colors, type } from "@/theme";
+import { LedCodeInput } from "@/ui/led-code-input";
+import { PanelKey } from "@/ui/panel-key";
+import { SheetPanel } from "./sheet-panel";
 
+/**
+ * Pairing a speaker that asks first: AirPlay shows a code to type into the LED
+ * field (or none, when it is left blank); Bluetooth confirms on the speaker.
+ */
 export function DevicePairSheet({
   target,
   onClose,
@@ -26,67 +23,64 @@ export function DevicePairSheet({
   onClose: () => void;
 }) {
   const { devicePairing, pairDevice } = useRemoteSession();
-  const pinInput = useNativeState("");
-  // The native field owns its text; JS keeps the sanitised copy it submits.
-  const pin = useRef("");
+  const [pin, setPin] = useState("");
   const airplay = target.transport === "airplay";
 
   const submit = async () => {
-    if (await pairDevice(target, pin.current)) onClose();
+    if (await pairDevice(target, pin)) onClose();
   };
 
   return (
-    <BottomSheet
-      {...sheetProps({ kind: "device-pair", transport: target.transport })}
-      isPresented
-      onDismiss={onClose}
+    <SheetPanel
+      spec={{ kind: "device-pair", transport: target.transport }}
+      caption="Pair speaker"
+      done={false}
+      onClose={onClose}
       testID="pair-sheet"
     >
-      <Column spacing={theme.spacing.md} style={{ padding: theme.spacing.md }}>
-        <Text textStyle={{ fontSize: 22, fontWeight: "700" }}>{`Pair ${target.name}`}</Text>
-        <Text>
+      <View style={{ gap: 4 }}>
+        <Text
+          maxFontSizeMultiplier={1.3}
+          style={[type.title, { fontSize: 18, color: colors.label }]}
+        >
+          {target.name}
+        </Text>
+        <Text
+          maxFontSizeMultiplier={1.3}
+          style={[type.body, { fontSize: 12, lineHeight: 16, color: colors.secondaryLabel }]}
+        >
           {airplay
-            ? "Enter the code shown by the speaker. If no code appears, leave it blank."
+            ? "Enter the code the speaker shows. No code? Leave it blank."
             : "Confirm pairing on the speaker or in the computer’s Bluetooth settings, then continue."}
         </Text>
-        {airplay && (
-          <TextInput
-            value={pinInput}
-            onChangeText={(value) => {
-              const next = digitsOnly(value, DEVICE_PIN_LENGTH);
-              pin.current = next;
-              pinInput.value = next;
-            }}
-            placeholder="Speaker code"
-            keyboardType="number-pad"
-            inputMode="numeric"
-            maxLength={DEVICE_PIN_LENGTH}
-            testID="device-pin-input"
-            style={{
-              padding: 12,
-              borderWidth: 1,
-              borderColor: colors.key,
-              borderRadius: radius.sm,
-            }}
-          />
-        )}
-        <Row alignment="center" spacing={theme.spacing.sm}>
-          <Button
-            label="Cancel"
-            variant="text"
-            disabled={devicePairing}
-            onPress={onClose}
-            testID="device-pair-cancel"
-          />
-          <Spacer />
-          <Button
-            label={devicePairing ? "Pairing…" : "Pair and connect"}
-            disabled={devicePairing}
-            onPress={() => void submit()}
-            testID="device-pair-submit"
-          />
-        </Row>
-      </Column>
-    </BottomSheet>
+      </View>
+      {airplay ? (
+        <LedCodeInput
+          length={DEVICE_PIN_LENGTH}
+          value={pin}
+          onChangeText={(value) => setPin(digitsOnly(value, DEVICE_PIN_LENGTH))}
+          editable={!devicePairing}
+          accessibilityLabel="Speaker code"
+          testID="device-pin-input"
+        />
+      ) : null}
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <PanelKey
+          label="Cancel"
+          disabled={devicePairing}
+          onPress={onClose}
+          testID="device-pair-cancel"
+          style={{ flex: 1, minHeight: 44 }}
+        />
+        <PanelKey
+          label={devicePairing ? "Pairing…" : "Pair and connect"}
+          lit
+          disabled={devicePairing}
+          onPress={() => void submit()}
+          testID="device-pair-submit"
+          style={{ flex: 2, minHeight: 44 }}
+        />
+      </View>
+    </SheetPanel>
   );
 }
