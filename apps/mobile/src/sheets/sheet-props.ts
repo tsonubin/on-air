@@ -8,7 +8,16 @@ export type SheetSpec =
   | { kind: "output"; count: number }
   | { kind: "device-pair"; transport: string };
 
-type SheetProps = Pick<BottomSheetProps, "modifiers" | "snapPoints" | "showDragIndicator">;
+type SheetProps = Pick<
+  BottomSheetProps,
+  "modifiers" | "snapPoints" | "showDragIndicator" | "containerColor" | "contentColor"
+>;
+
+const android: SheetProps = {
+  showDragIndicator: true,
+  containerColor: colors.surface,
+  contentColor: colors.label,
+};
 
 function iosSnapPoints(spec: SheetSpec): NonNullable<BottomSheetProps["snapPoints"]> {
   switch (spec.kind) {
@@ -22,10 +31,10 @@ function iosSnapPoints(spec: SheetSpec): NonNullable<BottomSheetProps["snapPoint
 }
 
 /**
- * Presentation for the mixer's bottom sheets. iOS gets compact detents and the
- * dark presentation explicitly, because BottomSheet creates its own native
- * host that the app host's color scheme does not cross. Android uses the
- * Material defaults, which already follow the app's dark appearance.
+ * Presentation for the mixer's bottom sheets. BottomSheet creates its own
+ * native host that the app host's color scheme and seed do not cross, so iOS
+ * gets compact detents, the dark presentation and the amber tint explicitly,
+ * and Android gets the faceplate container with cream content.
  */
 export function sheetProps(spec: SheetSpec): SheetProps {
   return (
@@ -35,11 +44,11 @@ export function sheetProps(spec: SheetSpec): SheetProps {
         modifiers: [
           environment({ key: "colorScheme", value: "dark" }),
           presentationBackground(colors.surface),
-          tint(colors.accent),
+          tint(colors.amber),
         ],
         snapPoints: iosSnapPoints(spec),
       },
-      default: { showDragIndicator: true },
-    }) ?? { showDragIndicator: true }
+      default: android,
+    }) ?? android
   );
 }

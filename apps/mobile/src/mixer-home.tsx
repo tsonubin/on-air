@@ -1,226 +1,74 @@
-import { Host, type IconName } from "@expo/ui";
 import type { CdStatus, FirewallWarning } from "@on-air/api-types";
 import type React from "react";
-import { Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { useState } from "react";
+import { ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { NativeFader } from "./native-fader";
-import { colors, layout, radius } from "./theme";
-import { Card } from "./ui/card";
+import { LedDisplay } from "./led-display";
+import { formatRate } from "./readouts";
+import { colors, layout, type } from "./theme";
+import { isTwoPane } from "./two-pane";
+import { Faceplate, Groove } from "./ui/faceplate";
+import { Fader } from "./ui/fader";
 import { FirewallNotice } from "./ui/firewall-notice";
-import { IconTile } from "./ui/icon-tile";
 import { icons } from "./ui/icons";
-import { NativeIcon } from "./ui/native-icon";
+import { LedReadout } from "./ui/led-readout";
 import { Notice } from "./ui/notice";
+import { PanelKey } from "./ui/panel-key";
+import { Sign } from "./ui/sign";
+import type { HomeStatus } from "./ui-state";
 
-const ROW_PADDING = 18;
-const TILE = 58;
-const ARROW = 24;
-const ROW_GAP = 16;
-
-function RouteRow({
-  icon,
-  title,
-  subtitle,
-  accessibilityLabel,
-  accessibilityHint,
-  onPress,
-  testID,
-  dense = false,
-}: {
-  icon: IconName;
-  title: string;
-  subtitle: string;
-  accessibilityLabel: string;
-  accessibilityHint: string;
-  onPress: () => void;
-  testID: string;
-  dense?: boolean;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      accessibilityHint={accessibilityHint}
-      onPress={onPress}
-      testID={testID}
-      style={({ pressed }) => ({
-        minHeight: dense ? 82 : 98,
-        paddingHorizontal: ROW_PADDING,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: ROW_GAP,
-        backgroundColor: pressed ? colors.surfacePressed : "transparent",
-      })}
-    >
-      <IconTile name={icon} size="lg" />
-      <View style={{ flex: 1, gap: 3 }}>
-        <Text numberOfLines={1} style={{ color: colors.label, fontSize: 20, fontWeight: "700" }}>
-          {title}
-        </Text>
-        <Text numberOfLines={1} style={{ color: colors.secondaryLabel, fontSize: 16 }}>
-          {subtitle}
-        </Text>
-      </View>
-      <NativeIcon name={icons.chevron} size={19} color={colors.secondaryLabel} />
-    </Pressable>
-  );
-}
-
-/** The separator between the two route rows, with the arrow centred under the source tile. */
-function RouteDivider() {
-  const arrowInset = ROW_PADDING + TILE / 2 - ARROW / 2;
-  return (
-    <View
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{
-        height: ARROW,
-        marginVertical: -ARROW / 2,
-        zIndex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-      }}
-    >
-      <View
-        style={{
-          marginLeft: arrowInset,
-          width: ARROW,
-          height: ARROW,
-          borderRadius: ARROW / 2,
-          alignItems: "center",
-          justifyContent: "center",
-          backgroundColor: colors.surface,
-        }}
-      >
-        <NativeIcon name={icons.route} size={16} color={colors.accent} />
-      </View>
-      <View
-        style={{
-          flex: 1,
-          height: 1,
-          marginLeft: ROW_PADDING + TILE + ROW_GAP - arrowInset - ARROW,
-          backgroundColor: colors.separator,
-        }}
-      />
-    </View>
-  );
-}
-
-type HeaderStatus = { text: string; announcement: string; live: boolean };
-
-function Header({ status, onMore }: { status: HeaderStatus; onMore: () => void }) {
+/** The ONAIR sign is the only status badge up top; the LED window carries the words. */
+function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
   const insets = useSafeAreaInsets();
   return (
-    <View
-      style={{
-        paddingTop: insets.top + 10,
-        paddingBottom: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.separator,
-      }}
-    >
+    <View style={{ paddingTop: insets.top + 10, paddingBottom: 14 }}>
       <View
         style={{
           width: "100%",
           maxWidth: layout.maxWidth,
           alignSelf: "center",
-          paddingHorizontal: 20,
+          paddingLeft: Math.max(insets.left, 20),
+          paddingRight: Math.max(insets.right, 20),
           flexDirection: "row",
           alignItems: "center",
         }}
       >
-        <Text
-          accessibilityRole="header"
-          style={{ flex: 1, color: colors.label, fontSize: 38, fontWeight: "700" }}
-        >
-          on-air
-        </Text>
-        <View
-          accessible
-          accessibilityRole="text"
-          accessibilityLabel={status.announcement}
-          testID="status-pill"
-          style={{ flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14 }}
-        >
-          <View
-            style={{
-              width: 9,
-              height: 9,
-              borderRadius: 5,
-              backgroundColor: status.live ? colors.accent : colors.tertiaryLabel,
-            }}
-          />
-          <Text
-            style={{
-              color: status.live ? colors.accent : colors.secondaryLabel,
-              fontSize: 17,
-              fontWeight: "600",
-            }}
-          >
-            {status.text}
-          </Text>
+        <View style={{ flex: 1 }}>
+          <Sign lit={live} testID="mixer-sign" />
         </View>
-        <Pressable
-          accessibilityRole="button"
+        <PanelKey
+          shape="round"
+          icon={icons.more}
           accessibilityLabel="More options"
           onPress={onMore}
           testID="more-button"
-          hitSlop={4}
-          style={({ pressed }) => ({
-            width: 46,
-            height: 46,
-            borderRadius: 23,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: pressed ? colors.surfacePressed : colors.surface,
-            borderWidth: 1,
-            borderColor: colors.border,
-          })}
-        >
-          <NativeIcon name={icons.more} size={23} />
-        </Pressable>
+        />
       </View>
     </View>
   );
+}
+
+const KEY_GAP = 8;
+
+/**
+ * Whether the key captions fit side by side in a row this wide. The captions
+ * are Plex Mono (0.6 em advance) at 11 pt with 1.76 pt tracking, capped at
+ * 1.3× text size, in keys with 8 pt padding each side; the longest is seven
+ * letters (SPEAKER, FORMAT and SOURCE are six or seven). Four keys normally,
+ * three when the equalizer has its own pane.
+ */
+export function keysFitInRow(rowWidth: number, fontScale: number, keys = 4): boolean {
+  const scale = Math.min(fontScale, 1.3);
+  const caption = 7 * (11 * scale * 0.6 + 1.76);
+  const key = (rowWidth - (keys - 1) * KEY_GAP) / keys;
+  return key >= caption + 2 * 8 + 2;
 }
 
 function padTrack(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-function TransportButton({
-  icon,
-  size,
-  label,
-  onPress,
-  testID,
-}: {
-  icon: IconName;
-  size: number;
-  label: string;
-  onPress: () => void;
-  testID: string;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      testID={testID}
-      hitSlop={8}
-      style={{
-        width: 46,
-        height: 46,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <NativeIcon name={icon} size={size} />
-    </Pressable>
-  );
-}
-
+/** The disc transport: an LED track counter and three faceplate keys. */
 function CdDeck({
   status,
   onPlayPause,
@@ -234,46 +82,73 @@ function CdDeck({
 }) {
   const label = status.title || status.album || "Audio CD";
   return (
-    <Card testID="cd-transport" style={{ paddingHorizontal: 18, paddingVertical: 14, gap: 12 }}>
+    <View testID="cd-transport" style={{ gap: 12 }}>
       <View
         accessible
         accessibilityLabel={`Track ${status.track} of ${status.track_count}, ${label}`}
         style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
       >
-        <Text testID="cd-track" style={{ color: colors.accent, fontSize: 16, fontWeight: "700" }}>
-          {padTrack(status.track)}/{padTrack(status.track_count)}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={{ flex: 1, color: colors.label, fontSize: 16, fontWeight: "600" }}
-        >
+        <LedReadout
+          value={`${padTrack(status.track)}/${padTrack(status.track_count)}`}
+          digits={5}
+          size={16}
+          accessibilityLabel={`Track ${status.track} of ${status.track_count}`}
+          testID="cd-track"
+        />
+        <Text numberOfLines={1} style={[type.title, { flex: 1, color: colors.label }]}>
           {label}
         </Text>
       </View>
-      <View style={{ flexDirection: "row", justifyContent: "center", gap: 22 }}>
-        <TransportButton
+      <View style={{ flexDirection: "row", justifyContent: "center", gap: 12 }}>
+        <PanelKey
           icon={icons.prev}
-          size={28}
-          label="Previous track"
+          iconSize={22}
+          accessibilityLabel="Previous track"
           onPress={onPrev}
+          style={{ width: 64 }}
           testID="cd-prev"
         />
-        <TransportButton
+        <PanelKey
           icon={status.playing ? icons.pause : icons.play}
-          size={32}
-          label={status.playing ? "Pause" : "Play"}
+          iconSize={26}
+          accessibilityLabel={status.playing ? "Pause" : "Play"}
           onPress={onPlayPause}
+          style={{ width: 64 }}
           testID="cd-play"
         />
-        <TransportButton
+        <PanelKey
           icon={icons.next}
-          size={28}
-          label="Next track"
+          iconSize={22}
+          accessibilityLabel="Next track"
           onPress={onNext}
+          style={{ width: 64 }}
           testID="cd-next"
         />
       </View>
-    </Card>
+    </View>
+  );
+}
+
+/** A printed scale under the volume fader; decoration, so it never reads aloud or counts. */
+function Scale({ marks }: { marks: string[] }) {
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: 4 }}
+    >
+      {marks.map((mark) => (
+        <Text
+          key={mark}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+          maxFontSizeMultiplier={1.3}
+          style={[type.label, { color: colors.tertiaryLabel }]}
+        >
+          {mark}
+        </Text>
+      ))}
+    </View>
   );
 }
 
@@ -283,265 +158,266 @@ export function MixerHome({
   outputPhase,
   volume,
   status,
+  outputSampleRate,
   error,
   firewallWarning,
   volumeDisabled,
   soundDisabled,
   cd,
+  eqFlat,
   onChangeInput,
   onChangeOutput,
-  onOpenSound,
+  onOpenEqualizer,
+  onOpenFormat,
   onOpenMore,
-  onDisconnect,
   onVolumeChange,
   onCdPlayPause,
   onCdPrev,
   onCdNext,
+  eqPane,
 }: {
   activeInput: string;
   activeOutput: string;
   /** Phase of the active output; absent means live (older desktops). */
   outputPhase?: "starting" | "live" | "failed";
   volume: number;
-  status: HeaderStatus;
+  /** The LED status (`homeStatus`): a firewall block already overrides live. */
+  status: HomeStatus;
+  /** The output sample rate in Hz for the window's format corner; 0 when unknown. */
+  outputSampleRate: number;
   error?: string | null;
   firewallWarning?: FirewallWarning | null;
   volumeDisabled: boolean;
   soundDisabled: boolean;
   cd?: CdStatus | null;
+  /** Every EQ band sits at 0 dB. */
+  eqFlat: boolean;
   onChangeInput: () => void;
   onChangeOutput: () => void;
-  onOpenSound: () => void;
+  onOpenEqualizer: () => void;
+  onOpenFormat: () => void;
   onOpenMore: () => void;
-  onDisconnect: () => void;
   onVolumeChange: (value: number) => void;
   onCdPlayPause?: () => void;
   onCdPrev?: () => void;
   onCdNext?: () => void;
+  /** The equalizer, shown beside the mixer when the window is roomy enough (`isTwoPane`). */
+  eqPane?: React.ReactNode;
 }): React.JSX.Element {
   const insets = useSafeAreaInsets();
-  const { width, height } = useWindowDimensions();
+  const { width, height, fontScale } = useWindowDimensions();
   const compact = width < layout.compactBreakpoint;
-  const wide = width >= layout.wideBreakpoint;
+  const twoPane = eqPane != null && isTwoPane(width, height);
+  // The mixer's own two-column layout is only for windows too short for the EQ pane.
+  const wide = !twoPane && width >= layout.wideBreakpoint;
   const shortWide = wide && height < 600;
-  const source = activeInput || "Choose a source";
-  const output = activeOutput || "Choose a speaker";
-  const outputSubtitle = !activeOutput
-    ? "No speaker selected"
-    : outputPhase === "starting"
-      ? "Connecting…"
-      : outputPhase === "failed"
-        ? "Speaker failed. Choose it again."
-        : "Selected speaker";
+  const gap = shortWide ? 12 : compact ? 18 : 22;
+  const pad = compact ? 16 : 20;
+  // The keys share a row while their captions fit; the row is measured, and
+  // estimated from the window until then.
+  const [keysWidth, setKeysWidth] = useState(0);
+  const keyCount = twoPane ? 3 : 4;
+  // The estimate leaves out the same side padding as the scroll view, rails included.
+  const padLeft = Math.max(insets.left, pad);
+  const keysRow =
+    keysWidth ||
+    (twoPane
+      ? (width - 2) / 2 - padLeft - pad
+      : Math.min(width, layout.maxWidth) - padLeft - Math.max(insets.right, pad));
+  const keyGrid = !keysFitInRow(keysRow, fontScale, keyCount);
+  const keyStyle = { flexGrow: 1, flexBasis: keyGrid ? "48%" : 0 } as const;
+  // The big LED follows the fader's draft, so it moves with the finger.
+  const [shownVolume, setShownVolume] = useState(volume);
+  const speakerFailed = activeOutput !== "" && outputPhase === "failed";
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }} testID="mixer-screen">
-      <Header
-        status={
-          firewallWarning
-            ? { text: "Audio blocked", announcement: "Firewall blocking audio", live: false }
-            : status
-        }
-        onMore={onOpenMore}
-      />
-      <ScrollView
-        style={{ flex: 1 }}
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{
-          paddingHorizontal: compact ? 16 : 20,
-          paddingTop: shortWide ? 12 : 22,
-          paddingBottom: Math.max(insets.bottom, 18) + 12,
-          gap: compact ? 18 : 22,
-          width: "100%",
-          maxWidth: layout.maxWidth,
-          alignSelf: "center",
-        }}
-      >
-        {error ? <Notice message={error} testID="mixer-error" /> : null}
-        <FirewallNotice warning={firewallWarning} />
-        <View
-          testID={
-            shortWide ? "mixer-landscape-layout" : wide ? "mixer-wide-layout" : "mixer-phone-layout"
-          }
-          style={{
+    <Faceplate testID="mixer-screen">
+      <Header live={status.live} onMore={onOpenMore} />
+      {/* The mixer's scroll view is always the row's first child, so folding or
+          unfolding re-lays it out instead of remounting it (and a drag survives). */}
+      <View testID="mixer-panes" style={{ flex: 1, flexDirection: "row" }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentInsetAdjustmentBehavior="automatic"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{
+            // Clear of a side rail or sensor housing; in two panes the right edge is the fold.
+            paddingLeft: Math.max(insets.left, pad),
+            paddingRight: twoPane ? pad : Math.max(insets.right, pad),
+            paddingTop: shortWide ? 4 : 8,
+            paddingBottom: Math.max(insets.bottom, 18) + 12,
             width: "100%",
-            flexDirection: wide ? "row" : "column",
-            alignItems: "flex-start",
-            gap: shortWide ? 16 : wide ? 24 : compact ? 18 : 22,
+            maxWidth: layout.maxWidth,
+            alignSelf: "center",
           }}
         >
           <View
+            testID={
+              twoPane
+                ? "mixer-pane-layout"
+                : shortWide
+                  ? "mixer-landscape-layout"
+                  : wide
+                    ? "mixer-wide-layout"
+                    : "mixer-phone-layout"
+            }
             style={{
-              width: wide ? undefined : "100%",
-              flex: wide ? 1.08 : undefined,
-              gap: shortWide ? 12 : wide ? 24 : compact ? 18 : 22,
+              width: "100%",
+              flexDirection: wide ? "row" : "column",
+              alignItems: wide ? "flex-start" : "stretch",
+              gap: wide ? 24 : gap,
             }}
           >
-            <View style={{ gap: 10 }}>
-              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Now streaming</Text>
-              <Card>
-                <RouteRow
-                  icon={icons.monitor}
-                  title={source}
-                  subtitle="This Mac"
-                  accessibilityLabel={`Source: ${source}`}
+            <View style={{ flex: wide ? 1.08 : undefined, gap }}>
+              <LedDisplay
+                source={activeInput}
+                speaker={activeOutput}
+                status={status}
+                rate={formatRate(outputSampleRate)}
+              />
+              {error ? <Notice message={error} testID="mixer-error" /> : null}
+              {speakerFailed ? (
+                <Text testID="speaker-failed" style={[type.body, { color: colors.secondaryLabel }]}>
+                  Speaker failed. Choose it again.
+                </Text>
+              ) : null}
+              <FirewallNotice warning={firewallWarning} />
+              {cd?.present ? (
+                <CdDeck
+                  status={cd}
+                  onPlayPause={() => onCdPlayPause?.()}
+                  onPrev={() => onCdPrev?.()}
+                  onNext={() => onCdNext?.()}
+                />
+              ) : null}
+            </View>
+
+            {wide ? null : <Groove />}
+
+            <View style={{ flex: wide ? 0.92 : undefined, gap }}>
+              <View style={{ gap: 10 }}>
+                <View
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "flex-end",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <Text
+                    maxFontSizeMultiplier={1.3}
+                    style={[type.label, { color: colors.tertiaryLabel }]}
+                  >
+                    Volume
+                  </Text>
+                  <LedReadout
+                    value={String(Math.round(shownVolume))}
+                    digits={3}
+                    size={shortWide ? 36 : 44}
+                    dim={volumeDisabled}
+                    accessibilityLabel={`Volume ${Math.round(shownVolume)}`}
+                    testID="volume-readout"
+                  />
+                </View>
+                <Fader
+                  orientation="horizontal"
+                  value={volume}
+                  min={0}
+                  max={100}
+                  step={1}
+                  origin={0}
+                  accessibilityStep={5}
+                  accessibilityLabel="Volume"
+                  formatValue={(value) => String(Math.round(value))}
+                  disabled={volumeDisabled}
+                  testID="volume-slider"
+                  onDraft={setShownVolume}
+                  onChange={onVolumeChange}
+                />
+                <Scale marks={["0", "50", "100"]} />
+              </View>
+
+              <Groove />
+
+              {/* Keyed by layout: React Native 0.88 doesn't re-lay out the wrap when the
+                  keys' flex basis changes in place, so a switch mounts a fresh row. */}
+              <View
+                key={keyGrid ? "key-grid" : "key-row"}
+                testID="mixer-keys"
+                onLayout={(event) => setKeysWidth(event.nativeEvent.layout.width)}
+                style={{ flexDirection: "row", flexWrap: "wrap", gap: KEY_GAP }}
+              >
+                <PanelKey
+                  label="Source"
                   accessibilityHint="Choose what the desktop captures"
                   onPress={onChangeInput}
-                  testID="source-row"
-                  dense={shortWide}
+                  style={keyStyle}
+                  testID="source-key"
                 />
-                <RouteDivider />
-                <RouteRow
-                  icon={icons.speaker}
-                  title={output}
-                  subtitle={outputSubtitle}
-                  accessibilityLabel={`Speaker: ${output}`}
+                <PanelKey
+                  label="Speaker"
                   accessibilityHint="Choose where the audio plays"
                   onPress={onChangeOutput}
-                  testID="output-row"
-                  dense={shortWide}
+                  style={keyStyle}
+                  testID="speaker-key"
                 />
-              </Card>
+                {twoPane ? null : (
+                  <PanelKey
+                    label="EQ"
+                    accessibilityLabel="Equalizer"
+                    accessibilityValue={{ text: eqFlat ? "Flat" : "Custom" }}
+                    indicator={!eqFlat}
+                    disabled={soundDisabled}
+                    onPress={onOpenEqualizer}
+                    style={keyStyle}
+                    testID="eq-key"
+                  />
+                )}
+                <PanelKey
+                  label="Format"
+                  accessibilityLabel="Audio format"
+                  disabled={soundDisabled}
+                  onPress={onOpenFormat}
+                  style={keyStyle}
+                  testID="format-key"
+                />
+              </View>
             </View>
-
-            {cd?.present ? (
-              <CdDeck
-                status={cd}
-                onPlayPause={() => onCdPlayPause?.()}
-                onPrev={() => onCdPrev?.()}
-                onNext={() => onCdNext?.()}
-              />
-            ) : null}
-
+          </View>
+        </ScrollView>
+        {twoPane ? (
+          <>
+            {/* An engraved groove down the middle: on the iPhone Duo it sits on the fold. */}
             <View
-              accessible
-              accessibilityLabel={`${status.live ? "Audio is live" : "Ready to stream"}. ${source} to ${output}`}
+              testID="pane-fold"
+              accessibilityElementsHidden
+              importantForAccessibility="no-hide-descendants"
               style={{
-                minHeight: shortWide ? 72 : wide ? 112 : 86,
-                paddingHorizontal: compact ? 8 : 18,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: shortWide ? 12 : 18,
+                marginVertical: 8,
+                borderLeftWidth: 1,
+                borderLeftColor: colors.grooveDark,
+                borderRightWidth: 1,
+                borderRightColor: colors.grooveLight,
+              }}
+            />
+            <ScrollView
+              testID="eq-pane-scroll"
+              style={{ flex: 1 }}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{
+                flexGrow: 1,
+                paddingLeft: pad,
+                paddingRight: Math.max(insets.right, pad),
+                paddingTop: 8,
+                paddingBottom: Math.max(insets.bottom, 18) + 12,
               }}
             >
-              <NativeIcon
-                name={icons.live}
-                size={shortWide ? 52 : compact ? 58 : 68}
-                color={status.live ? colors.accent : colors.tertiaryLabel}
-              />
-              <View style={{ flexShrink: 1, gap: 5 }}>
-                <Text style={{ color: colors.label, fontSize: 21, fontWeight: "700" }}>
-                  {status.live ? "Audio is live" : "Ready to stream"}
-                </Text>
-                <Text
-                  numberOfLines={2}
-                  style={{ color: colors.secondaryLabel, fontSize: 16, lineHeight: 21 }}
-                >
-                  {`${source} → ${output}`}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View
-            style={{
-              width: wide ? undefined : "100%",
-              flex: wide ? 0.92 : undefined,
-              gap: shortWide ? 12 : wide ? 18 : compact ? 18 : 22,
-            }}
-          >
-            {wide ? (
-              <Text style={{ color: colors.secondaryLabel, fontSize: 17 }}>Playback</Text>
-            ) : null}
-            <Card
-              style={{ paddingHorizontal: 18, paddingVertical: 16, gap: 8, overflow: "visible" }}
-            >
-              <View
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-                style={{ paddingLeft: 40, flexDirection: "row", alignItems: "center" }}
-              >
-                <Text style={{ flex: 1, color: colors.label, fontSize: 16, fontWeight: "600" }}>
-                  Volume
-                </Text>
-                <Text style={{ color: colors.label, fontSize: 16, fontWeight: "600" }}>
-                  {Math.round(volume)}
-                </Text>
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-                <NativeIcon
-                  name={icons.volume}
-                  size={28}
-                  color={volumeDisabled ? colors.disabled : colors.label}
-                />
-                <Host
-                  colorScheme="dark"
-                  seedColor={colors.accent}
-                  ignoreSafeArea="all"
-                  style={{ flex: 1, height: 42 }}
-                >
-                  <NativeFader
-                    label="Volume"
-                    accessibilityLabel="Volume"
-                    value={volume}
-                    min={0}
-                    max={100}
-                    testId="volume-slider"
-                    disabled={volumeDisabled}
-                    hideHeader
-                    onChange={onVolumeChange}
-                  />
-                </Host>
-              </View>
-            </Card>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Sound settings"
-              accessibilityState={{ disabled: soundDisabled }}
-              onPress={onOpenSound}
-              disabled={soundDisabled}
-              testID="sound-settings-button"
-              style={({ pressed }) => ({
-                minHeight: 68,
-                paddingHorizontal: 18,
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 16,
-                borderRadius: radius.xl,
-                borderCurve: "continuous",
-                borderWidth: 1,
-                borderColor: colors.border,
-                backgroundColor: pressed ? colors.surfacePressed : colors.surface,
-                opacity: soundDisabled ? 0.5 : 1,
-              })}
-            >
-              <NativeIcon name={icons.tune} size={28} />
-              <Text style={{ flex: 1, color: colors.label, fontSize: 18 }}>Sound settings</Text>
-              <NativeIcon name={icons.chevron} size={19} color={colors.secondaryLabel} />
-            </Pressable>
-
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Disconnect remote"
-              onPress={onDisconnect}
-              testID="disconnect-button"
-              style={({ pressed }) => ({
-                minHeight: 48,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: pressed ? 0.65 : 1,
-              })}
-            >
-              <Text style={{ color: colors.accent, fontSize: 17, fontWeight: "500" }}>
-                Disconnect remote
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
-    </View>
+              {eqPane}
+            </ScrollView>
+          </>
+        ) : null}
+      </View>
+    </Faceplate>
   );
 }

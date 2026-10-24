@@ -1,0 +1,148 @@
+import type { ReactElement } from "react";
+import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
+import { EqPane, EqPanel, eqTrackLength } from "@/eq-panel";
+
+const { act } = ReactTestRenderer;
+
+function create(element: ReactElement) {
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = ReactTestRenderer.create(element);
+  });
+  return renderer;
+}
+
+// Style props are arbitrarily nested arrays of objects; flatten like StyleSheet.flatten.
+const flat = (style: any): Record<string, unknown> =>
+  Array.isArray(style) ? Object.assign({}, ...style.filter(Boolean).map(flat)) : (style ?? {});
+const hostById = (r: ReactTestRenderer.ReactTestRenderer, id: string) =>
+  r.root.find((n) => typeof n.type === "string" && n.props.testID === id);
+const textsIn = (node: ReactTestInstance) =>
+  node.findAll((n) => (n.type as unknown) === "Text" && typeof n.props.children === "string");
+
+afterEach(() => jest.useRealTimers());
+
+test("five vertical faders with spoken band names and LED dB readouts", () => {
+  const r = create(
+    <EqPanel gains={[3.5, 0, -2, 0, 12]} disabled={false} onChangeBand={jest.fn()} />,
+  );
+  expect(hostById(r, "eq-band-0").props).toMatchObject({
+    accessibilityRole: "adjustable",
+    accessibilityLabel: "Bass, 60 hertz",
+    accessibilityValue: { min: -12, max: 12, now: 3.5, text: "plus 3.5 decibels" },
+  });
+  expect(hostById(r, "eq-band-2").props.accessibilityValue.text).toBe("minus 2 decibels");
+  expect(hostById(r, "eq-band-4").props.accessibilityLabel).toBe("Air, 12 kilohertz");
+  expect(textsIn(hostById(r, "eq-band-0-readout")).map((t) => t.props.children)).toContain("+3.5");
+  expect(hostById(r, "eq-curve").props.children).toBe("CUSTOM");
+});
+
+test("a flat curve reads FLAT", () => {
+  const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  expect(hostById(r, "eq-curve").props.children).toBe("FLAT");
+});
+
+test("an increment commits the stepped band", async () => {
+  jest.useFakeTimers();
+  const onChangeBand = jest.fn();
+  const r = create(
+    <EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={onChangeBand} />,
+  );
+  act(() =>
+    hostById(r, "eq-band-2").props.onAccessibilityAction({
+      nativeEvent: { actionName: "increment" },
+    }),
+  );
+  await act(async () => {
+    jest.advanceTimersByTime(180);
+  });
+  expect(onChangeBand).toHaveBeenCalledWith(2, 1);
+});
+
+test("disabled bands report it and take no input", () => {
+  const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled onChangeBand={jest.fn()} />);
+  for (let i = 0; i < 5; i += 1) {
+    expect(hostById(r, `eq-band-${i}`).props.accessibilityState).toEqual({ disabled: true });
+  }
+});
+
+test("track length fills the row within bounds", () => {
+  expect(eqTrackLength(100)).toBe(140);
+  expect(eqTrackLength(300)).toBe(204);
+  expect(eqTrackLength(1000)).toBe(320);
+});
+
+test("the scale, 0 dB line and readouts are decoration", () => {
+  const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  expect(hostById(r, "eq-scale").props.accessibilityElementsHidden).toBe(true);
+  expect(hostById(r, "eq-zero-line").props.accessibilityElementsHidden).toBe(true);
+  // The fader itself speaks the value, so its LED readout is hidden.
+  const readout = hostById(r, "eq-band-0-readout");
+  let hidden = false;
+  for (let node: ReactTestInstance | null = readout; node; node = node.parent) {
+    if (node.props.accessibilityElementsHidden) hidden = true;
+  }
+  expect(hidden).toBe(true);
+});
+
+test("printed captions and scale marks cap text scaling", () => {
+  const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  const marks = textsIn(hostById(r, "eq-scale"));
+  expect(marks.map((t) => t.props.children)).toEqual(["+12", "+6", "0", "−6", "−12"]);
+  const curve = r.root.find((n) => (n.type as unknown) === "Text" && n.props.children === "Curve");
+  const printed = [...marks, curve];
+  for (const text of printed) expect(text.props.maxFontSizeMultiplier).toBe(1.3);
+});
+
+test("dB readouts fit a 60 pt column: small digits, tight padding, no text scaling", () => {
+  // Found in review: a 4-digit well at 14 pt with 8 pt padding was ~62 pt, wider than a 360 dp column.
+  const r = create(<EqPanel gains={[3.5, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  const readout = hostById(r, "eq-band-0-readout");
+  expect(flat(readout.props.style).paddingHorizontal).toBe(4);
+  for (const digits of textsIn(readout)) {
+    expect(digits.props.maxFontSizeMultiplier).toBe(1);
+    expect(flat(digits.props.style).fontSize).toBe(12);
+  }
+});
+
+test("the footnote explains the faders", () => {
+  const r = create(<EqPanel gains={[0, 0, 0, 0, 0]} disabled={false} onChangeBand={jest.fn()} />);
+  expect(textsIn(r.root).map((t) => t.props.children)).toContain(
+    "Drag up to boost, down to cut. 0 dB leaves the sound unchanged.",
+  );
+});
+
+const pane = (gains: number[], disabled = false, onReset = jest.fn()) =>
+  create(<EqPane gains={gains} disabled={disabled} onChangeBand={jest.fn()} onReset={onReset} />);
+
+test("the pane names itself and holds the five faders", () => {
+  const r = pane([0, 0, 0, 0, 0]);
+  const root = hostById(r, "eq-pane");
+  const caption = root.find(
+    (n) => (n.type as unknown) === "Text" && n.props.children === "Equalizer",
+  );
+  expect(caption.props.accessibilityRole).toBe("header");
+  expect(caption.props.maxFontSizeMultiplier).toBe(1.3);
+  for (let i = 0; i < 5; i += 1) {
+    expect(
+      root.findAll((n) => typeof n.type === "string" && n.props.testID === `eq-band-${i}`),
+    ).toHaveLength(1);
+  }
+});
+
+test("pane Reset is off while flat or disabled, and flattens the curve", () => {
+  expect(hostById(pane([0, 0, 0, 0, 0]), "eq-pane-reset").props.onPress).toBeUndefined();
+  expect(hostById(pane([2, 0, 0, 0, 0], true), "eq-pane-reset").props.onPress).toBeUndefined();
+  const onReset = jest.fn();
+  const reset = hostById(pane([2, 0, 0, 0, 0], false, onReset), "eq-pane-reset");
+  expect(reset.props.accessibilityLabel).toBe("Reset equalizer");
+  act(() => reset.props.onPress());
+  expect(onReset).toHaveBeenCalledTimes(1);
+});
+
+test("a disabled pane disables every band", () => {
+  const r = pane([2, 0, 0, 0, 0], true);
+  for (let i = 0; i < 5; i += 1) {
+    expect(hostById(r, `eq-band-${i}`).props.accessibilityState).toEqual({ disabled: true });
+  }
+});

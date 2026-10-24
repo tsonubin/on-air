@@ -24,7 +24,7 @@ export function NativeIcon({
       matchContents
       ignoreSafeArea="all"
       colorScheme="dark"
-      seedColor={colors.accent}
+      seedColor={colors.amber}
       style={{ width: size, height: size }}
       accessible={!decorative}
       accessibilityRole={decorative ? undefined : "image"}
