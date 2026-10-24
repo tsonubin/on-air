@@ -4,6 +4,11 @@ packages:
   - "e2e"
 
 # One version per tool across the workspace. Reference with "catalog:".
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  esbuild: set this to true or false
+  unrs-resolver: set this to true or false
+
 catalog:
   "@types/node": ^26.6.4
   typescript: ~7.0.2
