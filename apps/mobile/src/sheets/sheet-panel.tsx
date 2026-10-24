@@ -10,7 +10,8 @@ import { type SheetSpec, sheetProps } from "./sheet-props";
 /**
  * A bottom sheet cut from the same faceplate as the mixer: the native sheet
  * presents and dismisses it, and the faceplate fills it edge to edge under a
- * silkscreened caption and, except where the sheet has its own Cancel, a Done key.
+ * silkscreened caption. On Android a Done key sits beside the caption (unless the
+ * sheet has its own Cancel); iOS closes the sheet by swipe or a tap outside.
  */
 export function SheetPanel({
   spec,
@@ -73,7 +74,9 @@ export function SheetPanel({
               >
                 {caption}
               </Text>
-              {done ? (
+              {/* iOS closes by swipe or a tap outside, so nothing sits beside the folded
+                  iPhone Duo's rail, which holds the system's own controls. */}
+              {done && !ios ? (
                 <PanelKey
                   label="Done"
                   onPress={onClose}
