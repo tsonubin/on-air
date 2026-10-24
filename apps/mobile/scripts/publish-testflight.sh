@@ -264,7 +264,7 @@ else
   export EXPO_ASC_KEY_ID EXPO_ASC_ISSUER_ID EXPO_ASC_API_KEY_PATH
   (
     cd "$MOBILE_DIR"
-    npx --yes eas-cli@latest build \
+    pnpm dlx eas-cli@latest build \
       --platform ios \
       --profile production \
       --auto-submit
