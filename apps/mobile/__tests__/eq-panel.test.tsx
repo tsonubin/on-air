@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import ReactTestRenderer, { type ReactTestInstance } from "react-test-renderer";
-import { EqPanel, eqTrackLength } from "@/eq-panel";
+import { EqPane, EqPanel, eqTrackLength } from "@/eq-panel";
 
 const { act } = ReactTestRenderer;
 
@@ -110,4 +110,39 @@ test("the footnote explains the faders", () => {
   expect(textsIn(r.root).map((t) => t.props.children)).toContain(
     "Drag up to boost, down to cut. 0 dB leaves the sound unchanged.",
   );
+});
+
+const pane = (gains: number[], disabled = false, onReset = jest.fn()) =>
+  create(<EqPane gains={gains} disabled={disabled} onChangeBand={jest.fn()} onReset={onReset} />);
+
+test("the pane names itself and holds the five faders", () => {
+  const r = pane([0, 0, 0, 0, 0]);
+  const root = hostById(r, "eq-pane");
+  const caption = root.find(
+    (n) => (n.type as unknown) === "Text" && n.props.children === "Equalizer",
+  );
+  expect(caption.props.accessibilityRole).toBe("header");
+  expect(caption.props.maxFontSizeMultiplier).toBe(1.3);
+  for (let i = 0; i < 5; i += 1) {
+    expect(
+      root.findAll((n) => typeof n.type === "string" && n.props.testID === `eq-band-${i}`),
+    ).toHaveLength(1);
+  }
+});
+
+test("pane Reset is off while flat or disabled, and flattens the curve", () => {
+  expect(hostById(pane([0, 0, 0, 0, 0]), "eq-pane-reset").props.onPress).toBeUndefined();
+  expect(hostById(pane([2, 0, 0, 0, 0], true), "eq-pane-reset").props.onPress).toBeUndefined();
+  const onReset = jest.fn();
+  const reset = hostById(pane([2, 0, 0, 0, 0], false, onReset), "eq-pane-reset");
+  expect(reset.props.accessibilityLabel).toBe("Reset equalizer");
+  act(() => reset.props.onPress());
+  expect(onReset).toHaveBeenCalledTimes(1);
+});
+
+test("a disabled pane disables every band", () => {
+  const r = pane([2, 0, 0, 0, 0], true);
+  for (let i = 0; i < 5; i += 1) {
+    expect(hostById(r, `eq-band-${i}`).props.accessibilityState).toEqual({ disabled: true });
+  }
 });

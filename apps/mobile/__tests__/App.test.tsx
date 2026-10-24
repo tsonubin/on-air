@@ -4,11 +4,13 @@ import { FakeSocket } from "@on-air/control-client/testing";
 import * as expoRouter from "expo-router";
 import * as SecureStore from "expo-secure-store";
 import { Keyboard, Platform, useWindowDimensions } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ReactTestRenderer, {
   type ReactTestInstance,
   type TestRendererOptions,
 } from "react-test-renderer";
 import RootLayout from "../app/_layout";
+import { keysFitInRow } from "../src/mixer-home";
 
 jest.mock("@on-air/control-client", () => ({
   ...jest.requireActual("@on-air/control-client"),
@@ -221,6 +223,7 @@ beforeEach(() => {
     scale: 3,
     fontScale: 1,
   });
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 47, right: 0, bottom: 34, left: 0 });
   mockDesktop();
 });
 
@@ -763,6 +766,36 @@ test("keys measure their row: a narrow column wraps even at the default text siz
   expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
 });
 
+test("before the row is measured, the keys' width estimate leaves out a side rail", async () => {
+  // Found on the folded iPhone Duo: the estimate ignored the 84 pt rail, so the
+  // first frame put four keys in one row at the largest text size.
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 84, bottom: 34, left: 0 });
+  jest
+    .mocked(useWindowDimensions)
+    .mockReturnValue({ width: 466, height: 678, scale: 3, fontScale: 3.571 });
+  await renderApp();
+  await pairWith();
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+});
+
+test("switching between one row and the grid mounts a fresh key row", async () => {
+  // React Native 0.88 doesn't re-lay out a wrapping row when its keys' flex
+  // basis changes in place (seen on the iPhone Duo when the text size changed).
+  await renderApp();
+  await pairWith();
+  setWindow(390, 844, 1);
+  const row = host("mixer-keys");
+  setWindow(390, 844, 1.1);
+  expect(host("mixer-keys")).toBe(row);
+  setWindow(390, 844, 1.6);
+  const grid = host("mixer-keys");
+  expect(grid).not.toBe(row);
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: "48%" });
+  setWindow(390, 844, 1);
+  expect(host("mixer-keys")).not.toBe(grid);
+  expect(flat(host("eq-key").props.style)).toMatchObject({ flexBasis: 0 });
+});
+
 test("keys share one row at the default text size", async () => {
   await renderApp();
   await pairWith();
@@ -817,7 +850,15 @@ test("compact disc transport applies the returned state", async () => {
   expect(text()).toContain("Freddie Freeloader");
 });
 
-test("layouts: two panes when unfolded, compact rows in phone landscape", async () => {
+/** Sets the window, as a fold, unfold, rotation or split view does, and re-renders. */
+function setWindow(width: number, height: number, fontScale = 1) {
+  jest.mocked(useWindowDimensions).mockReturnValue({ width, height, scale: 3, fontScale });
+  ReactTestRenderer.act(() => tree?.update(<RootLayout />));
+}
+
+const touch = (x: number, y = 0) => ({ nativeEvent: { pageX: x, pageY: y } });
+
+test("layouts: mixer + EQ when unfolded, the two-column mixer in phone landscape", async () => {
   jest.mocked(useWindowDimensions).mockReturnValue({
     width: 852,
     height: 883,
@@ -827,19 +868,166 @@ test("layouts: two panes when unfolded, compact rows in phone landscape", async 
   await renderApp();
   expect(exists("pairing-wide-layout")).toBe(true);
   await pairWith();
-  expect(exists("mixer-wide-layout")).toBe(true);
+  expect(host("mixer-panes").findAll((n) => n.props.testID === "eq-pane").length).toBeGreaterThan(
+    0,
+  );
+  expect(exists("mixer-pane-layout")).toBe(true);
+  expect(exists("eq-key")).toBe(false);
+  for (const id of ["source-key", "speaker-key", "volume-slider", "format-key"]) {
+    expect(exists(id)).toBe(true);
+  }
 
-  jest.mocked(useWindowDimensions).mockReturnValue({
-    width: 844,
-    height: 390,
-    scale: 3,
-    fontScale: 1,
-  });
-  ReactTestRenderer.act(() => tree?.update(<RootLayout />));
+  setWindow(844, 390);
   expect(exists("mixer-landscape-layout")).toBe(true);
+  expect(exists("eq-pane")).toBe(false);
   for (const id of ["source-key", "speaker-key", "volume-slider", "eq-key", "format-key"]) {
     expect(exists(id)).toBe(true);
   }
+});
+
+test("unfolding shows the EQ beside the mixer; folding puts it away", async () => {
+  await renderApp();
+  await pairWith();
+  setWindow(375, 812); // folded: the outer screen
+  expect(exists("eq-pane")).toBe(false);
+  expect(exists("eq-key")).toBe(true);
+  setWindow(669, 951); // unfolded
+  expect(exists("eq-pane")).toBe(true);
+  expect(exists("eq-key")).toBe(false);
+  setWindow(375, 812);
+  expect(exists("eq-pane")).toBe(false);
+  expect(exists("eq-key")).toBe(true);
+});
+
+test("the EQ pane writes through the same session calls", async () => {
+  await renderApp();
+  await pairWith();
+  setWindow(669, 951);
+  jest.useFakeTimers();
+  stepFader("eq-band-2", "increment");
+  await ReactTestRenderer.act(async () => {
+    jest.advanceTimersByTime(180);
+  });
+  jest.useRealTimers();
+  await flush();
+  expect(api.setEq).toHaveBeenLastCalledWith(BASE, [0, 0, 1, 0, 0], TOKEN);
+  await press("eq-pane-reset");
+  expect(api.setEq).toHaveBeenLastCalledWith(BASE, [0, 0, 0, 0, 0], TOKEN);
+});
+
+test("a fold mid-drag sends no stray commit and keeps the volume fader", async () => {
+  api.getActiveOutput.mockResolvedValue({
+    transport: "sonos",
+    device_id: "uuid:mock-sonos",
+    device_name: "Mock Sonos",
+    state: "live",
+  });
+  await renderApp();
+  await pairWith();
+  setWindow(669, 951);
+  const fader = host("volume-slider");
+  jest.useFakeTimers();
+  ReactTestRenderer.act(() => fader.props.onResponderGrant(touch(0)));
+  setWindow(375, 812); // folded while the finger is down
+  expect(host("volume-slider")).toBe(fader);
+  await ReactTestRenderer.act(async () => {
+    jest.advanceTimersByTime(500);
+  });
+  jest.useRealTimers();
+  expect(api.setVolume).not.toHaveBeenCalled();
+});
+
+test("a narrow split view falls back to the phone layout", async () => {
+  await renderApp();
+  await pairWith();
+  setWindow(320, 900);
+  expect(exists("mixer-phone-layout")).toBe(true);
+  expect(exists("eq-pane")).toBe(false);
+  expect(exists("eq-key")).toBe(true);
+});
+
+test("a paused desktop disables the EQ pane", async () => {
+  await renderApp();
+  await pairWith();
+  api.fetchStatus.mockResolvedValue({ status: "ok", version: "0.1.0", service_enabled: false });
+  for (const read of [api.listInputs, api.listOutputs, api.getEq, api.getVolume]) {
+    read.mockRejectedValue(
+      new client.HttpError("/api/x", 503, '{"error":"","code":"service_paused"}'),
+    );
+  }
+  await press("more-button");
+  await pressRefresh();
+  await press("native-back");
+  setWindow(669, 951);
+  expect(host("eq-band-0").props.accessibilityState).toEqual({ disabled: true });
+  expect(host("eq-pane-reset").props.onPress).toBeUndefined();
+});
+
+test("the three-key row wraps at the largest text in a narrow pane", async () => {
+  await renderApp();
+  await pairWith();
+  setWindow(669, 951, 1.6);
+  // The Duo's ~293 pt pane still fits three keys at the 1.3× cap; a narrower one must wrap.
+  ReactTestRenderer.act(() =>
+    host("mixer-keys").props.onLayout({
+      nativeEvent: { layout: { x: 0, y: 0, width: 293, height: 56 } },
+    }),
+  );
+  expect(flat(host("source-key").props.style)).toMatchObject({ flexBasis: 0 });
+  ReactTestRenderer.act(() =>
+    host("mixer-keys").props.onLayout({
+      nativeEvent: { layout: { x: 0, y: 0, width: 260, height: 56 } },
+    }),
+  );
+  expect(flat(host("source-key").props.style)).toMatchObject({ flexBasis: "48%" });
+  expect(keysFitInRow(290, 1, 3)).toBe(true);
+  expect(keysFitInRow(200, 1, 3)).toBe(false);
+});
+
+/** The content style of the scroll view that holds a host element. */
+function scrollContentOf(id: string): Record<string, unknown> {
+  let node = host(id).parent;
+  while (node && node.props.contentContainerStyle === undefined) node = node.parent;
+  return flat(node?.props.contentContainerStyle);
+}
+
+test("the mixer and its EQ pane keep clear of a side rail", async () => {
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 59, bottom: 21, left: 59 });
+  await renderApp();
+  await pairWith();
+  expect(scrollContentOf("mixer-phone-layout")).toMatchObject({
+    paddingLeft: 59,
+    paddingRight: 59,
+  });
+  setWindow(951, 669); // unfolded, sideways: the rail sits on a side
+  expect(flat(host("eq-pane-scroll").props.contentContainerStyle)).toMatchObject({
+    paddingRight: 59,
+  });
+  expect(scrollContentOf("mixer-pane-layout")).toMatchObject({
+    paddingLeft: 59,
+  });
+});
+
+test("pairing keeps clear of a side rail", async () => {
+  jest.mocked(useSafeAreaInsets).mockReturnValue({ top: 0, right: 59, bottom: 21, left: 59 });
+  await renderApp();
+  expect(flat(host("pairing-scroll").props.contentContainerStyle)).toMatchObject({
+    paddingLeft: 59,
+    paddingRight: 59,
+  });
+});
+
+test("unfolding while the EQ screen is open keeps it; Back returns to the two panes", async () => {
+  await renderApp();
+  await pairWith();
+  setWindow(375, 812);
+  await press("eq-key");
+  setWindow(669, 951);
+  expect(exists("equalizer-screen")).toBe(true);
+  expect(exists("eq-pane")).toBe(false);
+  await press("native-back");
+  expect(exists("mixer-screen")).toBe(true);
+  expect(exists("eq-pane")).toBe(true);
 });
 
 test("accessibility: nothing but the host string is selectable; decorative icons are hidden", async () => {

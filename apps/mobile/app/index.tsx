@@ -4,6 +4,7 @@ import { outputPhase } from "@on-air/api-types";
 import { router } from "expo-router";
 import { useState } from "react";
 import { View } from "react-native";
+import { EqPane } from "@/eq-panel";
 import { MixerHome } from "@/mixer-home";
 import { PairingHome } from "@/pairing-home";
 import { type DevicePairTarget, useRemoteSession } from "@/remote-session";
@@ -85,6 +86,14 @@ function MixerScreen() {
         onCdPlayPause={() => void remote.controlCd(cd.playing ? "pause" : "play")}
         onCdPrev={() => void remote.controlCd("prev")}
         onCdNext={() => void remote.controlCd("next")}
+        eqPane={
+          <EqPane
+            gains={remote.gains}
+            disabled={!view.controlsEnabled}
+            onChangeBand={(index, value) => remote.changeBand(index, value)}
+            onReset={() => remote.applyEq([0, 0, 0, 0, 0])}
+          />
+        }
       />
       {sheet === "source" && <SourceSheet onClose={() => setSheet(null)} />}
       {sheet === "output" && (

@@ -105,6 +105,9 @@ export const layout = {
   wideBreakpoint: 700,
   /** Window width below which paddings tighten. */
   compactBreakpoint: 370,
+  /** Window size at or above which the mixer and the equalizer sit side by side (unfolded iPhone Duo, iPads, foldables). */
+  twoPaneMinWidth: 600,
+  twoPaneMinHeight: 500,
 } as const;
 
 export const theme = {

@@ -49,7 +49,7 @@ export function digitsOnly(value: string, max: number): string {
 }
 
 /** iOS reports `inactive` during transitions and `unknown` before the first event. */
-export function isForeground(state: AppStateStatus | null | undefined): boolean {
+export function isForeground(state: AppStateStatus | string | null | undefined): boolean {
   return state !== "background";
 }
 

@@ -2,16 +2,12 @@
   "expo": {
     "name": "on-air remote",
     "slug": "on-air-remote",
-    "version": "0.2.0",
+    "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": "onair",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#000000",
-    "androidNavigationBar": {
-      "backgroundColor": "#000000",
-      "barStyle": "light-content"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.onair.remote",
@@ -31,7 +27,7 @@
       "versionCode": 2,
       "permissions": ["ACCESS_NETWORK_STATE", "CHANGE_WIFI_MULTICAST_STATE", "INTERNET"]
     },
-    "plugins": ["expo-secure-store", "expo-router"],
+    "plugins": ["expo-secure-store", "expo-router", "expo-font", "expo-status-bar"],
     "extra": {
       "eas": {
         "projectId": "6d6a9d12-1cf3-4458-8e5b-9dd27e357c98"
