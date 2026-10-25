@@ -5,5 +5,14 @@
   "assets": {
     "directory": "../public",
     "not_found_handling": "404-page"
-  }
+  },
+  "account_id": "ac72daf92f7410af142e1b598fca99a0",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "on-air.tsonubin.com",
+      "custom_domain": true
+    }
+  ]
 }
