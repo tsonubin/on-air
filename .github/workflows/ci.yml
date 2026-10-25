@@ -110,6 +110,8 @@ jobs:
         run: |
           sudo apt-get install -y desktop-file-utils jq lua5.4
           sh packaging/omarchy/test.sh
+      - name: Validate the desktop installer
+        run: python3 packaging/test-install.py
 
   e2e-mobile:
     name: phone client e2e against the mock core

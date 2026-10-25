@@ -99,6 +99,12 @@ sh "$dir/install.sh" --bogus >/dev/null 2>&1 && fail "install.sh accepted an unk
 echo "ok $dir/install.sh builds the checkout"
 python3 "$dir/test-install.py" || fail "install.sh installation flow"
 echo "ok $dir/install.sh authentication and failure handling"
+# The desktop installer (packaging/install.sh) picks a method and stages a
+# build before it installs anything. Exercise its decision and failure
+# paths without root, a network, or an Arch/Flatpak toolchain.
+bash -n packaging/install.sh || fail "packaging/install.sh syntax"
+python3 packaging/test-install.py || fail "packaging/install.sh decision and failure paths"
+echo "ok packaging/install.sh decision and failure paths"
 
 # Release recipes: one MIT license, one version, and the prebuilt package
 # installs the same files as the source build.
