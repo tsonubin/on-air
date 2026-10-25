@@ -20,8 +20,8 @@ Release preparation on October 25, 2026.
 
 The English copy and direct simulator screenshots are committed alongside this record. App Store Connect has build 8, iPhone/iPad screenshots, description, keywords, support/marketing URLs, companion setup instructions, and manual release configured. The Developer Program agreement was verified accepted on October 25.
 
-Marketing, support, and privacy pages are now in `website/public`, with Vercel and Cloudflare deployment settings in `website/README.md`. The account holder will deploy later; no Site publication is planned. Replace the previously proposed Sites URLs in App Store Connect and `en-US.json` with the final public origin after hosting.
+Marketing, support, and privacy pages are now in `website/public`, with Vercel and Cloudflare deployment settings in `website/README.md`. The website was deployed with Wrangler to https://on-air.tsonubin.com on October 25. The custom domain and HTTPS are active, and the homepage, support, privacy, scripts, fonts, images and custom 404 were verified. `en-US.json` now uses this public origin; the App Store Connect draft still needs its previously proposed Sites URLs replaced. Cloudflare Worker version: `2837eea9-38e8-48b9-8154-04f7cb19ef77`.
 
 The account holder confirmed free pricing. A zero-price schedule was configured in App Store Connect for all 175 price territories on October 25. This price schedule does not itself configure territorial app availability.
 
-App Review submission remains pending public support/privacy hosting, territorial availability, and the account holder's approval of Apple content/privacy/age declarations and private review contact. Do not interpret the prepared App Store draft as a submitted release.
+App Review submission remains pending final App Store URL updates, territorial availability, and the account holder's approval of Apple content/privacy/age declarations and private review contact. Do not interpret the prepared App Store draft as a submitted release.

@@ -12,7 +12,19 @@ python3 -m http.server 48762 --bind 127.0.0.1 --directory website/public
 
 Open <http://127.0.0.1:48762>. Edit `public/index.html`, `public/styles.css`, and `public/site.js` directly. The install selector, command-copy button, and screenshot carousel controls use JavaScript; all installation options and product screenshots remain available without it. The copy button needs a secure browser context (HTTPS or localhost).
 
-## Deploy later
+## Production
+
+Live at <https://on-air.tsonubin.com>, hosted on Cloudflare Workers static assets. The custom domain, DNS entry, and managed HTTPS certificate are configured through Wrangler. Worker: `on-air-website`. Initial production version: `2837eea9-38e8-48b9-8154-04f7cb19ef77`, deployed from source commit `bb80b00`.
+
+To redeploy from the repository root after reviewing and committing changes:
+
+```sh
+wrangler deploy --config website/cloudflare/wrangler.jsonc
+```
+
+The configured audience is public at the custom domain. The default `workers.dev` URL and version preview URLs are disabled.
+
+## Other deployment options
 
 Only `website/public/` is the public artifact. Keep the project root at `website` so the host does not install or build the Rust/mobile monorepo.
 
@@ -25,21 +37,21 @@ Only `website/public/` is the public artifact. Keep the project root at `website
 | Output directory | `public` | `public` |
 | Install command | `true` (skip; set in vercel.json) | No dependencies to install |
 
-`vercel.json` records the Vercel overrides. For Cloudflare Pages Git integration, enter the settings above in the dashboard. For Cloudflare Workers static assets, `cloudflare/wrangler.jsonc` also points at `public`; from `website/`, use the official Wrangler CLI's `wrangler deploy --config cloudflare/wrangler.jsonc` after selecting your account. No Worker script or bindings are needed. These instructions prepare deployment; no production deployment was performed in this change.
+`vercel.json` records the Vercel overrides. For Cloudflare Pages Git integration, enter the settings above in the dashboard. For Cloudflare Workers static assets, `cloudflare/wrangler.jsonc` also points at `public`; from `website/`, use the official Wrangler CLI's `wrangler deploy --config cloudflare/wrangler.jsonc` after selecting your account. No Worker script or bindings are needed. The Cloudflare Workers configuration is the active production target. Vercel and Cloudflare Pages remain alternatives.
 
 Official references: [Vercel static builds](https://vercel.com/docs/builds/configure-a-build#skip-build-step), [Cloudflare Pages static HTML](https://developers.cloudflare.com/pages/framework-guides/deploy-anything/), [Cloudflare Workers static assets](https://developers.cloudflare.com/workers/static-assets/get-started/).
 
 ## App Store handoff after hosting
 
-The final domain is intentionally unspecified. Every internal link and asset path is relative, and there is no dependency on the earlier prepared Sites project.
+The production domain is `https://on-air.tsonubin.com`. Internal page and asset links are relative; canonical and social metadata use the production origin. There is no dependency on the earlier prepared Sites project.
 
-After deployment, set the App Store URLs and `apps/mobile/store/en-US.json` to the real public origin:
+`apps/mobile/store/en-US.json` now uses this public origin. The App Store Connect draft should use:
 
 - Marketing: `/`
 - Support: `/support.html`
 - Privacy policy: `/privacy.html`
 
-Open each URL without authentication before submitting. The existing App Store draft still references the previously proposed Sites origin; it must be replaced. Add an absolute `og:image` and canonical URL after choosing a domain, if desired. Update the iOS release notice and add a real App Store link only after the app is publicly available.
+Open each URL without authentication before submitting. The existing App Store draft still references the previously proposed Sites origin; it must be replaced. The absolute `og:image` and canonical URLs are configured. Update the iOS release notice and add a real App Store link only after the app is publicly available.
 
 ## Content and assets
 
