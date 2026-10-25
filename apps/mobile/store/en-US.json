@@ -10,6 +10,7 @@
   "privacyPolicyUrl": "https://on-air-remote.tsonubin.chatgpt.site/privacy.html",
   "copyright": "2026 on-air contributors",
   "primaryCategory": "MUSIC",
+  "price": "FREE",
   "testFlightWhatToTest": "Test discovery and manual address setup, six-digit PIN pairing, saved pairing after restart, source and speaker selection, connection state, volume, five-band EQ and reset, audio format controls, and the expanded iPad/iPhone Duo layout. The source, speaker, and pairing sheets now share the mixer faceplate design. Requires the on-air desktop companion on the same local network. On macOS, AirPlay remains desktop-only.",
   "reviewNotes": "on-air remote is a LAN controller for the free, open-source on-air desktop companion. It has no user account or cloud sign-in. Pairing uses the six-digit PIN displayed by the desktop companion.\n\nTo review: install and run the companion from https://github.com/tsonubin/on-air on a computer connected to the same local network as the iPhone/iPad. Allow Local Network access, select the computer or use Set up manually with its LAN address, and enter the companion PIN. Choose an available audio input, then a supported output. For a hardware-free walkthrough, run the core with ON_AIR_MOCK=1; it provides mock source/speaker devices and PIN 123456. The mock option belongs to the desktop companion and is documented source behavior.\n\nThe phone app controls desktop audio; it does not play or capture phone audio. macOS AirPlay is desktop-only through the system route picker. No in-app purchases or subscriptions."
 }

@@ -20,6 +20,8 @@ Release preparation on October 25, 2026.
 
 The English copy and direct simulator screenshots are committed alongside this record. App Store Connect has build 8, iPhone/iPad screenshots, description, keywords, support/marketing URLs, companion setup instructions, and manual release configured. The Developer Program agreement was verified accepted on October 25.
 
-Marketing, support, and privacy pages are in `website/dist`. Matching Site source was pushed and saved as version 2; public publication awaits the account holder's confirmation. The expected origin in the listing is not evidence of a live publication.
+Marketing, support, and privacy pages are now in `website/public`, with Vercel and Cloudflare deployment settings in `website/README.md`. The account holder will deploy later; no Site publication is planned. Replace the previously proposed Sites URLs in App Store Connect and `en-US.json` with the final public origin after hosting.
 
-App Review submission remains pending the account holder's approval of Apple content/privacy/age declarations, price, website audience, and private review contact. Do not interpret the prepared App Store draft as a submitted release.
+The account holder confirmed free pricing. A zero-price schedule was configured in App Store Connect for all 175 price territories on October 25. This price schedule does not itself configure territorial app availability.
+
+App Review submission remains pending public support/privacy hosting, territorial availability, and the account holder's approval of Apple content/privacy/age declarations and private review contact. Do not interpret the prepared App Store draft as a submitted release.

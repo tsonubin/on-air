@@ -13,7 +13,9 @@
       "!apps/desktop/src-tauri",
       "!apps/mobile/assets/AppIcon.icon",
       "!packaging/omarchy/snippets",
-      "!apps/quickshell/Rope.js"
+      "!apps/quickshell/Rope.js",
+      "!website/public/vendor",
+      "!website/public/assets/icons"
     ]
   },
   "formatter": {

@@ -7,6 +7,6 @@ Screenshots are direct captures of the Release app in Apple's simulator, using t
 - `screenshots/iphone`: iPhone 17 Pro, 1206 × 2622. Mixer, speakers, equalizer, and source picker.
 - `screenshots/ipad`: iPad Pro 13-inch (M5), 2064 × 2752. Expanded mixer and equalizer.
 
-The marketing, support, and privacy pages live under `website/dist`. The Site identity is recorded in `website/.openai/hosting.json`. Edit these sources and publish a matching saved Site version when updating the hosted copy.
+The marketing, support, and privacy pages live under `website/public`. Deployment settings for Vercel and Cloudflare are in `website/README.md`. The production domain and App Store URLs must be updated after hosting.
 
 Before a later submission, refresh the captures if the app UI changes, verify the support and privacy URLs are public, select the processed build in App Store Connect, and confirm the app's current privacy/content declarations with the account holder.
