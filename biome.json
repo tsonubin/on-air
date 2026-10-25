@@ -14,7 +14,8 @@
       "!apps/mobile/assets/AppIcon.icon",
       "!packaging/omarchy/snippets",
       "!apps/quickshell/Rope.js",
-      "!website/dist"
+      "!website/public/vendor",
+      "!website/public/assets/icons"
     ]
   },
   "formatter": {

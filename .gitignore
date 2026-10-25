@@ -5,8 +5,6 @@
 # Node
 node_modules
 dist
-!website/dist/
-!website/dist/**
 .turbo
 e2e/**/test-results
 e2e/**/playwright-report

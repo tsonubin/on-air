@@ -116,6 +116,10 @@ The domain vocabulary (exclusive output, rate bridge, stereo pair, error
 envelope) is in [docs/glossary.md](docs/glossary.md); the design records
 behind each milestone are in [docs/design](docs/design).
 
+## Website
+
+The product, setup, and privacy website lives in [website](website/README.md). It is a standalone static site ready for Vercel or Cloudflare. Preview it with `python3 -m http.server 48762 --directory website/public`.
+
 ## Develop
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and the checks CI runs.

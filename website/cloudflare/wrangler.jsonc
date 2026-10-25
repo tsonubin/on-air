@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "on-air-website",
+  "compatibility_date": "2026-10-25",
+  "assets": {
+    "directory": "../public",
+    "not_found_handling": "404-page"
+  }
+}
