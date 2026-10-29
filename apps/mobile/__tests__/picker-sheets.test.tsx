@@ -54,7 +54,7 @@ function create(element: ReactElement) {
 const hostById = (r: ReactTestRenderer.ReactTestRenderer, id: string): ReactTestInstance =>
   r.root.find((n) => typeof n.type === "string" && n.props.testID === id);
 
-test("a sheet panel is a full-bleed faceplate with a caption and Done", () => {
+test("a sheet panel is a full-bleed faceplate with a caption, closed by swipe on iOS", () => {
   const onClose = jest.fn();
   const r = create(
     <SheetPanel spec={{ kind: "source", count: 1 }} caption="Source" onClose={onClose} testID="p">
@@ -77,12 +77,36 @@ test("a sheet panel is a full-bleed faceplate with a caption and Done", () => {
     accessibilityRole: "header",
     children: "Source",
   });
-  hostById(r, "p-done").props.onPress();
-  expect(onClose).toHaveBeenCalledTimes(2);
+  // iOS closes by swipe or a tap outside: no in-content Done beside the folded Duo's rail.
+  expect(r.root.findAll((n) => n.props.testID === "p-done")).toHaveLength(0);
   expect(
     r.root.findAll((n) => n.props.testID === "faceplate-finish" && typeof n.type === "string"),
   ).toHaveLength(1);
 });
+
+test("Android sheets keep their Done key", () => {
+  const original = Platform.OS;
+  (Platform as { OS: string }).OS = "android";
+  try {
+    const onClose = jest.fn();
+    const r = create(
+      <SheetPanel spec={{ kind: "source", count: 1 }} caption="Source" onClose={onClose} testID="p">
+        <Text>Body</Text>
+      </SheetPanel>,
+    );
+    expect(hostById(r, "p-caption").props.children).toBe("Source");
+    hostById(r, "p-done").props.onPress();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  } finally {
+    (Platform as { OS: string }).OS = original;
+  }
+});
+
+/** Swipes the native sheet down, as on iOS (or Android back). */
+const swipeDown = (r: ReactTestRenderer.ReactTestRenderer) =>
+  ReactTestRenderer.act(() =>
+    r.root.find((n) => (n.type as unknown) === "ExpoBottomSheet").props.onDismiss(),
+  );
 
 test("the faceplate fills an iOS detent and grows to its content on Android", () => {
   const host = () =>
@@ -245,13 +269,13 @@ describe("source sheet", () => {
     expect(hostById(r, "input-mock.monitor").props.onPress).toBeUndefined();
   });
 
-  test("with controls off the strips disable but Done still closes", async () => {
+  test("with controls off the strips disable but the sheet still closes", () => {
     const onClose = jest.fn();
     mockSession = session({ view: { controlsEnabled: false } });
     const r = create(<SourceSheet onClose={onClose} />);
     expect(hostById(r, "input-mic").props.onPress).toBeUndefined();
     expect(hostById(r, "input-mock.monitor").props.onPress).toBeUndefined();
-    await press(hostById(r, "source-sheet-done"));
+    swipeDown(r);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -382,13 +406,13 @@ describe("speaker sheet", () => {
     for (const id of strips) expect(hostById(r, `output-${id}`).props.onPress).toBeUndefined();
   });
 
-  test("with controls off the strips and Add disable but Done still closes", async () => {
+  test("with controls off the strips and Add disable but the sheet still closes", () => {
     const onClose = jest.fn();
     mockSession = session({ view: { controlsEnabled: false } });
     const r = sheet(onClose);
     for (const id of strips) expect(hostById(r, `output-${id}`).props.onPress).toBeUndefined();
     expect(hostById(r, "add-bluetooth").props.onPress).toBeUndefined();
-    await press(hostById(r, "output-sheet-done"));
+    swipeDown(r);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

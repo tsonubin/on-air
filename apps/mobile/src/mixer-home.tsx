@@ -17,8 +17,11 @@ import { PanelKey } from "./ui/panel-key";
 import { Sign } from "./ui/sign";
 import type { HomeStatus } from "./ui-state";
 
-/** The ONAIR sign is the only status badge up top; the LED window carries the words. */
-function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
+/**
+ * The ONAIR sign is the only status badge up top; the LED window carries the words.
+ * The "…" key is here only where the screen has no native toolbar to hold it (Android).
+ */
+function Header({ live, onMore }: { live: boolean; onMore?: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <View style={{ paddingTop: insets.top + 10, paddingBottom: 14 }}>
@@ -36,13 +39,15 @@ function Header({ live, onMore }: { live: boolean; onMore: () => void }) {
         <View style={{ flex: 1 }}>
           <Sign lit={live} testID="mixer-sign" />
         </View>
-        <PanelKey
-          shape="round"
-          icon={icons.more}
-          accessibilityLabel="More options"
-          onPress={onMore}
-          testID="more-button"
-        />
+        {onMore ? (
+          <PanelKey
+            shape="round"
+            icon={icons.more}
+            accessibilityLabel="More options"
+            onPress={onMore}
+            testID="more-button"
+          />
+        ) : null}
       </View>
     </View>
   );
@@ -196,7 +201,8 @@ export function MixerHome({
   onChangeOutput: () => void;
   onOpenEqualizer: () => void;
   onOpenFormat: () => void;
-  onOpenMore: () => void;
+  /** Shows the in-content "…" key; leave it out where a native toolbar holds More options. */
+  onOpenMore?: () => void;
   onVolumeChange: (value: number) => void;
   onCdPlayPause?: () => void;
   onCdPrev?: () => void;
