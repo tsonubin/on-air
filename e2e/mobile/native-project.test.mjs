@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -84,9 +84,7 @@ test("iOS native project autolinks Expo and declares LAN discovery access", () =
   for (const relativePath of [
     "apps/mobile/assets/icon.png",
     "apps/mobile/assets/AppIcon.icon/icon.json",
-    "apps/mobile/assets/AppIcon.icon/Assets/live-dial.png",
     "apps/mobile/ios/OnAirMobile/AppIcon.icon/icon.json",
-    "apps/mobile/ios/OnAirMobile/AppIcon.icon/Assets/live-dial.png",
     "apps/mobile/ios/OnAirMobile/Images.xcassets/AppIcon.appiconset/AppIcon.png",
   ]) {
     assert.ok(existsSync(path.join(ROOT, relativePath)), relativePath);
@@ -142,19 +140,49 @@ test("Android native project keeps the dark-only Expo appearance", () => {
   );
 });
 
-test("Icon Composer packages retain the shared Live Dial artwork", () => {
-  const icon = readFileSync(path.join(ROOT, "apps/mobile/assets/icon.png"));
+test("Icon Composer packages hold the layered Liquid Glass Live Dial", () => {
   const packages = ["apps/mobile/assets/AppIcon.icon", "apps/mobile/ios/OnAirMobile/AppIcon.icon"];
   const specs = packages.map((folder) => JSON.parse(read(`${folder}/icon.json`)));
   assert.deepEqual(specs[0], specs[1]);
+  const [spec] = specs;
+  // The charcoal background is the document fill, with its own dark appearance.
+  assert.ok(spec["fill-specializations"].some((fill) => !fill.appearance));
+  assert.ok(spec["fill-specializations"].some((fill) => fill.appearance === "dark"));
+  const layers = spec.groups.flatMap((group) => group.layers);
+  assert.deepEqual(layers.map((layer) => layer["image-name"]).sort(), [
+    "dial-glyph.svg",
+    "on-air-dot.svg",
+  ]);
+  for (const group of spec.groups) {
+    assert.equal(group.specular, true);
+    assert.equal(group.translucency.enabled, true);
+    assert.ok(group.shadow.opacity > 0);
+  }
+  for (const layer of layers) {
+    assert.equal(layer.glass, true);
+    assert.ok(layer["fill-specializations"].some((fill) => fill.appearance === "tinted"));
+  }
   for (const folder of packages) {
-    for (const group of specs[0].groups) {
-      for (const layer of group.layers) {
-        assert.deepEqual(
-          readFileSync(path.join(ROOT, folder, "Assets", layer["image-name"])),
-          icon,
-        );
-      }
+    const assets = path.join(ROOT, folder, "Assets");
+    assert.deepEqual(readdirSync(assets).sort(), ["dial-glyph.svg", "on-air-dot.svg"]);
+    for (const layer of layers) {
+      const svg = readFileSync(path.join(assets, layer["image-name"]), "utf8");
+      assert.match(svg, /^<svg [^>]*viewBox="0 0 1024 1024"/);
+      assert.equal(svg, read(`${packages[0]}/Assets/${layer["image-name"]}`));
     }
   }
+});
+
+test("flat icon fallbacks are the same opaque 1024 px render", () => {
+  const icon = readFileSync(path.join(ROOT, "apps/mobile/assets/icon.png"));
+  assert.deepEqual(
+    readFileSync(
+      path.join(ROOT, "apps/mobile/ios/OnAirMobile/Images.xcassets/AppIcon.appiconset/AppIcon.png"),
+    ),
+    icon,
+  );
+  assert.equal(icon.toString("ascii", 12, 16), "IHDR");
+  assert.equal(icon.readUInt32BE(16), 1024);
+  assert.equal(icon.readUInt32BE(20), 1024);
+  assert.equal(icon[25], 2, "8-bit RGB without alpha");
 });
