@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
+import { flatPixels, layers as iconLayers } from "../../apps/mobile/scripts/make-app-icon.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const read = (relativePath) => readFileSync(path.join(ROOT, relativePath), "utf8");
@@ -84,9 +86,7 @@ test("iOS native project autolinks Expo and declares LAN discovery access", () =
   for (const relativePath of [
     "apps/mobile/assets/icon.png",
     "apps/mobile/assets/AppIcon.icon/icon.json",
-    "apps/mobile/assets/AppIcon.icon/Assets/live-dial.png",
     "apps/mobile/ios/OnAirMobile/AppIcon.icon/icon.json",
-    "apps/mobile/ios/OnAirMobile/AppIcon.icon/Assets/live-dial.png",
     "apps/mobile/ios/OnAirMobile/Images.xcassets/AppIcon.appiconset/AppIcon.png",
   ]) {
     assert.ok(existsSync(path.join(ROOT, relativePath)), relativePath);
@@ -142,19 +142,78 @@ test("Android native project keeps the dark-only Expo appearance", () => {
   );
 });
 
-test("Icon Composer packages retain the shared Live Dial artwork", () => {
-  const icon = readFileSync(path.join(ROOT, "apps/mobile/assets/icon.png"));
+const REGENERATE = "stale: run `node scripts/make-app-icon.mjs` from apps/mobile";
+
+// Icon Composer stores a value as `key` until it varies by appearance, then as
+// `key-specializations`, whose entry without an appearance is the default.
+const iconValue = (object, key, appearance) =>
+  appearance === undefined && key in object
+    ? object[key]
+    : object[`${key}-specializations`]?.find((entry) => entry.appearance === appearance)?.value;
+
+test("Icon Composer packages hold the layered Liquid Glass Live Dial", () => {
   const packages = ["apps/mobile/assets/AppIcon.icon", "apps/mobile/ios/OnAirMobile/AppIcon.icon"];
   const specs = packages.map((folder) => JSON.parse(read(`${folder}/icon.json`)));
-  assert.deepEqual(specs[0], specs[1]);
+  assert.deepEqual(specs[0], specs[1], `the Xcode copy is ${REGENERATE}`);
+  const [spec] = specs;
+  // The charcoal background is the document fill, with its own dark appearance.
+  assert.ok(iconValue(spec, "fill"));
+  assert.ok(iconValue(spec, "fill", "dark"));
+  const layers = spec.groups.flatMap((group) => group.layers);
+  assert.deepEqual(
+    layers.map((layer) => layer["image-name"]).sort(),
+    Object.keys(iconLayers).sort(),
+  );
+  for (const group of spec.groups) {
+    assert.equal(iconValue(group, "specular"), true);
+    assert.equal(iconValue(group, "translucency")?.enabled, true);
+    assert.ok(iconValue(group, "shadow")?.opacity > 0);
+  }
+  for (const layer of layers) {
+    assert.equal(layer.glass, true);
+    assert.ok(iconValue(layer, "fill", "tinted"), `${layer.name} needs a tinted fill`);
+  }
   for (const folder of packages) {
-    for (const group of specs[0].groups) {
-      for (const layer of group.layers) {
-        assert.deepEqual(
-          readFileSync(path.join(ROOT, folder, "Assets", layer["image-name"])),
-          icon,
-        );
-      }
+    const assets = path.join(ROOT, folder, "Assets");
+    const files = readdirSync(assets).filter((name) => !name.startsWith("."));
+    assert.deepEqual(files.sort(), Object.keys(iconLayers).sort());
+    for (const [name, svg] of Object.entries(iconLayers)) {
+      assert.equal(
+        readFileSync(path.join(assets, name), "utf8"),
+        svg,
+        `${folder} is ${REGENERATE}`,
+      );
     }
+  }
+});
+
+test("flat icon fallbacks are opaque 1024 px renders of the layers", () => {
+  const expected = flatPixels();
+  for (const relativePath of [
+    "apps/mobile/assets/icon.png",
+    "apps/mobile/ios/OnAirMobile/Images.xcassets/AppIcon.appiconset/AppIcon.png",
+  ]) {
+    const png = readFileSync(path.join(ROOT, relativePath));
+    // App Store icons must be opaque: 8-bit RGB, no tRNS transparency chunk.
+    assert.equal(png.toString("ascii", 12, 16), "IHDR");
+    assert.equal(png.readUInt32BE(16), 1024);
+    assert.equal(png.readUInt32BE(20), 1024);
+    assert.equal(png[24], 8, "bit depth");
+    assert.equal(png[25], 2, "color type: RGB");
+    const idat = [];
+    for (let at = 8; at < png.length; at += png.readUInt32BE(at) + 12) {
+      const type = png.toString("ascii", at + 4, at + 8);
+      assert.notEqual(type, "tRNS");
+      if (type === "IDAT") idat.push(png.subarray(at + 8, at + 8 + png.readUInt32BE(at)));
+    }
+    // Compare pixels, not bytes: zlib output varies across Node builds. A sample
+    // flipped by floating-point noise moves a channel by at most 7.
+    const actual = inflateSync(Buffer.concat(idat));
+    assert.equal(actual.length, expected.length);
+    let worst = 0;
+    for (let i = 0; i < actual.length; i += 1) {
+      worst = Math.max(worst, Math.abs(actual[i] - expected[i]));
+    }
+    assert.ok(worst <= 8, `${relativePath} is ${REGENERATE}`);
   }
 });
