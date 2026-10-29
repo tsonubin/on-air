@@ -1053,11 +1053,13 @@ code {
     padding-top: 36px;
   }
   .footer-top {
+    flex-wrap: wrap;
     gap: 20px;
     padding-bottom: 30px;
   }
   .site-footer nav {
-    gap: 18px;
+    flex-wrap: wrap;
+    gap: 12px 18px;
     font-size: 12px;
   }
   .footer-bottom {

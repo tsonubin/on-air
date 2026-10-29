@@ -50,6 +50,7 @@ The production domain is `https://on-air.tsonubin.com`. Internal page and asset 
 - Marketing: `/`
 - Support: `/support.html`
 - Privacy policy: `/privacy.html`
+- User privacy choices: `/privacy-choices.html`
 
 Open each URL without authentication before submitting. The existing App Store draft still references the previously proposed Sites origin; it must be replaced. The absolute `og:image` and canonical URLs are configured. Update the iOS release notice and add a real App Store link only after the app is publicly available.
 
