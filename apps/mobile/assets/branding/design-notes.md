@@ -25,10 +25,25 @@ dial's pointer, with the lamp above the stem. The geometry lives in
 - Tinted and clear appearances fill both layers white so the whole mark stays
   legible in mono.
 
-After changing the geometry or `icon.json`, run `node scripts/make-app-icon.mjs`
-from `apps/mobile`. It rewrites the SVG layers, copies the package into the Xcode
-project (`ios/OnAirMobile/AppIcon.icon`), and draws the flat, opaque 1024 x 1024
-fallback (`assets/icon.png` and the Xcode marketing icon) from the same shapes.
-Preview every appearance with Xcode's Icon Composer or its `ictool` renderer.
-The native-project tests check that the two packages match, that both layers
-are glass vectors with tinted fills, and that the two fallbacks are identical.
+Edit only `assets/AppIcon.icon` (in Icon Composer or by hand) and the geometry in
+the script. After any change, run `node scripts/make-app-icon.mjs` from
+`apps/mobile`. It rewrites the SVG layers, replaces the Xcode project's copy
+(`ios/OnAirMobile/AppIcon.icon`, so never edit that one), and draws the flat,
+opaque 1024 x 1024 fallback (`assets/icon.png` and the Xcode marketing icon) from
+the same shapes.
+
+Preview every appearance in Icon Composer, or render them with the command-line
+tool inside it, `Icon Composer.app/Contents/Executables/ictool` (the `ictool` on
+the PATH is a different tool):
+
+```sh
+ictool assets/AppIcon.icon --export-image --output-file Dark.png --platform iOS \
+  --rendition Dark --width 1024 --height 1024 --scale 1
+```
+
+The renditions are Default, Dark, TintedLight, TintedDark, ClearLight and
+ClearDark; the tinted ones also take `--tint-color` and `--tint-strength`.
+
+The native-project tests regenerate the layers and the fallback and fail if the
+committed files are stale. They also check that both packages match and that
+both layers are glass with tinted fills.

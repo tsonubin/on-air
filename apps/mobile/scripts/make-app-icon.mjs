@@ -4,10 +4,12 @@
 // package in the Xcode project, and the flat 1024 x 1024 fallback PNG (assets/icon.png
 // and the Xcode marketing icon). icon.json is not generated: edit it in Icon Composer
 // (or by hand) in assets/AppIcon.icon, then rerun this script to copy it into the
-// Xcode project. Run from apps/mobile: `node scripts/make-app-icon.mjs`.
+// Xcode project. Every run replaces the Xcode copy, so never edit that one directly.
+// Run from apps/mobile: `node scripts/make-app-icon.mjs`. The native-project tests
+// import `layers` and `flatPixels` to check the committed files are current.
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { crc32, deflateSync } from "node:zlib";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -65,6 +67,12 @@ function glyphPath() {
 const svg = (body) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${CANVAS}" height="${CANVAS}" viewBox="0 0 ${CANVAS} ${CANVAS}">\n  ${body}\n</svg>\n`;
 
+// The Icon Composer layers, by file name.
+export const layers = {
+  "dial-glyph.svg": svg(`<path fill="${hex(IVORY)}" d="${glyphPath()}"/>`),
+  "on-air-dot.svg": svg(`<circle fill="${hex(RED)}" cx="${DOT.cx}" cy="${DOT.cy}" r="${DOT.r}"/>`),
+};
+
 // Point-in-shape tests mirroring glyphPath(), for the flat raster.
 function inGlyph(x, y) {
   const dx = x - BOWL.cx;
@@ -93,7 +101,8 @@ function chunk(type, data) {
   return Buffer.concat([length, body, crc]);
 }
 
-function flatPng() {
+// The flat icon as PNG scanlines: a filter byte (0, None), then RGB for each pixel.
+export function flatPixels() {
   const samples = 6;
   const row = CANVAS * 3 + 1;
   const raw = Buffer.alloc(row * CANVAS);
@@ -118,6 +127,10 @@ function flatPng() {
       }
     }
   }
+  return raw;
+}
+
+function png(raw) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(CANVAS, 0);
   header.writeUInt32BE(CANVAS, 4);
@@ -131,16 +144,15 @@ function flatPng() {
   ]);
 }
 
-mkdirSync(join(iconPackage, "Assets"), { recursive: true });
-writeFileSync(
-  join(iconPackage, "Assets", "dial-glyph.svg"),
-  svg(`<path fill="${hex(IVORY)}" d="${glyphPath()}"/>`),
-);
-writeFileSync(
-  join(iconPackage, "Assets", "on-air-dot.svg"),
-  svg(`<circle fill="${hex(RED)}" cx="${DOT.cx}" cy="${DOT.cy}" r="${DOT.r}"/>`),
-);
-rmSync(xcodePackage, { recursive: true, force: true });
-cpSync(iconPackage, xcodePackage, { recursive: true });
-const png = flatPng();
-for (const file of fallbacks) writeFileSync(file, png);
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  mkdirSync(join(iconPackage, "Assets"), { recursive: true });
+  for (const [name, source] of Object.entries(layers)) {
+    writeFileSync(join(iconPackage, "Assets", name), source);
+  }
+  rmSync(xcodePackage, { recursive: true, force: true });
+  // Leave Finder's .DS_Store and other dotfiles behind.
+  const visible = (source) => !basename(source).startsWith(".");
+  cpSync(iconPackage, xcodePackage, { recursive: true, filter: visible });
+  const icon = png(flatPixels());
+  for (const file of fallbacks) writeFileSync(file, icon);
+}
