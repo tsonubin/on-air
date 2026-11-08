@@ -12,7 +12,7 @@ Capture lands on the **input** sample rate (pipeline). Each transport then conve
 
 ## Stereo pair
 
-Two ZonePlayers or two HomePods bonded as one room (left/right). Cast to the **coordinator** only; bonded satellites are not separate destinations. Pairing *setup* for HomePods is an AirPlay2 PIN; Sonos stereo bonding is already done on the speakers and is discovered via ZoneGroupTopology.
+Two ZonePlayers or two HomePods bonded as one room (left/right). Discovery presents the **coordinator** as one destination and hides bonded satellites. Sonos stereo bonding is discovered via ZoneGroupTopology. HomePod grouping at discovery does not prove stereo playback: the direct pyatv RAOP sender may play only one member, so the pair needs a verified stereo-capable transport. Pairing *setup* for HomePods can require an AirPlay2 PIN.
 
 ## ZonePlayer
 

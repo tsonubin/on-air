@@ -103,6 +103,16 @@ def install_volume_control(loop: asyncio.AbstractEventLoop, atv, stopped: asynci
 
 async def play(host: str, url: str, volume: float | None) -> None:
     from pyatv import connect, scan, const
+    from pyatv.protocols.raop import audio_source
+    from pyatv.support.metadata import EMPTY_METADATA
+
+    # This helper always consumes on-air's endless WAV radio. pyatv's tag
+    # reader seeks to EOF, filling its bounded buffer and stalling setup.
+    # Keep decoding untouched; there are no file tags to read in live PCM.
+    async def live_metadata(_buffer):
+        return EMPTY_METADATA
+
+    audio_source.get_buffered_io_metadata = live_metadata
 
     loop = asyncio.get_running_loop()
     found = await scan(loop, hosts=[host], timeout=8)

@@ -82,7 +82,7 @@ async fn set_volume_sends_desired_volume() {
 
     let calls = captured.0.lock().unwrap().clone();
     assert_eq!(calls.len(), 1);
-    assert!(calls[0].0.contains("SetVolume"));
+    assert!(calls[0].0.contains("SetGroupVolume"));
     assert!(calls[0].1.contains("<DesiredVolume>42</DesiredVolume>"));
 }
 

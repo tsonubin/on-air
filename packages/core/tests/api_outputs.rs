@@ -153,3 +153,40 @@ async fn unknown_routes_get_the_envelope_too() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["code"], "not_found");
 }
+
+#[tokio::test]
+async fn terminal_volume_follows_one_playing_patchbay_speaker() {
+    let (app, state) = mock_app().await;
+    let (_, snapshot) = send(app.clone(), get("/api/patchbay")).await;
+    let id = snapshot["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|node| node["kind"] == "sonos")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let command = serde_json::json!({"op":"connect", "source":"desktop", "target":id});
+    let (status, _) = send(
+        app.clone(),
+        json("POST", "/api/patchbay", &command.to_string()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(state.active_output().is_none());
+    let (status, _) = send(
+        app.clone(),
+        json("POST", "/api/outputs/active/volume", r#"{"volume":37}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, body) = send(app.clone(), get("/api/outputs/active/volume")).await;
+    assert_eq!(body["volume"], 37);
+    assert!(state
+        .mock_log
+        .lock()
+        .await
+        .iter()
+        .any(|line| line.ends_with(":volume:37")));
+    state.shutdown().await;
+}

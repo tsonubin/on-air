@@ -29,6 +29,16 @@ working tree, uncommitted edits included, and keeps compiled output in
 Installation skips the Rust test suite. For development, run
 `cargo test --locked -p on-air-core -p on-air-tui` separately.
 
+The installer also prepares AirPlay: if system Python cannot import `pyatv`,
+it installs `uv` when needed and caches a `pyatv` environment for offline
+playback, with `srptools<2` for compatibility with pyatv’s pairing API. This step needs Internet access on the first install. When UFW is
+installed, it adds rules for each connected private IPv4 LAN: TCP 47990
+(control and audio), UDP 48000–48127 (AirPlay timing/control), and UDP 5353
+(mDNS discovery). It does not
+enable UFW. Rerun the installer after changing LANs; custom service ports
+need corresponding firewall rules. The core service is restarted so it
+detects the prepared backend.
+
 Run the installer as your normal user in a terminal. The install step uses
 your normal sudo authentication and preserves cached credentials. If
 installation fails, it prints the saved package path so you can retry with
@@ -71,6 +81,54 @@ AirPlay/Sonos speakers are also selectable directly as system outputs.
 Independent AirPlay needs `python-pyatv` and a receiver address from LAN
 discovery. Output groups use independent timing, and the network path
 streams stereo PCM. Physical speaker buffering remains.
+
+HomePod stereo pairs appear as one destination, labelled “stereo pair” in
+the panel. This describes discovery, not verified stereo playback: the direct
+pyatv RAOP sender can play through only one member or fail to connect. Do not
+assume both speakers are playing until you have tested them. A direct sink
+advertises pyatv's 1.5-second RAOP scheduling delay, but that is not a
+measured end-to-end lip-sync calibration. Capture and network buffering can
+add delay, and exact synchronization across independent outputs is not
+supported.
+
+### Troubleshooting silent network speakers
+
+`on-air status --json` shows discovered outputs and the active single-output
+session. A HomePod stereo pair is listed once under its room name; its two
+members do not appear as separate patchbay outputs. Discovery alone does not
+mean playback is connected. Check the output's state and error in the panel.
+
+If AirPlay reports that OwnTone or pyatv is missing, prepare the offline
+backend as the same user running the service, then restart the service:
+
+```sh
+uv run --with pyatv --with 'srptools<2' --python python3 python3 -c 'import pyatv'
+uv run --offline --with pyatv --with 'srptools<2' --python python3 python3 -c 'import pyatv'
+on-air service restart
+```
+
+This command matches the current sender; older installed versions may use a
+different dependency set. Reinstall the current package before retrying. The
+first command needs Internet access; the second verifies offline availability.
+
+The single-output client and the patchbay cannot control the same speaker at
+once. If the panel says a Sonos or AirPlay speaker is in use by another client,
+stop the single-output session in the terminal UI before connecting the
+patchbay route. For a direct network output, select its On-Air sink as the
+system output and ensure the application's audio stream uses it. For a
+Desktop-to-speaker cable, send the application to **On-Air desktop** instead.
+If using the single-output client with **System audio**, send the application
+to the hardware output whose monitor is being captured. These routes are
+independent; selecting a speaker's virtual sink does not feed a separate
+single-output session.
+
+The terminal mixer follows the single-output session when one is active.
+Otherwise its volume follows the sole playing network output in the patchbay.
+When several independent speakers are playing, use the panel to select one.
+Network sink volume changes are forwarded to the receiver; Sonos uses group
+volume so bonded speakers change together. The percentage describes the
+requested volume, and external changes made in the Sonos app are not yet
+read back into the panel.
 
 See [the panel guide](../apps/quickshell/README.md) for all gestures, keyboard
 controls, state persistence and the Qt preview. The sections below describe

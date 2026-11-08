@@ -308,7 +308,11 @@ impl Pulse {
             .collect();
         let id = self.run(&["load-module".into(), "module-null-sink".into(), format!("sink_name={name}"),
             "rate=44100".into(), "channels=2".into(),
-            format!("sink_properties=\"device.description='{label} (On-Air)' on_air.owner=patchbay priority.session=0\"")]).await?;
+            // pyatv RAOP schedules 22050 + sample_rate frames ahead: 1.5s
+            // at our 44.1kHz rate. Report that downstream delay rather than
+            // inserting another buffer; PipeWire propagates ProcessLatency
+            // to players so their video clock can follow the audible audio.
+            format!("sink_properties=\"device.description='{label} (On-Air)' on_air.owner=patchbay priority.session=0 latency.internal.ns={}\"", if id.starts_with("network:airplay:") { 1_500_000_000u64 } else { 0 })]).await?;
         self.modules.insert(
             name.clone(),
             id.parse()

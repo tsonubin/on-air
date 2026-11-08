@@ -97,6 +97,22 @@ impl Patchbay {
         self.inner.lock().await.snapshot.clone()
     }
 
+    /// The terminal's single fader can follow one playing network output.
+    /// Multiple independent speakers require an explicit panel selection.
+    pub async fn single_playing_output(&self) -> Option<(String, u8)> {
+        let inner = self.inner.lock().await;
+        let mut nodes = inner.snapshot.nodes.iter().filter(|node| {
+            node.side == PatchbaySide::Output
+                && node.state == "playing"
+                && matches!(node.kind.as_str(), "sonos" | "airplay")
+        });
+        let node = nodes.next()?;
+        if nodes.next().is_some() {
+            return None;
+        }
+        Some((node.id.clone(), node.volume))
+    }
+
     pub async fn stream_state(&self, nonce: &str) -> Option<CoreState> {
         self.inner
             .lock()
@@ -203,6 +219,25 @@ impl Patchbay {
                     failure = Some(error.to_string());
                 }
                 child.input().stop().await;
+            }
+            // A null sink's monitor can deliver pre-fader PCM. Forward its
+            // volume to the receiver as well, so system keys affect the sound.
+            let requested_volume = self
+                .inner
+                .lock()
+                .await
+                .endpoints
+                .iter()
+                .find(|e| e.node.id == id)
+                .map(|e| e.node.volume);
+            if wanted && child.active_output().is_some() && failure.is_none() {
+                if let Some(volume) = requested_volume {
+                    if volume != child.output_volume() {
+                        if let Err(error) = session::set_volume(&child, volume).await {
+                            failure = Some(error.to_string());
+                        }
+                    }
+                }
             }
             let mut inner = self.inner.lock().await;
             let output = child.output().snapshot();
@@ -402,7 +437,11 @@ impl Inner {
                 .any(|d| d.transport == info.transport && d.id == info.id);
             self.add_bus_endpoint(
                 id.clone(),
-                info.name.clone(),
+                if info.member_count > 1 {
+                    format!("{} (stereo pair)", info.name)
+                } else {
+                    info.name.clone()
+                },
                 PatchbaySide::Output,
                 &info.transport,
                 &bus_name(id),

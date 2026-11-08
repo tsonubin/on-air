@@ -1,6 +1,19 @@
 import asyncio
 import time
+import sys
 from types import SimpleNamespace
+
+
+async def _read_tags(_buffer):
+    raise AssertionError("live WAV must not be scanned for file tags")
+
+
+_metadata = SimpleNamespace(EMPTY_METADATA=object())
+_audio_source = SimpleNamespace(get_buffered_io_metadata=_read_tags)
+sys.modules["pyatv.protocols"] = SimpleNamespace()
+sys.modules["pyatv.protocols.raop"] = SimpleNamespace(audio_source=_audio_source)
+sys.modules["pyatv.support"] = SimpleNamespace()
+sys.modules["pyatv.support.metadata"] = _metadata
 
 
 class _Config:
@@ -14,6 +27,7 @@ class _Audio:
 
 class _Stream:
     async def stream_file(self, _url):
+        assert await _audio_source.get_buffered_io_metadata(object()) is _metadata.EMPTY_METADATA
         raop = _Device.settings.protocols.raop
         assert 48000 <= raop.control_port < raop.timing_port <= 48127
         _Device.metadata.started = time.monotonic()

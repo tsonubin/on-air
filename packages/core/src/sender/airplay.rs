@@ -242,6 +242,8 @@ fn pyatv_command() -> Result<Command, SenderError> {
                 "--offline",
                 "--with",
                 "pyatv",
+                "--with",
+                "srptools<2",
                 "--python",
                 "python3",
                 "python3",
@@ -254,7 +256,8 @@ fn pyatv_command() -> Result<Command, SenderError> {
     }
 }
 
-/// `$ON_AIR_UV` first, then `uv` from `PATH`.
+/// `$ON_AIR_UV` first, then standard install locations and `PATH`.
+/// A service's PATH may resolve to a version-manager shim that cannot run uv.
 fn uv_candidates() -> Vec<String> {
     let mut candidates = Vec::new();
     if let Some(configured) = std::env::var_os(UV_ENV) {
@@ -262,6 +265,15 @@ fn uv_candidates() -> Vec<String> {
         if !configured.is_empty() {
             candidates.push(configured);
         }
+    }
+    candidates.push("/usr/bin/uv".to_string());
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(
+            std::path::PathBuf::from(home)
+                .join(".local/bin/uv")
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
     candidates.push("uv".to_string());
     candidates
@@ -294,6 +306,8 @@ fn uv_has_cached_pyatv(bin: &str) -> bool {
             "--offline",
             "--with",
             "pyatv",
+            "--with",
+            "srptools<2",
             "--python",
             "python3",
             "python3",

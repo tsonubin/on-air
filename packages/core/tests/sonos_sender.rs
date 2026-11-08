@@ -33,7 +33,7 @@ async fn start_fake_sonos() -> (std::net::SocketAddr, Captured) {
     let app = Router::new()
         .route("/MediaRenderer/AVTransport/Control", post(capture_handler))
         .route(
-            "/MediaRenderer/RenderingControl/Control",
+            "/MediaRenderer/GroupRenderingControl/Control",
             post(capture_handler),
         )
         .with_state(captured.clone());
@@ -68,7 +68,7 @@ async fn start_calls_set_uri_then_play_stop_calls_stop_set_volume_calls_set_volu
     let calls = captured.0.lock().unwrap().clone();
     assert!(calls[0].contains("SetAVTransportURI"));
     assert!(calls[1].contains("#Play"));
-    assert!(calls[2].contains("SetVolume"));
+    assert!(calls[2].contains("SetGroupVolume"));
     assert!(calls[3].contains("#Stop"));
 }
 
@@ -116,7 +116,7 @@ async fn failed_stop_preserves_automatic_recovery_for_the_active_sender() {
             post(fail_stop_handler),
         )
         .route(
-            "/MediaRenderer/RenderingControl/Control",
+            "/MediaRenderer/GroupRenderingControl/Control",
             post(fail_stop_handler),
         )
         .with_state(probe.clone());

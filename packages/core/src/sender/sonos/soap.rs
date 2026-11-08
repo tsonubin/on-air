@@ -111,19 +111,18 @@ impl SonosControlClient {
             r#"<?xml version="1.0" encoding="utf-8"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
   <s:Body>
-    <u:SetVolume xmlns:u="urn:schemas-upnp-org:service:RenderingControl:1">
+    <u:SetGroupVolume xmlns:u="urn:schemas-upnp-org:service:GroupRenderingControl:1">
       <InstanceID>0</InstanceID>
-      <Channel>Master</Channel>
       <DesiredVolume>{volume}</DesiredVolume>
-    </u:SetVolume>
+    </u:SetGroupVolume>
   </s:Body>
 </s:Envelope>"#
         );
         self.send_action(
-            rendering_control_url,
-            "urn:schemas-upnp-org:service:RenderingControl:1#SetVolume",
+            &rendering_control_url.replace("/RenderingControl/", "/GroupRenderingControl/"),
+            "urn:schemas-upnp-org:service:GroupRenderingControl:1#SetGroupVolume",
             body,
-            "SetVolume",
+            "SetGroupVolume",
         )
         .await
     }

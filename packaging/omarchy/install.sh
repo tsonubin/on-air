@@ -102,9 +102,62 @@ if ! sudo pacman -U -- "$pkgfile"; then
   exit 1
 fi
 
+echo "== Preparing the local AirPlay backend"
+if ! python3 -c 'import pyatv' 2>/dev/null; then
+  # Arch protects system Python from pip installs. Populate uv's user cache,
+  # which the sender also probes with --offline (no downloads during playback).
+  if ! command -v uv >/dev/null 2>&1; then
+    sudo pacman -S --needed -- uv
+  fi
+  uv_bin=${ON_AIR_UV:-uv}
+  if [ -n "${ON_AIR_UV:-}" ]; then
+    uv_bin=$ON_AIR_UV
+  elif [ -x /usr/bin/uv ]; then
+    uv_bin=/usr/bin/uv
+  elif [ -x "$HOME/.local/bin/uv" ]; then
+    uv_bin=$HOME/.local/bin/uv
+  fi
+  # pyatv 0.18 calls the pre-2.0 positional SRP API during pairing.
+  "$uv_bin" run --with pyatv --with 'srptools<2' --python python3 python3 -c 'import pyatv'
+  "$uv_bin" run --offline --with pyatv --with 'srptools<2' --python python3 python3 -c 'import pyatv'
+fi
+
+if command -v ufw >/dev/null 2>&1; then
+  echo "== Configuring UFW for connected private IPv4 networks"
+  # Match the core's repair scope: private, directly connected LANs only.
+  subnets=$(python3 - <<'PY'
+import ipaddress
+import json
+import subprocess
+
+private = [ipaddress.ip_network(cidr) for cidr in
+           ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
+networks = set()
+for interface in json.loads(subprocess.check_output(["ip", "-j", "-4", "address", "show", "up"])):
+    for address in interface.get("addr_info", []):
+        if address.get("scope") != "global":
+            continue
+        network = ipaddress.ip_interface(f"{address['local']}/{address['prefixlen']}").network
+        if any(network.subnet_of(block) for block in private):
+            networks.add(str(network))
+print("\n".join(sorted(networks)))
+PY
+)
+  for subnet in $subnets; do
+    sudo ufw allow from "$subnet" to any port 47990 proto tcp
+    sudo ufw allow from "$subnet" to any port 48000:48127 proto udp
+    sudo ufw allow from "$subnet" to any port 5353 proto udp
+  done
+  if [ -z "$subnets" ]; then
+    echo "No connected private IPv4 LAN found; connect to your LAN and rerun the installer."
+  fi
+fi
+
 echo "== Enabling the on-air-core user service"
 systemctl --user daemon-reload
 systemctl --user enable --now on-air-core
+# enable --now leaves an already running service on the old backend probe.
+systemctl --user restart on-air-core
 systemctl --user --no-pager status on-air-core | head -3 || true
 
 echo

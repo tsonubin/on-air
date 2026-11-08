@@ -64,8 +64,15 @@ pub async fn get_output_volume(
     Paired: Paired,
     State(state): State<CoreState>,
 ) -> Json<OutputVolumeResponse> {
+    let patchbay = if state.active_output().is_none() {
+        state.patchbay.single_playing_output().await
+    } else {
+        None
+    };
     Json(OutputVolumeResponse {
-        volume: state.output_volume(),
+        volume: patchbay
+            .map(|(_, volume)| volume)
+            .unwrap_or_else(|| state.output_volume()),
     })
 }
 
@@ -76,6 +83,22 @@ pub async fn set_output_volume(
 ) -> Result<StatusCode, ApiError> {
     if req.volume > 100 {
         return Err(ApiError::validation("volume must be between 0 and 100"));
+    }
+    if state.active_output().is_none() {
+        if let Some((id, _)) = state.patchbay.single_playing_output().await {
+            state
+                .patchbay
+                .command(
+                    &state,
+                    on_air_api::PatchbayCommand::SetVolume {
+                        id,
+                        volume: req.volume,
+                    },
+                )
+                .await
+                .map_err(ApiError::validation)?;
+            return Ok(StatusCode::NO_CONTENT);
+        }
     }
     session::set_volume(&state, req.volume).await?;
     Ok(StatusCode::NO_CONTENT)
