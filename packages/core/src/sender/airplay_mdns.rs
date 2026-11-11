@@ -288,11 +288,39 @@ impl ReceiverRegistry {
     }
 }
 
-fn catalog_ids(devices: &[CatalogDevice]) -> Vec<(String, String)> {
-    devices
-        .iter()
-        .map(|d| (d.id.clone(), d.name.clone()))
-        .collect()
+fn publish_catalog(
+    catalog: &parking_lot::Mutex<Vec<CatalogDevice>>,
+    found: Vec<CatalogDevice>,
+    ws_tx: &tokio::sync::broadcast::Sender<crate::events::WsEvent>,
+) {
+    use crate::events::WsEvent;
+
+    let before = {
+        let mut current = catalog.lock();
+        if *current == found {
+            return;
+        }
+        std::mem::replace(&mut *current, found.clone())
+    };
+    // Clients already refresh the output details on DeviceJoined, even for a
+    // known ID. A partial scan can discover the leader before its satellite.
+    for device in &found {
+        if !before.contains(device) {
+            let _ = ws_tx.send(WsEvent::DeviceJoined {
+                transport: "airplay".into(),
+                id: device.id.clone(),
+                name: device.name.clone(),
+            });
+        }
+    }
+    for device in before {
+        if !found.iter().any(|next| next.id == device.id) {
+            let _ = ws_tx.send(WsEvent::DeviceLeft {
+                transport: "airplay".into(),
+                id: device.id,
+            });
+        }
+    }
 }
 
 /// The AirPlay finder: every 15 s, browse `_airplay._tcp`, merge OwnTone's
@@ -315,19 +343,7 @@ pub fn spawn(
             {
                 merge_owntone(&mut found, owntone);
             }
-            let diff = {
-                let mut current = catalog.lock();
-                let before = catalog_ids(&current);
-                if *current != found {
-                    *current = found;
-                    Some((before, catalog_ids(&current)))
-                } else {
-                    None
-                }
-            };
-            if let Some((before, after)) = diff {
-                crate::events::emit_catalog_diff(&ws_tx, "airplay", &before, &after);
-            }
+            publish_catalog(&catalog, found, &ws_tx);
             tokio::time::sleep(SCAN_INTERVAL).await;
         }
     })
@@ -351,6 +367,29 @@ mod spawn_tests {
             "192.168.1.2".parse().unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn finding_the_satellite_refreshes_a_known_leader() {
+        let mut registry = ReceiverRegistry::default();
+        let leader = receiver("leader", true);
+        let solo = registry.apply_scan(vec![leader.clone()]);
+        let catalog = parking_lot::Mutex::new(solo);
+        let (ws_tx, mut rx) = tokio::sync::broadcast::channel(4);
+
+        let pair = registry.apply_scan(vec![leader, receiver("satellite", false)]);
+        publish_catalog(&catalog, pair.clone(), &ws_tx);
+
+        assert_eq!(catalog.lock()[0].kind, "pair");
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            crate::events::WsEvent::DeviceJoined { id, .. } if id == "leader"
+        ));
+        publish_catalog(&catalog, pair, &ws_tx);
+        assert_eq!(
+            rx.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        );
     }
 
     #[test]
